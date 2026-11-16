@@ -1,0 +1,5 @@
+# Copy file này thành .dev.vars để chạy `npm run dev` trên máy.
+# Không commit .dev.vars.
+SETUP_TOKEN=doi-ma-nay-truoc-khi-chay
+# Tạo bằng: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ENCRYPTION_KEY=

@@ -1,0 +1,19 @@
+{
+  "name": "duyoi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Duy Ơi — nền tảng AI agent làm SEO, AEO, GEO cho nhiều site, chạy trên Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply duyoi --local",
+    "db:migrate:remote": "wrangler d1 migrations apply duyoi --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "node tests/run.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "wrangler": "^4.0.0"
+  }
+}

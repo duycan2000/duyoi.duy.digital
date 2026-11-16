@@ -1,0 +1,41 @@
+{
+  // Duy Ơi — Cloudflare Worker + D1 + static assets
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "duyoi",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // Giao diện (HTML/CSS/JS) phục vụ dạng static assets: miễn phí, không tính request Worker.
+  // Chỉ /api/* chạy qua Worker.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "duyoi",
+      // Thay bằng database_id in ra khi chạy: npx wrangler d1 create duyoi
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Cron 15 phút: chỉ ghi nhịp và (từ giai đoạn 2) đẩy việc đến hạn vào hàng đợi.
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  // Tên miền riêng. Zone duy.digital phải nằm trong cùng tài khoản Cloudflare.
+  "routes": [{ "pattern": "duyoi.duy.digital", "custom_domain": true }],
+
+  // Log: lấy mẫu 20% để không đẩy chi phí Observability lên.
+  "observability": { "enabled": true, "head_sampling_rate": 0.2 },
+
+  "vars": { "APP_NAME": "Duy Ơi" }
+
+  // Secrets (không ghi vào file này):
+  //   npx wrangler secret put SETUP_TOKEN     -> mã dùng một lần để tạo admin đầu tiên
+  //   npx wrangler secret put ENCRYPTION_KEY  -> khoá mã hoá API key (32 byte base64)
+}
