@@ -118,6 +118,10 @@ function renderLogin(notice = "") {
 
 // ---------------- Khung app ----------------
 
+// Thanh dưới cùng trên điện thoại: các màn dùng nhiều nhất + nút mở toàn bộ menu
+const TABBAR = [["overview", "Tổng quan", "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"], ["sites", "Site", "M3 5h18v14H3zM3 9h18"], ["activity", "Nhật ký", "M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"], ["settings", "Cài đặt", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"]];
+const icon = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+
 function renderShell() {
   app.innerHTML = `
   <div class="shell">
@@ -125,20 +129,49 @@ function renderShell() {
       <a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
       <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
       <span class="who">${esc(state.user.name)} · ${esc(state.user.email)}</span>
-      <button type="button" id="logout">Đăng xuất</button>
+      <button type="button" class="logout-top" data-logout>Đăng xuất</button>
     </header>
-    <nav class="side" aria-label="Menu chính">
+    <div class="scrim" id="scrim" hidden></div>
+    <nav class="side" id="side" aria-label="Menu chính">
+      <div class="side-head"><b>Menu</b><button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">✕</button></div>
       ${MENU.map((g) => `<div class="group"><p>${esc(g.group)}</p>${g.items.map((i) => `<a href="#/${i.id}" data-view="${i.id}">${esc(i.label)}${i.live ? "" : `<span class="soon">GĐ${i.phase}</span>`}</a>`).join("")}</div>`).join("")}
+      <div class="side-foot"><small>${esc(state.user.name)} · ${esc(state.user.email)}</small><button type="button" data-logout>Đăng xuất</button></div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
+    <nav class="tabbar" aria-label="Lối tắt">
+      ${TABBAR.map(([id, label, d]) => `<a href="#/${id}" data-tab="${id}">${icon(d)}<span>${esc(label)}</span></a>`).join("")}
+      <button type="button" id="menu-btn" aria-controls="side" aria-expanded="false">${icon("M4 6h16M4 12h16M4 18h16")}<span>Menu</span></button>
+    </nav>
   </div>`;
-  $("#logout").addEventListener("click", async () => {
+  $$("[data-logout]").forEach((b) => b.addEventListener("click", async () => {
     try { await api("/api/auth/logout", { method: "POST" }); } catch { /* vẫn về màn đăng nhập */ }
     state.user = null;
+    document.body.classList.remove("menu-open");
     renderLogin();
-  });
+  }));
+  $("#menu-btn").addEventListener("click", () => toggleMenu(true));
+  $("#side-close").addEventListener("click", () => toggleMenu(false));
+  $("#scrim").addEventListener("click", () => toggleMenu(false));
+  $$(".side a").forEach((a) => a.addEventListener("click", () => toggleMenu(false)));
+  document.onkeydown = (e) => { if (e.key === "Escape" && document.body.classList.contains("menu-open")) toggleMenu(false); };
   window.onhashchange = route;
   route();
+}
+
+function toggleMenu(open) {
+  const side = $("#side");
+  if (!side) return;
+  side.classList.toggle("open", open);
+  $("#scrim").hidden = !open;
+  $("#menu-btn").setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("menu-open", open);
+  if (open) {
+    const cur = $(".side a.on");
+    (cur || $("#side-close")).focus({ preventScroll: true });
+    if (cur) cur.scrollIntoView({ block: "center" });
+  } else if (side.contains(document.activeElement)) {
+    $("#menu-btn").focus({ preventScroll: true });
+  }
 }
 
 function setPill(paused) {
@@ -154,6 +187,10 @@ function route() {
   const parts = (location.hash.replace(/^#\/?/, "") || "overview").split("/");
   const view = ITEMS[parts[0]] ? parts[0] : "overview";
   $$(".side a").forEach((a) => a.classList.toggle("on", a.dataset.view === view));
+  const inBar = TABBAR.some(([id]) => id === view);
+  $$(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === view));
+  const mb = $("#menu-btn");
+  if (mb) mb.classList.toggle("on", !inBar);
   const main = $("#main");
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
   const views = { overview: viewOverview, sites: viewSites, settings: viewSettings, account: viewAccount, activity: viewActivity };

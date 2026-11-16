@@ -139,14 +139,48 @@ tr.click:hover td { background: var(--surface); }
 .activity div { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .activity time { color: var(--muted); font-family: var(--mono); font-size: 12px; flex: none; width: 112px; }
 
+/* Phần chỉ dùng trên điện thoại: ẩn trên desktop */
+.side-head, .side-foot, .tabbar, .scrim { display: none; }
+.icon-btn { padding: 4px 10px; font-size: 16px; line-height: 1; }
+
 @media (max-width: 860px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
-  .side { border-right: 0; border-bottom: 1px solid var(--line); display: flex; overflow-x: auto; gap: 14px; padding: 8px 10px; position: static; height: auto; }
-  .side .group { display: flex; align-items: center; gap: 2px; margin: 0; flex: none; }
-  .side .group p { display: none; }
-  .side a { white-space: nowrap; }
-  .side a .soon { display: none; }
-  .main { padding: 16px 14px 50px; }
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .topbar { padding: 8px 14px; gap: 10px; }
+  .logout-top { display: none; }
+
+  /* Menu đầy đủ thành ngăn kéo trượt từ trái, mở bằng nút Menu ở thanh dưới */
+  .side {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 30; height: auto;
+    width: min(86vw, 330px); padding: 0 10px calc(20px + env(safe-area-inset-bottom));
+    border-right: 1px solid var(--line); box-shadow: 8px 0 30px rgba(15, 23, 42, 0.18);
+    transform: translateX(-102%); transition: transform 0.22s ease; visibility: hidden;
+  }
+  .side.open { transform: none; visibility: visible; }
+  .side-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1; background: var(--panel); padding: 12px 4px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+  .side-head b { font-size: 16px; }
+  .side a { padding: 10px 10px; font-size: 15px; }
+  .side-foot { display: flex; flex-direction: column; gap: 8px; padding: 14px 10px 0; margin-top: 6px; border-top: 1px solid var(--line); }
+  .side-foot small { color: var(--muted); word-break: break-all; }
+  .scrim { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(15, 23, 42, 0.35); }
+  .scrim[hidden] { display: none !important; }
+  body.menu-open { overflow: hidden; }
+
+  /* Thanh dưới cùng: 4 màn dùng nhiều + Menu */
+  .tabbar {
+    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    background: var(--panel); border-top: 1px solid var(--line); padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+  }
+  .tabbar a, .tabbar button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px;
+    background: none; border: 0; border-radius: 8px; padding: 4px 2px; color: var(--muted); font: inherit; font-size: 11px; text-decoration: none; cursor: pointer;
+  }
+  .tabbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .tabbar .on { color: var(--accent-dark); background: var(--accent-soft); font-weight: 600; }
+
+  .main { padding: 16px 14px calc(84px + env(safe-area-inset-bottom)); }
+  .kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi { min-width: 0; padding: 9px 11px; }
+  .kpi b { font-size: 16px; overflow-wrap: anywhere; }
   .grid2, .form-grid { grid-template-columns: 1fr; }
   .secret-row { grid-template-columns: 1fr; }
   .topbar .who { display: none; }
