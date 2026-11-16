@@ -19,7 +19,7 @@
       "binding": "DB",
       "database_name": "duyoi",
       // Thay bằng database_id in ra khi chạy: npx wrangler d1 create duyoi
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "database_id": "d3d86a5f-fdcf-4f42-9170-9ca0c6ed3d4a",
       "migrations_dir": "migrations"
     }
   ],
