@@ -134,7 +134,7 @@ function renderShell() {
     <div class="scrim" id="scrim" hidden></div>
     <nav class="side" id="side" aria-label="Menu chính">
       <div class="side-head"><b>Menu</b><button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">✕</button></div>
-      ${MENU.map((g) => `<div class="group"><p>${esc(g.group)}</p>${g.items.map((i) => `<a href="#/${i.id}" data-view="${i.id}">${esc(i.label)}${i.live ? "" : `<span class="soon">GĐ${i.phase}</span>`}</a>`).join("")}</div>`).join("")}
+      ${MENU.map((g) => `<div class="group"><p>${esc(g.group)}</p>${g.items.map((i) => `<a href="#/${i.id}" data-view="${i.id}">${esc(i.label)}${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
       <div class="side-foot"><small>${esc(state.user.name)} · ${esc(state.user.email)}</small><button type="button" data-logout>Đăng xuất</button></div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
@@ -471,7 +471,7 @@ async function viewActivity(main) {
 function viewSoon(main, _args, item) {
   main.innerHTML = `
   <div class="page">
-    <div class="page-head"><div><h2>${esc(item.label)}</h2><p>Màn này đang được xây trong ${esc(PHASES[item.phase] || "giai đoạn sau")}.</p></div></div>
+    <div class="page-head"><div><h2>${esc(item.label)}</h2><p>Sắp có. Màn này nằm trong ${esc(PHASES[item.phase] || "giai đoạn sau")}.</p></div></div>
     <div class="card soon-card">
       <span class="phase">${esc(PHASES[item.phase] || "")}</span>
       <h3>Sẽ có</h3>

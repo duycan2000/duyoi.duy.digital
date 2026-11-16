@@ -80,7 +80,7 @@ textarea { resize: vertical; min-height: 70px; }
 .side a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; color: var(--text); text-decoration: none; font-size: 13.5px; }
 .side a:hover { background: var(--surface); }
 .side a.on { background: var(--accent-soft); color: var(--accent-dark); font-weight: 600; }
-.side a .soon { margin-left: auto; font-size: 10.5px; color: var(--muted); font-weight: 400; }
+.side a .soon { margin-left: auto; font-size: 10.5px; color: var(--muted); font-weight: 400; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; white-space: nowrap; }
 
 .main { padding: 22px 26px 60px; min-width: 0; }
 .main:focus { outline: none; }
