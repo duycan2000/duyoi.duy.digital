@@ -34,11 +34,18 @@ async function boot() {
 
 window.addEventListener("duyoi:unauthorized", () => { state.user = null; renderLogin("Phiên đăng nhập đã hết. Anh đăng nhập lại nhé."); });
 
+const AUTH_ART = () => `<aside class="auth-art" aria-hidden="true">
+      <div class="art-shapes"><span></span><span></span><span></span></div>
+      <b>${esc(state.appName)}</b>
+      <p>Đội AI agent làm SEO, AEO và GEO cho các site của anh.</p>
+      <ul><li>Nghiên cứu từ khoá và câu hỏi thật</li><li>Viết bài, chấm điểm, tự sửa</li><li>Theo dõi thứ hạng, backlink, AI</li></ul>
+    </aside>`;
+
 // ---------------- Tạo admin đầu tiên ----------------
 
 function renderSetup(status) {
   app.innerHTML = `
-  <div class="auth"><div class="auth-card">
+  <div class="auth"><div class="auth-split">${AUTH_ART()}<div class="auth-card">
     <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
     <h2>Tạo tài khoản admin</h2>
     <p class="lead">Lần đầu chạy app. Tài khoản này có toàn quyền; sau khi tạo xong, màn hình này sẽ không còn nữa.</p>
@@ -63,7 +70,7 @@ function renderSetup(status) {
       <button class="primary" type="submit"${status.setupTokenConfigured ? "" : " disabled"}>Tạo admin và vào app</button>
     </form>
     <p class="note mt">Mã cài đặt chỉ có người deploy biết, để người lạ mở được trang này cũng không tạo được admin.</p>
-  </div></div>`;
+  </div></div></div>`;
   const form = $("#setup-form");
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -88,7 +95,7 @@ function renderSetup(status) {
 
 function renderLogin(notice = "") {
   app.innerHTML = `
-  <div class="auth"><div class="auth-card">
+  <div class="auth"><div class="auth-split">${AUTH_ART()}<div class="auth-card">
     <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
     <h2>Đăng nhập</h2>
     <p class="lead">Nền tảng AI agent làm SEO, AEO, GEO cho các site của anh.</p>
@@ -98,7 +105,7 @@ function renderLogin(notice = "") {
       <div class="msg ${notice ? "warn" : ""}" id="login-msg" ${notice ? "" : "hidden"}>${esc(notice)}</div>
       <button class="primary" type="submit">Đăng nhập</button>
     </form>
-  </div></div>`;
+  </div></div></div>`;
   const form = $("#login-form");
   form.email.focus();
   form.addEventListener("submit", async (ev) => {
@@ -134,7 +141,7 @@ function renderShell() {
     <div class="scrim" id="scrim" hidden></div>
     <nav class="side" id="side" aria-label="Menu chính">
       <div class="side-head"><b>Menu</b><button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">✕</button></div>
-      ${MENU.map((g) => `<div class="group"><p>${esc(g.group)}</p>${g.items.map((i) => `<a href="#/${i.id}" data-view="${i.id}">${esc(i.label)}${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
+      ${MENU.map((g) => `<div class="group g-${g.key}"><p><i class="gdot"></i>${esc(g.group)}</p>${g.items.map((i) => `<a href="#/${i.id}" data-view="${i.id}">${esc(i.label)}${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
       <div class="side-foot"><small>${esc(state.user.name)} · ${esc(state.user.email)}</small><button type="button" data-logout>Đăng xuất</button></div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
@@ -192,6 +199,7 @@ function route() {
   const mb = $("#menu-btn");
   if (mb) mb.classList.toggle("on", !inBar);
   const main = $("#main");
+  main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
   const views = { overview: viewOverview, sites: viewSites, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
@@ -216,15 +224,15 @@ async function viewOverview(main) {
       <div class="toolbar">${state.user.role === "admin" ? `<button type="button" id="pause">${d.paused ? "Chạy lại agent" : "Tạm dừng toàn bộ"}</button>` : ""}</div>
     </div>
     <div class="kpis">
-      <div class="kpi"><b>${d.sites.total}</b><small>site đang theo dõi</small></div>
-      <div class="kpi"><b>${(d.jobs.queued || 0) + (d.jobs.running || 0)}</b><small>việc trong hàng đợi</small></div>
-      <div class="kpi"><b>$${spend("openrouter")} / $${esc(d.caps.openrouter)}</b><small>OpenRouter tháng này / trần</small></div>
-      <div class="kpi"><b>$${spend("dataforseo")} / $${esc(d.caps.dataforseo)}</b><small>DataForSEO tháng này / trần</small></div>
-      <div class="kpi"><b class="sm">${esc(ago(d.cronLastRun))}</b><small>cron chạy lần cuối</small></div>
+      <div class="kpi t-site"><small>Site đang theo dõi</small><b>${d.sites.total}</b></div>
+      <div class="kpi t-ops"><small>Việc trong hàng đợi</small><b>${(d.jobs.queued || 0) + (d.jobs.running || 0)}</b></div>
+      <div class="kpi t-content"><small>OpenRouter tháng này</small><b>$${spend("openrouter")}<em>/ $${esc(d.caps.openrouter)}</em></b></div>
+      <div class="kpi t-off"><small>DataForSEO tháng này</small><b>$${spend("dataforseo")}<em>/ $${esc(d.caps.dataforseo)}</em></b></div>
+      <div class="kpi t-sys"><small>Cron chạy lần cuối</small><b class="sm">${esc(ago(d.cronLastRun))}</b></div>
     </div>
     <div class="grid2">
       <div class="card"><h3>Bắt đầu (${done}/${d.checklist.length})</h3>
-        <div class="checklist">${d.checklist.map((c) => `<div class="${c.done ? "done" : ""}"><i></i><span>${esc(c.label)}</span></div>`).join("")}</div>
+        <div class="checklist">${d.checklist.map((c, i) => `<div class="${c.done ? "done" : ""}"><i>${c.done ? "✓" : i + 1}</i><span>${esc(c.label)}</span></div>`).join("")}</div>
         <div class="toolbar"><a class="btn" href="#/settings">Mở Cài đặt</a><a class="btn" href="#/sites/new">Thêm site</a></div>
       </div>
       <div class="card"><h3>Hoạt động gần đây</h3>
