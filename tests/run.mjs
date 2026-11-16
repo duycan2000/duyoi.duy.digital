@@ -171,6 +171,18 @@ await test("không có ENCRYPTION_KEY thì từ chối lưu key", async () => {
   assert.equal(r.status, 503);
   const s = await c("GET", "/api/settings");
   assert.equal(s.data.encryptionReady, false);
+  assert.equal(s.data.encryptionProblem, "missing");
+});
+
+await test("ENCRYPTION_KEY sai định dạng được báo riêng", async () => {
+  const env3 = makeEnv({ ENCRYPTION_KEY: "mot-mat-khau-thuong" });
+  const c = client(env3);
+  await c("POST", "/api/setup", { setupToken: "test-setup-token-123", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const s = await c("GET", "/api/settings");
+  assert.equal(s.data.encryptionProblem, "invalid");
+  const r = await c("PUT", "/api/settings", { secrets: { groq_api_key: "gsk_123456789012345678" } });
+  assert.equal(r.status, 503);
+  assert.match(r.data.message, /sai định dạng/);
 });
 
 await test("cài đặt thường được kiểm tra kiểu dữ liệu", async () => {

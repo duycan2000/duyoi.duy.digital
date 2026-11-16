@@ -1,6 +1,6 @@
 // Cài đặt chung và API key (mã hoá). Key không bao giờ trả về trình duyệt, chỉ trả gợi ý vài ký tự cuối.
 
-import { decryptText, encryptText, encryptionReady } from "./crypto";
+import { decryptText, encryptText, encryptionProblem, encryptionReady } from "./crypto";
 import { HttpError, json, now, readJson } from "./http";
 import { logActivity } from "./activity";
 import type { Env, User } from "./types";
@@ -79,7 +79,7 @@ export async function getSettings(env: Env): Promise<Response> {
     const r = results.find((x) => x.key === k);
     secrets[k] = { label, set: Boolean(r), hint: r?.hint ?? null, updatedAt: r?.updated_at ?? null };
   }
-  return json({ values, secrets, encryptionReady: encryptionReady(env.ENCRYPTION_KEY) });
+  return json({ values, secrets, encryptionReady: encryptionReady(env.ENCRYPTION_KEY), encryptionProblem: encryptionProblem(env.ENCRYPTION_KEY) });
 }
 
 // PUT /api/settings  { values?: {...}, secrets?: { key: "giá trị" | null } }
@@ -99,7 +99,7 @@ export async function updateSettings(env: Env, req: Request, user: User): Promis
   if (body.secrets && typeof body.secrets === "object") {
     const entries = Object.entries(body.secrets);
     if (entries.some(([, v]) => v !== null) && !encryptionReady(env.ENCRYPTION_KEY)) {
-      throw new HttpError(503, "Chưa đặt ENCRYPTION_KEY cho Worker nên chưa lưu được API key. Xem README.", "encryption_missing");
+      throw new HttpError(503, encryptionProblem(env.ENCRYPTION_KEY) === "invalid" ? "ENCRYPTION_KEY sai định dạng: cần đúng 32 byte mã hoá base64 (44 ký tự, kết thúc bằng =)." : "Worker chưa có secret ENCRYPTION_KEY nên chưa lưu được API key.", "encryption_missing");
     }
     for (const [k, v] of entries) {
       if (!(k in SECRET_KEYS)) throw new HttpError(400, `Không có key ${k}.`, "validation");

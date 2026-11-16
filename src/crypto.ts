@@ -82,6 +82,12 @@ async function aesKey(secretB64: string | undefined): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
+// "missing" khi chưa đặt, "invalid" khi đặt nhưng không phải 32 byte base64, null khi dùng được
+export function encryptionProblem(secretB64: string | undefined): "missing" | "invalid" | null {
+  if (!secretB64 || !secretB64.trim()) return "missing";
+  try { return unb64(secretB64.trim()).length === 32 ? null : "invalid"; } catch { return "invalid"; }
+}
+
 export function encryptionReady(secretB64: string | undefined): boolean {
   if (!secretB64) return false;
   try { return unb64(secretB64).length === 32; } catch { return false; }

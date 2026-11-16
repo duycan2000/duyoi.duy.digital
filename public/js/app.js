@@ -316,7 +316,10 @@ async function viewSettings(main) {
   main.innerHTML = `
   <div class="page">
     <div class="page-head"><div><h2>Cài đặt</h2><p>API key được mã hoá trước khi lưu vào D1 và không bao giờ gửi ngược về trình duyệt; ở đây chỉ hiện vài ký tự cuối.</p></div></div>
-    ${s.encryptionReady ? "" : `<div class="msg warn">Worker chưa có <code>ENCRYPTION_KEY</code> nên chưa lưu được API key. Xem README, mục "Đặt secrets".</div>`}
+    ${s.encryptionReady ? "" : `<div class="msg warn">${s.encryptionProblem === "invalid"
+      ? `<code>ENCRYPTION_KEY</code> đã có nhưng sai định dạng: cần đúng 32 byte mã hoá base64 (44 ký tự, kết thúc bằng <code>=</code>). Tạo lại giá trị và sửa secret.`
+      : `Worker chưa có secret <code>ENCRYPTION_KEY</code> nên chưa lưu được API key.`}
+      Cách đặt: Cloudflare › Workers &amp; Pages › duyoi › Settings › Variables and Secrets › Add, chọn Type <b>Secret</b>, tên <code>ENCRYPTION_KEY</code>. Lưu xong tải lại trang này.</div>`}
     <div class="card"><h3>API key</h3>
       ${Object.entries(s.secrets).map(([k, info]) => `
         <div class="secret-row">
