@@ -176,7 +176,10 @@ textarea { resize: vertical; min-height: 90px; }
 
 /* Ô số liệu: kiểu "Transactions" của mẫu */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px; }
-.kpi { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; display: flex; align-items: center; gap: 14px; }
+.kpi { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; display: flex; align-items: center; gap: 14px; color: var(--text); transition: box-shadow 0.15s, transform 0.15s; }
+a.kpi:hover { text-decoration: none; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(58, 53, 65, 0.16); }
+.kpi > svg { margin-left: auto; width: 18px; height: 18px; color: var(--hint); flex: none; }
+a.kpi:hover > svg { color: var(--primary); }
 .kpi-ic { width: 44px; height: 44px; border-radius: var(--radius); display: grid; place-items: center; flex: none; color: #fff; background: var(--accent); box-shadow: 0 2px 4px rgba(58, 53, 65, 0.15); }
 .kpi-ic svg { width: 24px; height: 24px; }
 .kpi div { display: flex; flex-direction: column-reverse; min-width: 0; }
@@ -205,7 +208,13 @@ tr.click:hover td { background: rgba(58, 53, 65, 0.04); }
 
 /* Danh sách bước: kiểu "Sales by Countries" */
 .checklist { display: flex; flex-direction: column; gap: 6px; }
-.checklist div { display: flex; align-items: center; gap: 14px; padding: 6px 0; font-size: 14px; font-weight: 500; }
+.checklist a { display: flex; align-items: center; gap: 14px; padding: 6px 10px; margin: 0 -10px; border-radius: var(--radius); font-size: 14px; font-weight: 500; color: var(--text); }
+.checklist a:hover { background: rgba(58, 53, 65, 0.04); text-decoration: none; }
+.checklist a > svg { width: 18px; height: 18px; color: var(--hint); margin-left: 4px; flex: none; }
+.checklist a:not(.done) > svg { margin-left: 0; }
+.checklist a:hover > svg { color: var(--primary); }
+.checklist span { flex: 1; }
+.checklist em { font-style: normal; font-size: 12px; font-weight: 500; color: var(--primary); background: rgba(38, 76, 200, 0.1); border-radius: 16px; padding: 2px 10px; white-space: nowrap; }
 .checklist i { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: rgba(38, 76, 200, 0.12); color: var(--primary); font-style: normal; font-size: 14px; font-weight: 500; flex: none; }
 .checklist .done i { background: rgba(86, 202, 0, 0.12); color: #4cb400; }
 .checklist .done span { color: var(--muted); text-decoration: line-through; font-weight: 400; }
@@ -220,6 +229,7 @@ tr.click:hover td { background: rgba(58, 53, 65, 0.04); }
 
 .secret-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .secret-row:last-child { border-bottom: 0; }
+.secret-row.hl { background: rgba(38, 76, 200, 0.05); margin: 0 -20px; padding-left: 20px; padding-right: 20px; }
 .secret-row b { font-size: 14px; font-weight: 600; }
 .secret-row small { color: var(--muted); display: block; font-size: 12px; }
 
@@ -282,14 +292,17 @@ pre.cred { margin: 0; padding: 14px 16px; background: var(--bg); border-radius: 
 
 /* Nhật ký: kiểu "Activity Timeline" */
 .activity { display: flex; flex-direction: column; }
-.activity div { position: relative; display: flex; justify-content: space-between; gap: 14px; padding: 0 0 22px 26px; font-size: 14px; font-weight: 500; }
-.activity div::before { content: ""; position: absolute; left: 0; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 3px #fff; z-index: 1; }
-.activity div::after { content: ""; position: absolute; left: 5px; top: 10px; bottom: 0; width: 1px; background: var(--line); }
-.activity div:last-child { padding-bottom: 0; }
-.activity div:last-child::after { display: none; }
-.activity div:nth-child(4n+1)::before { background: var(--error); }
-.activity div:nth-child(4n+3)::before { background: var(--info); }
-.activity div:nth-child(4n+4)::before { background: var(--warning); }
+.activity a { position: relative; display: flex; justify-content: space-between; gap: 14px; padding: 0 0 22px 26px; font-size: 14px; font-weight: 500; }
+.activity a::before { content: ""; position: absolute; left: 0; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 3px #fff; z-index: 1; }
+.activity a::after { content: ""; position: absolute; left: 5px; top: 10px; bottom: 0; width: 1px; background: var(--line); }
+.activity a:last-child { padding-bottom: 0; }
+.activity a:last-child::after { display: none; }
+.activity a:nth-child(4n+1)::before { background: var(--error); }
+.activity a:nth-child(4n+3)::before { background: var(--info); }
+.activity a:nth-child(4n+4)::before { background: var(--warning); }
+.activity a { color: var(--text); border-radius: var(--radius); }
+.activity a:hover { text-decoration: none; }
+.activity a:hover span { color: var(--primary); }
 .activity time { color: var(--hint); font-size: 12px; font-weight: 400; flex: none; white-space: nowrap; }
 
 /* Phần chỉ dùng trên điện thoại: ẩn trên desktop */
@@ -343,7 +356,7 @@ pre.cred { margin: 0; padding: 14px 16px; background: var(--bg); border-radius: 
   .grid2, .form-grid { grid-template-columns: 1fr; gap: 16px; }
   .secret-row { grid-template-columns: 1fr; gap: 8px; }
   th, td { padding-left: 14px; padding-right: 14px; }
-  .activity div { flex-direction: column; gap: 2px; }
+  .activity a { flex-direction: column; gap: 2px; }
   .roles { grid-template-columns: 1fr; gap: 14px; }
   .pw-grid { grid-template-columns: 1fr; }
   .pw-side { display: none; }

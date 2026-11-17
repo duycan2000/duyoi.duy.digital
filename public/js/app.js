@@ -186,6 +186,7 @@ const ICON = {
   users: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.7-3.5 3.3-5.5 6.5-5.5s5.8 2 6.5 5.5M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.5 3.5 5.2",
   plus: "M12 5v14M5 12h14",
   search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4",
+  chevron: "M9 6l6 6-6 6",
   dot: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   circle: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   chart: "M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-3",
@@ -397,8 +398,8 @@ function route() {
 // ---------------- Thẻ có tab (kiểu Account Settings của mẫu) ----------------
 
 state.tabs = {};
-const tabsNav = (id, tabs, active) => `<nav class="tabs" role="tablist" data-tabs="${id}">${tabs.map(([k, l, ic]) =>
-  `<button type="button" role="tab" data-tab-key="${k}" aria-selected="${k === active}" class="${k === active ? "on" : ""}">${icon(ICON[ic])}<span>${esc(l)}</span></button>`).join("")}</nav>`;
+const tabsNav = (id, tabs, def) => { const active = tabOf(id, def); return `<nav class="tabs" role="tablist" data-tabs="${id}">${tabs.map(([k, l, ic]) =>
+  `<button type="button" role="tab" data-tab-key="${k}" aria-selected="${k === active}" class="${k === active ? "on" : ""}">${icon(ICON[ic])}<span>${esc(l)}</span></button>`).join("")}</nav>` };
 const tabOf = (id, def) => state.tabs[id] || def;
 const panelAttr = (id, key, def) => `data-panel="${key}"${tabOf(id, def) === key ? "" : " hidden"}`;
 
@@ -418,7 +419,16 @@ function bindTabs(root, id) {
 // ---------------- Tổng quan ----------------
 
 // value đã là HTML an toàn (số hoặc chuỗi đã esc)
-const kpi = (tone, ic, value, label, cls = "") => `<div class="kpi ${tone}"><span class="kpi-ic">${icon(ICON[ic])}</span><div><b class="${cls}">${value}</b><small>${esc(label)}</small></div></div>`;
+const kpi = (tone, ic, value, label, href, cls = "") => `<a class="kpi ${tone}" href="${href}"><span class="kpi-ic">${icon(ICON[ic])}</span><div><b class="${cls}">${value}</b><small>${esc(label)}</small></div>${icon(ICON.chevron)}</a>`;
+
+// Mỗi bước "Bắt đầu" dẫn tới đúng chỗ cần làm
+const CHECK_LINK = {
+  encryption: "#/settings/keys",
+  openrouter: "#/settings/keys/openrouter_api_key",
+  dataforseo: "#/settings/keys/dataforseo_login",
+  site: "#/sites/new",
+  cron: "#/schedule"
+};
 
 async function viewOverview(main) {
   const [d, act] = await Promise.all([api("/api/dashboard"), api("/api/activity?limit=8")]);
@@ -432,15 +442,15 @@ async function viewOverview(main) {
       <div class="toolbar">${state.user.role === "admin" ? `<button type="button" id="pause">${d.paused ? "Chạy lại agent" : "Tạm dừng toàn bộ"}</button>` : ""}</div>
     </div>
     <div class="kpis">
-      ${kpi("t-site", "globe", d.sites.total, "Site đang theo dõi")}
-      ${kpi("t-yellow", "queue", (d.jobs.queued || 0) + (d.jobs.running || 0), "Việc trong hàng đợi")}
-      ${kpi("t-content", "money", `$${spend("openrouter")}<em>/ $${esc(d.caps.openrouter)}</em>`, "OpenRouter tháng này")}
-      ${kpi("t-ops", "chart", `$${spend("dataforseo")}<em>/ $${esc(d.caps.dataforseo)}</em>`, "DataForSEO tháng này")}
-      ${kpi("t-ai", "clock", esc(ago(d.cronLastRun)), "Cron chạy lần cuối", "sm")}
+      ${kpi("t-site", "globe", d.sites.total, "Site đang theo dõi", d.sites.total ? "#/sites" : "#/sites/new")}
+      ${kpi("t-yellow", "queue", (d.jobs.queued || 0) + (d.jobs.running || 0), "Việc trong hàng đợi", "#/schedule")}
+      ${kpi("t-content", "money", `$${spend("openrouter")}<em>/ $${esc(d.caps.openrouter)}</em>`, "OpenRouter tháng này", "#/settings/models")}
+      ${kpi("t-ops", "chart", `$${spend("dataforseo")}<em>/ $${esc(d.caps.dataforseo)}</em>`, "DataForSEO tháng này", "#/settings/models")}
+      ${kpi("t-ai", "clock", esc(ago(d.cronLastRun)), "Cron chạy lần cuối", "#/schedule", "sm")}
     </div>
     <div class="grid2">
       <div class="card"><h3>Bắt đầu (${done}/${d.checklist.length})</h3>
-        <div class="checklist">${d.checklist.map((c, i) => `<div class="${c.done ? "done" : ""}"><i>${c.done ? "✓" : i + 1}</i><span>${esc(c.label)}</span></div>`).join("")}</div>
+        <div class="checklist">${d.checklist.map((c, i) => `<a href="${c.id === "site" && c.done ? "#/sites" : CHECK_LINK[c.id] || "#/settings"}" class="${c.done ? "done" : ""}"><i>${c.done ? "✓" : i + 1}</i><span>${esc(c.label)}</span>${c.done ? "" : `<em>Làm ngay</em>`}${icon(ICON.chevron)}</a>`).join("")}</div>
         <div class="toolbar"><a class="btn" href="#/settings">Mở Cài đặt</a><a class="btn" href="#/sites/new">Thêm site</a></div>
       </div>
       <div class="card"><h3>Hoạt động gần đây</h3>
@@ -456,7 +466,33 @@ async function viewOverview(main) {
   }));
 }
 
-const actRow = (a) => `<div><span>${esc(a.detail || a.action)}${a.site ? ` · <b>${esc(a.site)}</b>` : ""}</span><time>${esc(fmtTime(a.at))}</time></div>`;
+// Đổi tên khoá cài đặt thành chữ dễ đọc
+function settingsText(detail) {
+  const NAMES = { openrouter_api_key: "OpenRouter API key", dataforseo_login: "DataForSEO login", dataforseo_password: "DataForSEO password", groq_api_key: "Groq API key", cloudflare_api_token: "Cloudflare API token", google_api_key: "Google Cloud API key", timezone: "múi giờ" };
+  const parts = new Set(String(detail || "").split(/,\s*/).filter(Boolean).map((k) =>
+    NAMES[k] || (k.startsWith("model_") ? "model AI" : k.startsWith("free_") ? "model free" : k.endsWith("_cap_usd") ? "trần chi phí" : k)));
+  return `Cập nhật cài đặt: ${[...parts].join(", ")}`;
+}
+
+function actText(a) {
+  if (a.action === "settings.updated") return settingsText(a.detail);
+  if (a.action === "site.updated") return `Sửa site (${a.detail})`;
+  if (a.action === "site.created") return `Thêm site ${a.detail}`;
+  return a.detail || a.action;
+}
+
+// Mỗi dòng nhật ký dẫn tới màn liên quan
+function actLink(a) {
+  const admin = state.user?.role === "admin";
+  if (a.siteId) return `#/sites/${a.siteId}`;
+  if (a.action.startsWith("settings.")) return /_key|_login|_password|_token/.test(a.detail || "") ? "#/settings/keys" : "#/settings/models";
+  if (a.action.startsWith("user.")) return admin ? "#/members" : "#/activity";
+  if (a.action.startsWith("auth.") || a.action.startsWith("setup.")) return "#/account/security";
+  if (a.action.startsWith("cron.")) return "#/schedule";
+  return "#/activity";
+}
+
+const actRow = (a) => `<a href="${actLink(a)}"><span>${esc(actText(a))}${a.site && a.action !== "site.created" ? ` · <b>${esc(a.site)}</b>` : ""}</span><time>${esc(fmtTime(a.at))}</time></a>`;
 
 // ---------------- Site ----------------
 
@@ -562,7 +598,8 @@ const SECRET_HELP = {
   google_api_key: "Knowledge Graph Search API (cho tab Entity)"
 };
 
-async function viewSettings(main) {
+async function viewSettings(main, args = []) {
+  if (args[0] === "keys" || args[0] === "models") state.tabs.settings = args[0];
   const s = await api("/api/settings");
   const admin = state.user.role === "admin";
   const v = s.values;
@@ -600,6 +637,9 @@ async function viewSettings(main) {
     </div>
   </div>`;
   bindTabs(main, "settings");
+  // Mở từ Tổng quan: đưa con trỏ vào đúng ô key cần nhập
+  const want = args[1] && $(`[data-secret="${CSS.escape(args[1])}"]`, main);
+  if (want && !want.disabled) { want.scrollIntoView({ block: "center" }); want.focus({ preventScroll: true }); want.closest(".secret-row").classList.add("hl"); }
 
   $$("[data-save]", main).forEach((btn) => btn.addEventListener("click", () => {
     const k = btn.dataset.save;
@@ -638,7 +678,8 @@ async function viewSettings(main) {
 
 // ---------------- Tài khoản ----------------
 
-async function viewAccount(main) {
+async function viewAccount(main, args = []) {
+  if (args[0] === "security" || args[0] === "info") state.tabs.account = args[0];
   const { sessions } = await api("/api/auth/sessions");
   const u = state.user;
   main.innerHTML = `

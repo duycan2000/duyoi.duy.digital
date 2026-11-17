@@ -14,7 +14,7 @@ export async function logActivity(env: Env, actor: string, action: string, detai
 export async function listActivity(env: Env, url: URL): Promise<Response> {
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 50));
   const { results } = await env.DB.prepare(
-    "SELECT a.id, a.actor, a.action, a.detail, a.at, s.name AS site FROM activity a LEFT JOIN sites s ON s.id = a.site_id ORDER BY a.at DESC LIMIT ?"
+    "SELECT a.id, a.actor, a.action, a.detail, a.at, a.site_id AS siteId, s.name AS site FROM activity a LEFT JOIN sites s ON s.id = a.site_id ORDER BY a.at DESC LIMIT ?"
   ).bind(limit).all();
   return json({ activity: results });
 }
