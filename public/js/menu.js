@@ -15,6 +15,9 @@ export const MENU = [
     { id: "rankings", label: "Rankings", phase: 2, plan: ["Vị trí desktop và mobile hằng ngày qua DataForSEO SERP (chế độ Standard, rẻ)", "SERP feature: PAA, AI Overview, featured snippet, local pack", "Biểu đồ hiển thị toàn site, tab Đối thủ và Cannibalization, xuất CSV"] },
     { id: "analytics", label: "Analytics & báo cáo", phase: 5, plan: ["Search Console, GA4, Bing Webmaster qua OAuth", "Báo cáo tháng tự động, gửi về điện thoại"] }
   ]},
+  { group: "Phục hồi", key: "rec", items: [
+    { id: "recovery", label: "Phục hồi thứ hạng", live: true }
+  ]},
   { group: "Site", key: "site", items: [
     { id: "sites", label: "Site", live: true },
     { id: "context", label: "Project context", phase: 3, plan: ["Giọng văn, tác giả, đối tượng đọc của từng site", "Luật riêng: site Đức không email lạnh, bài review cần ảnh test thật"] },

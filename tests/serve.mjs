@@ -3,6 +3,10 @@
 
 import { createServer } from "node:http";
 import { loadWorker, makeEnv } from "./harness.mjs";
+import { fakeSite } from "./fake-site.mjs";
+
+// FAKE_SITE=1: mọi lệnh tải trang ra ngoài trả về site giả caddemo.de (để thử chức năng Phục hồi khi không có mạng)
+if (process.env.FAKE_SITE) globalThis.fetch = fakeSite();
 
 const port = Number(process.argv[2]) || 8788;
 const worker = await loadWorker();
@@ -16,7 +20,8 @@ createServer(async (req, res) => {
   for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers.set(k, v);
   headers.set("CF-Connecting-IP", "127.0.0.1");
   const body = chunks.length && req.method !== "GET" && req.method !== "HEAD" ? Buffer.concat(chunks) : undefined;
-  const r = await worker.fetch(new Request(url, { method: req.method, headers, body }), env);
+  const waits = [];
+  const r = await worker.fetch(new Request(url, { method: req.method, headers, body }), env, { waitUntil: (p) => waits.push(p) });
   res.writeHead(r.status, Object.fromEntries(r.headers));
   res.end(Buffer.from(await r.arrayBuffer()));
 }).listen(port, () => console.log(`Duy Ơi chạy thử tại http://localhost:${port} (SETUP_TOKEN=${env.SETUP_TOKEN})`));

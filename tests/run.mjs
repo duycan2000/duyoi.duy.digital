@@ -3,6 +3,9 @@
 
 import assert from "node:assert/strict";
 import { loadWorker, makeEnv } from "./harness.mjs";
+import { fakeSite } from "./fake-site.mjs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const worker = await loadWorker();
 const BASE = "https://duyoi.duy.digital";
@@ -272,6 +275,78 @@ await test("đăng xuất xoá phiên", async () => {
   assert.equal(r.status, 200);
   assert.match(r.setCookie, /Max-Age=0/);
   assert.equal((await call("GET", "/api/auth/me")).status, 401);
+});
+
+// ---------------- Phục hồi thứ hạng (site giả, không ra mạng) ----------------
+
+await test("phục hồi: quét site, chẩn đoán, lập việc có Gác cổng", async () => {
+  const env2 = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const c2 = client(env2);
+  await c2("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite();
+  try {
+    const cr = await c2("POST", "/api/recovery", { url: "https://www.caddemo.de/", dropMonth: "2025-10", language: "de", rules: {
+      blocklist: ["3DScan", "3D Scan"], blockedFilenames: ["3dscan.png"], commercialPaths: ["/cad-dienstleistung-tga/", "/cad-outsourcing-kosten-sparen/"], verifiedNumbers: ["Über 50% Kostenersparnis"]
+    } });
+    assert.equal(cr.status, 201);
+    const g = await c2("GET", `/api/recovery/${cr.data.id}`);
+    assert.equal(g.data.case.status, "ready", g.data.case.error);
+    assert.ok(g.data.case.score < 100);
+    const codes = g.data.findings.map((f) => f.code);
+    for (const c of ["dead_end", "orphan_commercial", "blocklist", "markers_live", "thin", "http_errors", "timeline"]) assert.ok(codes.includes(c), `thiếu ${c}: ${codes}`);
+    const tl = g.data.findings.find((f) => f.code === "timeline");
+    assert.match(tl.title, /August 2025 spam update/);
+    assert.equal(g.data.pages.find((p) => p.path === "/cad-dienstleistung-tga/").kind, "commercial");
+    assert.equal(g.data.pages.find((p) => p.path === "/inventor-vs-solidworks/").kind, "informational");
+    const link = g.data.tasks.find((t) => t.kind === "internal_links" && t.target_url.includes("cad-symbole"));
+    assert.ok(link, "phải có việc chèn link cho bài CAD-Symbole");
+    assert.equal(link.status, "proposed", JSON.stringify(link.gate));
+    for (const e of link.payload.edits) {
+      assert.ok(e.replace.startsWith(e.find), "replace phải giữ nguyên câu gốc");
+      assert.match(e.replace, /<a href="\/cad-/);
+      assert.doesNotMatch(e.replace, /Learn more|Related/);
+    }
+    assert.ok(link.payload.edits.length <= 3);
+    assert.ok(g.data.tasks.some((t) => t.kind === "remove_blocked" && t.priority === 1));
+    // Gác cổng chặn các trường hợp nguy hiểm
+    const gate = await import(pathToFileURL(join(process.cwd(), ".test-build", "recovery-gate.js")).href);
+    const rules = g.data.case.rules;
+    const base = { find: "Die Zeichnungen sind klar.", type: "internal_link", target: "/cad-dienstleistung-tga/", anchor: "CAD-Dienstleistung TGA" };
+    const ctx = { rules, pageNumbers: [], occurrences: () => 1, targetText: () => "CAD-Dienstleistung TGA" };
+    assert.equal(gate.checkEdits([{ ...base, replace: base.find + " Learn more about our TGA services and the team that helps you." }], ctx).ok, false);
+    assert.equal(gate.checkEdits([{ ...base, replace: base.find + " Das spart 40% Zeit." }], ctx).ok, false);
+    assert.equal(gate.checkEdits([{ ...base, replace: base.find + " Über 50% Kostenersparnis mit <a href=\"/x/\">CAD-Dienstleistung TGA</a>." }], ctx).ok, true);
+    assert.equal(gate.checkEdits([{ ...base, replace: base.find + " Wie bei 3DScan." }], ctx).ok, false);
+    assert.equal(gate.checkEdits([{ ...base, replace: "Neuer Satz ohne Original." }], ctx).ok, false);
+    assert.equal(gate.checkEdits([{ ...base, replace: base.find + " Passend dazu: <a>X</a>." }], { ...ctx, occurrences: () => 2 }).ok, false);
+    // Disavow chỉ khi có danh sách domain
+    assert.equal((await c2("GET", `/api/recovery/${cr.data.id}/disavow`)).status, 400);
+    const ru = await c2("PUT", `/api/recovery/${cr.data.id}/rules`, { rules: { toxicDomains: "spam1.sg\ndomain:spam2.md\nhttps://www.spam3.top/x", linksBought: true } });
+    assert.equal(ru.status, 200);
+    const d = await c2("GET", `/api/recovery/${cr.data.id}/disavow`);
+    assert.equal(d.status, 200);
+    const g2 = await c2("GET", `/api/recovery/${cr.data.id}`);
+    const dis = g2.data.tasks.find((t) => t.kind === "disavow");
+    assert.deepEqual(dis.payload.domains, ["spam1.sg", "spam2.md", "spam3.top"]);
+    assert.equal(dis.risk, "irreversible");
+    // Duyệt / từ chối việc
+    const link2 = g2.data.tasks.find((t) => t.kind === "internal_links" && t.target_url === link.target_url);
+    assert.equal((await c2("PUT", `/api/recovery/tasks/${link2.id}`, { status: "approved" })).status, 200);
+    const blocked = g2.data.tasks.find((t) => t.status === "blocked");
+    if (blocked) assert.equal((await c2("PUT", `/api/recovery/tasks/${blocked.id}`, { status: "approved" })).status, 409);
+    // Quét lại giữ việc đã duyệt
+    assert.equal((await c2("POST", `/api/recovery/${cr.data.id}/rescan`)).status, 200);
+    const g3 = await c2("GET", `/api/recovery/${cr.data.id}`);
+    assert.equal(g3.data.case.status, "ready");
+    assert.equal(g3.data.tasks.find((t) => t.id === link2.id)?.status, "approved");
+    assert.equal(g3.data.tasks.filter((t) => t.kind === "internal_links" && t.target_url === link.target_url).length, 1);
+    // Site được tạo tự động từ địa chỉ nhập vào
+    const sites = await c2("GET", "/api/sites");
+    assert.ok(sites.data.sites.some((x) => x.domain === "caddemo.de"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 await test("đường dẫn không phải /api trả giao diện (SPA)", async () => {

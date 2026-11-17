@@ -73,6 +73,20 @@ Khi đã tạo admin, `SETUP_TOKEN` hết tác dụng. Muốn chắc chắn, đ�
 - **Cloudflare → Billing → Billable Usage:** tạo budget alert $10 / $25 / $50.
 - **Thêm một lớp bảo vệ (khuyên dùng):** đặt Cloudflare Access (Zero Trust, miễn phí tới 50 người) trước `duyoi.duy.digital`, chỉ cho email của anh vào.
 
+## Phục hồi thứ hạng
+
+Menu **Phục hồi › Phục hồi thứ hạng**: nhập địa chỉ site (và tháng bắt đầu tụt). App đọc robots.txt và sitemap, quét tối đa 400 trang như Googlebot (không cần mật khẩu, không sửa gì), rồi:
+
+- chấm điểm sức khoẻ và xếp nguyên nhân: nội dung mỏng/hàng loạt, ăn thịt từ khoá, bài thông tin cụt (không dẫn tới trang dịch vụ), trang dịch vụ ít link nội bộ, lỗi kỹ thuật (noindex, canonical, URL lỗi), blocklist pháp lý, dấu biên tập còn sót, link chéo giữa các site của anh;
+- đối chiếu tháng tụt với các bản cập nhật Google đã xác nhận (`src/google-updates.ts`, thêm bản mới vào cuối danh sách);
+- lập việc cho đội 9 agent. Việc sửa nội dung là danh sách find/replace "phẫu thuật" (giữ nguyên câu gốc, thêm link/CTA), đã qua **Gác cổng**: blocklist, dấu biên tập, ngôn ngữ, số liệu không nguồn, đoạn gốc phải khớp đúng 1 lần, tối đa 3 link mỗi trang.
+
+Không việc nào tự đăng lên site. Redirect, xoá trang, đổi canonical, disavow là việc "khó đảo ngược": chỉ admin duyệt và người làm tay. Áp dụng việc đã duyệt vào WordPress (bản nháp, sao lưu, hoàn tác, sửa `_elementor_data`, xoá cache) là giai đoạn kế tiếp.
+
+Luật riêng của từng site (blocklist, ngôn ngữ, trang dịch vụ, số liệu đã kiểm chứng…) nhập ở tab **Luật an toàn**, lưu trong D1. Không ghi luật của khách vào code vì repo công khai.
+
+Thử trên máy không cần mạng: `FAKE_SITE=1 node tests/serve.mjs` rồi nhập `caddemo.de`.
+
 ## Chạy trên máy
 
 ```bash

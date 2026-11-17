@@ -2,6 +2,7 @@
 
 import { api, ApiError } from "./api.js";
 import { MENU, ITEMS, PHASES } from "./menu.js";
+import { viewRecovery } from "./recovery.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
 const app = $("#app");
@@ -204,7 +205,7 @@ const ICON = {
   menu: "M4 6h16M4 12h16M4 18h16",
   close: "M6 6l12 12M18 6L6 18"
 };
-const GROUP_ICON = { ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
+const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
 const ITEM_ICON = { overview: "grid", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
@@ -385,7 +386,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }
@@ -484,6 +485,7 @@ function actText(a) {
 // Mỗi dòng nhật ký dẫn tới màn liên quan
 function actLink(a) {
   const admin = state.user?.role === "admin";
+  if (a.action.startsWith("recovery.")) return "#/recovery";
   if (a.siteId) return `#/sites/${a.siteId}`;
   if (a.action.startsWith("settings.")) return /_key|_login|_password|_token/.test(a.detail || "") ? "#/settings/keys" : "#/settings/models";
   if (a.action.startsWith("user.")) return admin ? "#/members" : "#/activity";

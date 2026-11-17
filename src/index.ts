@@ -7,9 +7,10 @@ import { HttpError, assertSameOrigin, errorResponse, json } from "./http";
 import { getSettings, updateSettings } from "./settings";
 import { createSite, getSite, listSites, updateSite } from "./sites";
 import { createUser, deleteUser, listUsers, resetUserPassword, updateUser } from "./users";
+import { archiveCase, createCase, decideTask, disavow, getCase, listCases, processRecoveryQueue, rescanCase, updateRules } from "./recovery";
 import type { CronEvent, Env, ExecCtx } from "./types";
 
-async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
+async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promise<Response> {
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const m = req.method;
   assertSameOrigin(req);
@@ -61,15 +62,31 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (m === "PUT") return updateSite(env, req, user, id);
   }
 
+  // Phục hồi thứ hạng
+  if (path === "/api/recovery" && m === "GET") return listCases(env);
+  if (path === "/api/recovery" && m === "POST") return createCase(env, req, user, ctx);
+  const taskMatch = path.match(/^\/api\/recovery\/tasks\/(\d+)$/);
+  if (taskMatch && m === "PUT") return decideTask(env, req, user, Number(taskMatch[1]));
+  const recMatch = path.match(/^\/api\/recovery\/(\d+)(?:\/(rescan|rules|disavow|archive))?$/);
+  if (recMatch) {
+    const id = Number(recMatch[1]);
+    const action = recMatch[2];
+    if (!action && m === "GET") return getCase(env, id);
+    if (action === "rescan" && m === "POST") return rescanCase(env, user, id, ctx);
+    if (action === "rules" && m === "PUT") return updateRules(env, req, user, id, ctx);
+    if (action === "disavow" && m === "GET") return disavow(env, id);
+    if (action === "archive" && m === "POST") return archiveCase(env, user, id);
+  }
+
   throw new HttpError(404, "Không có API này.", "not_found");
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx?: ExecCtx): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/api/")) {
       try {
-        return await handleApi(req, env, url);
+        return await handleApi(req, env, url, ctx);
       } catch (err) {
         return errorResponse(err);
       }
@@ -80,5 +97,6 @@ export default {
 
   async scheduled(_event: CronEvent, env: Env, ctx: ExecCtx): Promise<void> {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
+    ctx.waitUntil(processRecoveryQueue(env).catch((e) => console.error("recovery cron failed", e)));
   }
 };
