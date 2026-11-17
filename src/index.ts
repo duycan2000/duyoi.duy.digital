@@ -16,6 +16,7 @@ import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from ".
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
+import { apiApply as affApply, apiDecide as affDecide, apiDeleteLink as affDelete, apiLinks as affLinks, apiRollback as affRollback, apiSaveLink as affSave, apiScan as affScan } from "./affiliate";
 import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
 
@@ -112,6 +113,18 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (pubMatch && pubMatch[2] && m === "POST") return apiDetectProfile(env, user, Number(pubMatch[1]));
   if (pubMatch && !pubMatch[2] && m === "GET") return apiGetProfile(env, Number(pubMatch[1]));
   if (pubMatch && !pubMatch[2] && m === "PUT") return apiSavePublish(env, req, user, Number(pubMatch[1]));
+  const affMatch = path.match(/^\/api\/sites\/(\d+)\/affiliate(?:\/(links|scan|edits|apply|applies)(?:\/(\d+))?(\/rollback)?)?$/);
+  if (affMatch) {
+    const sid = Number(affMatch[1]), sub = affMatch[2], sub2 = affMatch[3] ? Number(affMatch[3]) : null;
+    if (!sub && m === "GET") return affLinks(env, sid);
+    if (sub === "links" && m === "POST" && !sub2) return affSave(env, req, user, sid, null);
+    if (sub === "links" && m === "PUT" && sub2) return affSave(env, req, user, sid, sub2);
+    if (sub === "links" && m === "DELETE" && sub2) return affDelete(env, user, sid, sub2);
+    if (sub === "scan" && m === "POST") return affScan(env, req, user, sid);
+    if (sub === "edits" && m === "PUT") return affDecide(env, req, user, sid);
+    if (sub === "apply" && m === "POST") return affApply(env, req, user, sid);
+    if (sub === "applies" && sub2 && affMatch[4] && m === "POST") return affRollback(env, user, sid, sub2);
+  }
   const mdMatch = path.match(/^\/api\/sites\/(\d+)\/media(\/check)?$/);
   if (mdMatch && m === "POST") return mdMatch[2] ? apiCheckMedia(env, user, Number(mdMatch[1])) : apiSetupMedia(env, user, Number(mdMatch[1]));
   const imgMatch = path.match(/^\/api\/content\/ideas\/(\d+)\/images\/([a-z0-9]{2,6})$/);

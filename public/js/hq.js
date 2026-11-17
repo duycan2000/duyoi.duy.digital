@@ -39,6 +39,28 @@ export async function viewHq(main, args, kit) {
   })));
   bindLead(main);
   $$(".agent-card[data-href]", main).forEach((c) => c.addEventListener("click", () => { location.hash = c.dataset.href; }));
+  bindOffice(main);
+}
+
+function bindOffice(main) {
+  const team = $(".hq-team", main);
+  if (!team) return;
+  $$("[data-hq-view]", main).forEach((b) => b.addEventListener("click", () => {
+    K.state.hqView = b.dataset.hqView;
+    team.className = `hq-team v-${b.dataset.hqView}`;
+    $$("[data-hq-view]", main).forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  }));
+  const tpl = $("#office-cards", main);
+  const detail = $("#office-detail", main);
+  $$("[data-desk]", main).forEach((d) => d.addEventListener("click", () => {
+    $$("[data-desk]", main).forEach((x) => x.classList.toggle("on", x === d));
+    const card = tpl.content.querySelector(`[data-card="${CSS.escape(d.dataset.desk)}"]`);
+    if (!card) return;
+    detail.innerHTML = "";
+    const node = card.firstElementChild.cloneNode(true);
+    detail.appendChild(node);
+    if (node.dataset.href) node.addEventListener("click", () => { location.hash = node.dataset.href; });
+  }));
 }
 
 function agentCard(a, href) {
@@ -53,17 +75,58 @@ function agentCard(a, href) {
   </div>`;
 }
 
+const leadOf = (hq) => ({ id: "lead", name: "Trưởng nhóm", icon: "spark", role: "Anh chat trực tiếp: Trưởng nhóm đọc tình trạng thật của các site, trả lời và đề xuất phương án giao cho agent sẵn có. Anh chọn việc rồi bấm Giao việc.", state: hq.lead.blockedPrompt ? "blocked" : hq.lead.running ? "working" : hq.lead.queued ? "waiting" : "idle", detail: `${hq.lead.queued} việc chờ · ${hq.lead.running} đang chạy · ${hq.lead.done} xong${hq.lead.failed ? ` · ${hq.lead.failed} lỗi` : ""}`, spend: hq.lead.spend, last: hq.lead.last });
+const HREF = (a, key) => (a.id === "lead" ? "#/hq/lead" : key === "recovery" ? "#/recovery" : key === "content" ? "#/content" : key === "manager" ? "#/hq/prompts" : null);
+
+// Văn phòng 3D: sàn isometric 4 phòng, mỗi agent một bàn; trạng thái thật hiện bằng chuyển động (đang làm),
+// dấu "!" (có việc chờ), đèn đỏ (bị chặn), mờ (rảnh). Bấm bàn để xem chi tiết.
+function officeHtml(hq, x) {
+  const rooms = [["manager", [x.lead, x.manager]], ["auto", [x.auto]], ["recovery", hq.zones.recovery], ["content", hq.zones.content]];
+  const all = rooms.flatMap(([key, ags]) => ags.map((a) => [key, a]));
+  const desk = (key, a) => {
+    const st = STATE[a.state] || STATE.idle;
+    return `<button type="button" class="desk s-${esc(a.state)}" data-desk="${esc(a.id)}" aria-label="${esc(`${a.name}: ${st[0]}`)}">
+      <span class="desk-top"><span class="monitor"></span></span>
+      <span class="bot"><span class="bot-head">${K.icon(K.ICON[a.icon] || K.ICON.spark)}</span><span class="bot-body"></span>${a.state === "waiting" ? `<span class="bubble">!</span>` : a.state === "blocked" ? `<span class="bubble err">×</span>` : a.state === "idle" ? `<span class="zzz">z</span>` : ""}<span class="desk-name">${esc(a.name)}</span></span>
+    </button>`;
+  };
+  const working = all.filter(([, a]) => a.state === "working").length;
+  const waiting = all.filter(([, a]) => a.state === "waiting").length;
+  const blocked = all.filter(([, a]) => a.state === "blocked").length;
+  return `<div class="office-wrap">
+    <div class="office-legend"><span class="lg working">${working} đang làm</span><span class="lg waiting">${waiting} có việc chờ</span><span class="lg blocked">${blocked} bị chặn</span><span class="lg idle">${all.length - working - waiting - blocked} rảnh</span></div>
+    <div class="office" aria-label="Văn phòng agent">
+      <div class="office-floor">
+        ${rooms.map(([key, ags]) => {
+          const [, title] = ZONES.find((z) => z[0] === key);
+          return `<div class="room r-${key}"><span class="room-label">${esc(title)}</span><div class="room-desks n-${Math.min(ags.length, 6)}">${ags.map((a) => desk(key, a)).join("")}</div></div>`;
+        }).join("")}
+      </div>
+    </div>
+    <div class="office-detail" id="office-detail"><p class="note">Bấm vào một bàn để xem agent đó đang làm gì.</p></div>
+    <template id="office-cards">${all.map(([key, a]) => `<div data-card="${esc(a.id)}">${agentCard(a, HREF(a, key))}</div>`).join("")}</template>
+  </div>`;
+}
+
 function teamHtml(hq, spend) {
   const m = hq.manager;
   const manager = { id: "manager", name: "Quản lý", icon: "shield", role: "Duyệt prompt trước khi agent dùng (đúng từng phiên bản), giữ trần chi phí tháng và trần AI mỗi site/ngày, ghi lại mọi lần gọi.", state: m.promptsPending ? "blocked" : "idle", waiting: m.promptsPending, detail: `OpenRouter ${money(spend.spent.openrouter)} / $${spend.caps.openrouter} · DataForSEO ${money(spend.spent.dataforseo)} / $${spend.caps.dataforseo}${spend.blockedMonth ? ` · đã chặn ${spend.blockedMonth} lần gọi tháng này` : ""}` };
   const auto = { id: "autopilot", name: "Tự động", icon: "clock", role: "Cứ 15 phút: quét lại định kỳ, cho AI viết câu chèn, nghiên cứu từ khoá, lập dàn ý, viết nháp, tạo bản nháp WordPress. Không tự đăng, không tự duyệt việc sửa site.", state: hq.autopilot.sites.length ? "working" : "idle", detail: hq.autopilot.sites.length ? hq.autopilot.sites.map((x) => `${x.domain}: ${x.lastStep || "chưa chạy"}`).join(" · ") : "Chưa site nào bật. Bật ở Phục hồi › ca của site › Luật an toàn.", last: hq.autopilot.last };
   const zone = (key) => {
     const [, title, desc] = ZONES.find((z) => z[0] === key);
-    const leadCard = { id: "lead", name: "Trưởng nhóm", icon: "spark", role: "Anh chat trực tiếp: Trưởng nhóm đọc tình trạng thật của các site, trả lời và đề xuất phương án giao cho agent sẵn có. Anh chọn việc rồi bấm Giao việc.", state: hq.lead.blockedPrompt ? "blocked" : hq.lead.running ? "working" : hq.lead.queued ? "waiting" : "idle", detail: `${hq.lead.queued} việc chờ · ${hq.lead.running} đang chạy · ${hq.lead.done} xong${hq.lead.failed ? ` · ${hq.lead.failed} lỗi` : ""}`, spend: hq.lead.spend, last: hq.lead.last };
+    const leadCard = leadOf(hq);
     const agents = key === "manager" ? [leadCard, manager] : key === "auto" ? [auto] : hq.zones[key];
-    return `<section class="zone z-${key}"><header><b>${esc(title)}</b><small>${esc(desc)}</small></header><div class="zone-grid">${agents.map((a) => agentCard(a, a.id === "lead" ? "#/hq/lead" : key === "recovery" ? "#/recovery" : key === "content" ? "#/content" : key === "manager" ? "#/hq/prompts" : null)).join("")}</div></section>`;
+    return `<section class="zone z-${key}"><header><b>${esc(title)}</b><small>${esc(desc)}</small></header><div class="zone-grid">${agents.map((a) => agentCard(a, HREF(a, key))).join("")}</div></section>`;
   };
-  return `<div class="hq-floor">${zone("manager")}${zone("auto")}${zone("recovery")}${zone("content")}</div>
+  const mode = K.state.hqView || (window.matchMedia("(max-width: 720px)").matches ? "cards" : "3d");
+  return `<div class="hq-view-toggle" role="group" aria-label="Kiểu xem">
+      <button type="button" data-hq-view="3d" aria-pressed="${mode === "3d"}">Văn phòng 3D</button>
+      <button type="button" data-hq-view="cards" aria-pressed="${mode === "cards"}">Dạng thẻ</button>
+    </div>
+    <div class="hq-team v-${mode}">
+      ${officeHtml(hq, { manager, auto, lead: leadOf(hq) })}
+      <div class="hq-floor">${zone("manager")}${zone("auto")}${zone("recovery")}${zone("content")}</div>
+    </div>
     <h3 class="sub">${K.icon(K.ICON.list)}Agent vừa làm</h3>
     ${hq.recent.length ? `<div class="activity">${hq.recent.map((r) => `<a href="#/activity"><span><b>${esc(ACTOR[r.actor.replace("agent:", "")] || r.actor)}</b> · ${esc(r.detail || r.action)}</span><time>${esc(fmtTime(r.at))}</time></a>`).join("")}</div>` : `<p class="note">Chưa có hoạt động của agent.</p>`}`;
 }

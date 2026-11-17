@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Duy Ơi Connector
  * Description: Cho app Duy Ơi đọc và sửa "phẫu thuật" nội dung SEO (post_content, Elementor, Rank Math) qua REST API, có kiểm tra khớp đúng 1 chỗ, xoá cache và khôi phục.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Requires PHP: 7.4
  * Author: Duy Ơi
  * License: GPLv2 or later
@@ -15,7 +15,7 @@ if (!defined('ABSPATH') && !defined('DUYOI_TEST')) {
     exit;
 }
 
-const DUYOI_VERSION = '1.1.0';
+const DUYOI_VERSION = '1.2.0';
 const DUYOI_META_KEYS = ['rank_math_title', 'rank_math_description', 'rank_math_focus_keyword'];
 
 // ---------------------------------------------------------------------------
@@ -73,10 +73,29 @@ function duyoi_wrap_block($s, $html)
 function duyoi_apply_edit($s, array $e)
 {
     $find = isset($e['find']) ? (string) $e['find'] : '';
+    $mode = isset($e['mode']) ? $e['mode'] : 'replace';
+    // Đổi link affiliate: thay URL cũ trong thuộc tính href (mọi chỗ), chỉ URL https sang URL https
+    if ($mode === 'swap_url') {
+        $replace = isset($e['replace']) ? (string) $e['replace'] : '';
+        if (!preg_match('#^https://\S+$#', $find) || !preg_match('#^https://[^\s"<>]+$#', $replace)) {
+            return null;
+        }
+        $n = 0;
+        $out = str_replace('href="' . $find . '"', 'href="' . $replace . '"', $s, $n);
+        return $n > 0 ? $out : null;
+    }
     if ($find === '' || duyoi_count($s, $find) !== 1) {
         return null;
     }
-    $mode = isset($e['mode']) ? $e['mode'] : 'replace';
+    // Gắn link affiliate: chỉ được bọc chữ có sẵn bằng thẻ <a rel="sponsored">, chữ phải giữ nguyên
+    if ($mode === 'wrap_link') {
+        $replace = isset($e['replace']) ? (string) $e['replace'] : '';
+        if (strip_tags($replace) !== strip_tags($find) || strpos($replace, 'rel="sponsored') === false || preg_match('#<(?!/?a\b)[a-z]#i', str_replace($find, '', $replace))) {
+            return null;
+        }
+        $at = strpos($s, $find);
+        return substr($s, 0, $at) . $replace . substr($s, $at + strlen($find));
+    }
     $at = strpos($s, $find);
     if ($mode === 'replace') {
         $replace = isset($e['replace']) ? (string) $e['replace'] : '';
@@ -132,6 +151,23 @@ function duyoi_apply_all($content, array $edits, $is_elementor)
     foreach ($edits as $i => $e) {
         $n = $i + 1;
         $find = isset($e['find']) ? (string) $e['find'] : '';
+        if (isset($e['mode']) && $e['mode'] === 'swap_url') {
+            $hit = 0;
+            if ($is_elementor) {
+                duyoi_el_walk($content, function (&$v) use ($e, &$hit) {
+                    $new = duyoi_apply_edit($v, $e);
+                    if ($new !== null) { $v = $new; $hit++; }
+                });
+            } else {
+                $new = duyoi_apply_edit($content, $e);
+                if ($new !== null) { $content = $new; $hit++; }
+            }
+            if (!$hit) {
+                return ['ok' => false, 'changes' => 0, 'error' => "Sửa #$n: không còn link cũ để thay."];
+            }
+            $changes++;
+            continue;
+        }
         if ($is_elementor) {
             $total = 0;
             duyoi_el_walk($content, function (&$v) use ($find, &$total) {
@@ -281,7 +317,7 @@ add_action('rest_api_init', function () {
                 'elementor' => defined('ELEMENTOR_VERSION'),
                 'rankmath' => class_exists('RankMath'),
                 'flyingpress' => class_exists('\FlyingPress\Purge'),
-                'features' => ['post', 'apply', 'restore', 'create'],
+                'features' => ['post', 'apply', 'restore', 'create', 'wrap_link', 'swap_url'],
             ];
         },
     ]);

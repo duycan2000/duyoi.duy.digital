@@ -988,6 +988,124 @@ export const collections = { blog, pages };`;
   }
 });
 
+await test("link affiliate cho bài đã đăng: thư viện, rà bài, chỉ bọc chữ có sẵn, câu công khai, Gác cổng, duyệt >3 trang, WordPress + hoàn tác, Astro PR, đổi link cũ", async () => {
+  const wp = { user: "duy", pass: "abcd efgh ijkl mnop" };
+  const envA = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const cA = client(envA);
+  await cA("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ wp });
+  try {
+    const cr = await cA("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/"], blocklist: ["3DScan"] } });
+    const siteId = (await cA("GET", `/api/recovery/${cr.data.id}`)).data.case.siteId;
+    await cA("PUT", `/api/sites/${siteId}/wp`, { wpUser: wp.user, appPassword: wp.pass });
+    const base = `/api/sites/${siteId}/affiliate`;
+    assert.equal((await cA("POST", `${base}/scan`, {})).status, 409, "chưa có link");
+    assert.equal((await cA("POST", `${base}/links`, { name: "Maschinenbau-Paket", url: "http://x.de" })).status, 400, "chỉ nhận https");
+    const l1 = await cA("POST", `${base}/links`, { name: "Maschinenbau-Paket", aliases: "Maschinenbau", url: "https://amzn.to/mb1", merchant: "Amazon" });
+    assert.equal(l1.status, 201);
+    await cA("POST", `${base}/links`, { name: "3DScan Kit", url: "https://partner.example/3d" });
+    let sc = await cA("POST", `${base}/scan`, { buttons: true });
+    assert.equal(sc.status, 200, JSON.stringify(sc.data));
+    let d = (await cA("GET", base)).data;
+    const inv = d.edits.filter((e) => e.page.endsWith("/inventor-vs-solidworks/"));
+    const link = inv.find((e) => e.kind === "link");
+    assert.equal(link.find, "Beide Programme sind gut für den Maschinenbau geeignet und weit verbreitet in Deutschland.");
+    assert.equal(link.replace, 'Beide Programme sind gut für den <a href="https://amzn.to/mb1" rel="sponsored nofollow noopener" target="_blank">Maschinenbau</a> geeignet und weit verbreitet in Deutschland.');
+    assert.equal(link.replace.replace(/<[^>]+>/g, ""), link.find, "chỉ bọc chữ, không đổi câu");
+    assert.ok(link.gate.problems.some((p) => p.rule === "amazon"), "cảnh báo link Amazon");
+    assert.ok(inv.some((e) => e.kind === "button" && /Bei Amazon ansehen/.test(e.replace)));
+    assert.ok(inv.some((e) => e.kind === "disclosure"), "bài chưa có câu công khai");
+    assert.ok(!d.edits.some((e) => e.page.includes("referenzen") && e.kind === "link" && e.gate.ok), "sản phẩm trong danh sách cấm không được duyệt");
+    // Gác cổng chặn thì không duyệt được
+    const blocked = d.edits.find((e) => e.gate && !e.gate.ok);
+    if (blocked) { await cA("PUT", `${base}/edits`, { ids: [blocked.id], status: "approved" }); assert.equal((await cA("GET", base)).data.edits.find((e) => e.id === blocked.id).status, "proposed"); }
+    await cA("PUT", `${base}/edits`, { ids: inv.map((e) => e.id), status: "approved" });
+    let ap = await cA("POST", `${base}/apply`, {});
+    assert.equal(ap.status, 200, JSON.stringify(ap.data));
+    assert.equal(ap.data.applied, 3);
+    const live = await (await fakeFetchText("https://caddemo.de/inventor-vs-solidworks/"));
+    assert.match(live, /<p class="affiliate-disclosure"><em>[^<]+<\/em><\/p><h2>Kurz<\/h2>|affiliate-disclosure/);
+    assert.match(live, /für den <a href="https:\/\/amzn\.to\/mb1" rel="sponsored nofollow noopener" target="_blank">Maschinenbau<\/a> geeignet/);
+    assert.match(live, /class="buy-buttons"/);
+    const applyCall = wp.calls.filter((c) => c.route === "/apply");
+    assert.equal(applyCall[0].body.dry_run, true, "thử trước");
+    assert.deepEqual(applyCall[1].body.edits.map((e) => e.mode).sort(), ["after_block", "before_block", "wrap_link"]);
+    d = (await cA("GET", base)).data;
+    assert.equal(d.applies[0].status, "applied");
+    // Hoàn tác
+    assert.equal((await cA("POST", `${base}/applies/${d.applies[0].id}/rollback`)).status, 200);
+    assert.doesNotMatch(await fakeFetchText("https://caddemo.de/inventor-vs-solidworks/"), /amzn\.to\/mb1/);
+    // Nhiều hơn 3 trang một lần: phải xác nhận
+    await cA("POST", `${base}/links`, { name: "Planungs-Tool", aliases: "Planung", url: "https://partner.example/plan" });
+    sc = await cA("POST", `${base}/scan`, {});
+    d = (await cA("GET", base)).data;
+    const many = d.edits.filter((e) => e.gate.ok && e.kind !== "disclosure");
+    assert.ok(new Set(many.map((e) => e.page)).size > 3, "nhiều trang có lần nhắc");
+    await cA("PUT", `${base}/edits`, { ids: many.map((e) => e.id), status: "approved" });
+    ap = await cA("POST", `${base}/apply`, {});
+    assert.equal(ap.status, 409);
+    assert.equal(ap.data.error, "confirm_bulk");
+    // Đổi link: đề xuất thay URL cũ ở bài đã có link
+    await cA("PUT", `${base}/edits`, { ids: many.filter((e) => e.page.endsWith("/inventor-vs-solidworks/")).map((e) => e.id), status: "approved" });
+    await cA("PUT", `${base}/edits`, { ids: many.filter((e) => !e.page.endsWith("/inventor-vs-solidworks/")).map((e) => e.id), status: "rejected" });
+    ap = await cA("POST", `${base}/apply`, {});
+    assert.equal(ap.status, 200, JSON.stringify(ap.data));
+    const ch = await cA("PUT", `${base}/links/${l1.data.id}`, { name: "Maschinenbau-Paket", aliases: "Maschinenbau", url: "https://amzn.to/mb2", merchant: "Amazon" });
+    assert.equal(ch.data.urlChanged, true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  async function fakeFetchText(u) { return (await globalThis.fetch(u)).text(); }
+});
+
+await test("link affiliate trên site Astro: rà file Markdown trong repo, mở pull request, đổi link cũ", async () => {
+  const envB = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const cB = client(envB);
+  await cB("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await cB("PUT", "/api/settings", { secrets: { github_token: "gh-token" } });
+  const cfg = `import { defineCollection, z } from "astro:content";\nconst blog = defineCollection({ loader: glob({ base: "./src/content/blog", pattern: "**/*.md" }), schema: z.object({ title: z.string(), pubDate: z.coerce.date() }) });\nexport const collections = { blog };`;
+  const ghState = { token: "gh-token", repo: "duycan2000/caddemo", prs: [], commits: 0, checks: () => [], branches: { main: {
+    "src/content.config.ts": cfg,
+    "src/content/blog/best-drills.md": `---\ntitle: "Beste Akkuschrauber"\npubDate: 2025-01-01\n---\n\nWir haben den Bosch PSR 18 drei Monate in der Werkstatt benutzt und waren zufrieden.\n\nMehr bei [Amazon](https://amzn.to/old1).\n`,
+    "src/content/blog/other.md": `---\ntitle: "Anderes"\npubDate: 2025-01-01\n---\n\nKein Produkt hier erwähnt, nur allgemeine Tipps.\n`
+  } } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ gh: ghState });
+  try {
+    const cr = await cB("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/"] } });
+    const siteId = (await cB("GET", `/api/recovery/${cr.data.id}`)).data.case.siteId;
+    await cB("PUT", `/api/sites/${siteId}`, { platform: "astro", repo: "duycan2000/caddemo" });
+    const base = `/api/sites/${siteId}/affiliate`;
+    await cB("POST", `${base}/links`, { name: "Bosch PSR 18", url: "https://amzn.to/old1", merchant: "Amazon" });
+    assert.equal((await cB("POST", `${base}/scan`, {})).status, 409, "chưa có hồ sơ đăng bài");
+    assert.equal((await cB("POST", `/api/sites/${siteId}/publish/detect`)).status, 200);
+    let d = (await cB("GET", base)).data;
+    const id = d.links[0].id;
+    await cB("PUT", `${base}/links/${id}`, { name: "Bosch PSR 18", url: "https://amzn.to/new1", merchant: "Amazon" });
+    const sc = await cB("POST", `${base}/scan`, {});
+    assert.equal(sc.status, 200, JSON.stringify(sc.data));
+    d = (await cB("GET", base)).data;
+    assert.deepEqual(d.edits.map((e) => e.kind).sort(), ["disclosure", "link", "replace_url"]);
+    assert.ok(d.edits.every((e) => e.page === "src/content/blog/best-drills.md"));
+    await cB("PUT", `${base}/edits`, { ids: d.edits.map((e) => e.id), status: "approved" });
+    const ap = await cB("POST", `${base}/apply`, {});
+    assert.equal(ap.status, 200, JSON.stringify(ap.data));
+    assert.equal(ap.data.prs.length, 1);
+    assert.equal(ap.data.failed, 0);
+    const br = Object.keys(ghState.branches).find((b) => b.startsWith("duyoi/affiliate-"));
+    const out = ghState.branches[br]["src/content/blog/best-drills.md"];
+    assert.match(out, /Wir haben den <a href="https:\/\/amzn\.to\/new1" rel="sponsored nofollow noopener" target="_blank">Bosch PSR 18<\/a> drei Monate/);
+    assert.match(out, /\(https:\/\/amzn\.to\/new1\)/);
+    assert.doesNotMatch(out, /old1/);
+    assert.match(out, /^---\n[\s\S]*?\n---\n\n<p class="affiliate-disclosure">/);
+    assert.equal(ghState.branches.main["src/content/blog/best-drills.md"].includes("new1"), false, "không đẩy thẳng lên nhánh chính");
+    assert.match(ghState.prs.at(-1).body, /best-drills\.md/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 await test("đường dẫn không phải /api trả giao diện (SPA)", async () => {
   const res = await worker.fetch(new Request(BASE + "/sites/12"), env);
   assert.equal(res.status, 200);

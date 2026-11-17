@@ -64,10 +64,12 @@ export function fakeSite(opts = {}) {
       if (body.expected_modified && body.expected_modified !== p.modified) return jsonRes({ code: "conflict", message: "Bài vừa được sửa ở nơi khác" }, 409);
       let h = pages[path].body;
       for (const [i, e] of (body.edits || []).entries()) {
+        if (e.mode === "swap_url") { if (!h.includes(`href="${e.find}"`)) return jsonRes({ code: "no_match", message: "không còn link cũ" }, 422); h = h.split(`href="${e.find}"`).join(`href="${e.replace}"`); continue; }
         const n = count(h, e.find);
         if (n !== 1) return jsonRes({ code: "no_match", message: `Sửa #${i + 1}: đoạn gốc khớp ${n} lần` }, 422);
         const at = h.indexOf(e.find);
-        if (e.mode === "replace") { if (!e.replace.includes(e.find)) return jsonRes({ code: "no_match", message: "mất chữ gốc" }, 422); h = h.slice(0, at) + e.replace + h.slice(at + e.find.length); }
+        if (e.mode === "wrap_link") { if (e.replace.replace(/<[^>]+>/g, "") !== e.find.replace(/<[^>]+>/g, "") || !e.replace.includes('rel="sponsored')) return jsonRes({ code: "no_match", message: "đổi chữ" }, 422); h = h.slice(0, at) + e.replace + h.slice(at + e.find.length); }
+        else if (e.mode === "replace") { if (!e.replace.includes(e.find)) return jsonRes({ code: "no_match", message: "mất chữ gốc" }, 422); h = h.slice(0, at) + e.replace + h.slice(at + e.find.length); }
         else if (e.mode === "after_block") { const pos = blockEnd(h, at + e.find.length); h = h.slice(0, pos) + e.insert + h.slice(pos); }
         else { const pos = blockStart(h, at); h = h.slice(0, pos) + e.insert + h.slice(pos); }
       }

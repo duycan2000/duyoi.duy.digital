@@ -11,7 +11,7 @@ export interface WpPost {
   content: string; elementor: boolean; elementor_data: string | null; meta: Record<string, unknown>;
 }
 
-export interface WpEdit { find: string; replace?: string; insert?: string; mode: "replace" | "after_block" | "before_block" }
+export interface WpEdit { find: string; replace?: string; insert?: string; mode: "replace" | "after_block" | "before_block" | "wrap_link" | "swap_url" }
 
 interface SiteRow { id: number; domain: string; platform: string; wp_user: string | null }
 

@@ -34,5 +34,16 @@ $el2 = $el; $el2[0]['elements'][] = ['id' => 'd', 'elType' => 'widget', 'setting
 ok(!duyoi_apply_all($el2, [['find' => 'Die Symbole erzeugen Darstellungen.', 'replace' => 'Die Symbole erzeugen Darstellungen. X']], true)['ok'], 'Elementor: khớp ở 2 widget thì từ chối');
 $multi = duyoi_apply_all($html, [['find' => 'Erster Satz.', 'replace' => 'Erster Satz. A.'], ['find' => 'Anderer Absatz.', 'replace' => 'Anderer Absatz. B.']], false);
 ok($multi['ok'] && $multi['changes'] === 2, 'nhiều sửa trên cùng bài');
+$aff = "<p>Wir nutzen Planwerk Pro seit Jahren im Büro.</p><p>Mehr: <a href=\"https://amzn.to/old\">hier</a> und <a href=\"https://amzn.to/old\">da</a>.</p>";
+$r = duyoi_apply_edit($aff, ['find' => 'Wir nutzen Planwerk Pro seit Jahren im Büro.', 'mode' => 'wrap_link', 'replace' => 'Wir nutzen <a href="https://amzn.to/x" rel="sponsored nofollow noopener" target="_blank">Planwerk Pro</a> seit Jahren im Büro.']);
+ok(strpos($r, '<a href="https://amzn.to/x" rel="sponsored nofollow noopener" target="_blank">Planwerk Pro</a> seit') !== false, 'wrap_link: bọc chữ có sẵn bằng link sponsored');
+ok(duyoi_apply_edit($aff, ['find' => 'Wir nutzen Planwerk Pro seit Jahren im Büro.', 'mode' => 'wrap_link', 'replace' => 'Wir lieben <a href="https://amzn.to/x" rel="sponsored">Planwerk Pro</a> seit Jahren im Büro.']) === null, 'wrap_link: từ chối khi đổi chữ');
+ok(duyoi_apply_edit($aff, ['find' => 'Wir nutzen Planwerk Pro seit Jahren im Büro.', 'mode' => 'wrap_link', 'replace' => 'Wir nutzen <a href="https://amzn.to/x">Planwerk Pro</a> seit Jahren im Büro.']) === null, 'wrap_link: từ chối link không có rel=sponsored');
+ok(duyoi_apply_edit($aff, ['find' => 'Wir nutzen Planwerk Pro seit Jahren im Büro.', 'mode' => 'wrap_link', 'replace' => 'Wir nutzen <a href="https://amzn.to/x" rel="sponsored">Planwerk Pro</a> seit Jahren im Büro.<script>x</script>']) === null, 'wrap_link: từ chối thẻ lạ');
+$r = duyoi_apply_edit($aff, ['find' => 'https://amzn.to/old', 'mode' => 'swap_url', 'replace' => 'https://amzn.to/new']);
+ok(substr_count($r, 'href="https://amzn.to/new"') === 2 && strpos($r, 'old') === false, 'swap_url: thay URL cũ ở mọi href');
+ok(duyoi_apply_edit($aff, ['find' => 'https://amzn.to/old', 'mode' => 'swap_url', 'replace' => 'javascript:alert(1)']) === null, 'swap_url: chỉ nhận URL https');
+$sw = duyoi_apply_all($aff, [['find' => 'https://amzn.to/old', 'mode' => 'swap_url', 'replace' => 'https://amzn.to/new']], false);
+ok($sw['ok'] && substr_count($sw['content'], 'amzn.to/new') === 2, 'swap_url qua apply_all: thay cả 2 chỗ');
 echo $fail ? "\n$fail test lỗi.\n" : "\nTất cả test PHP đạt.\n";
 exit($fail ? 1 : 0);

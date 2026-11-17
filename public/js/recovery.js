@@ -2,6 +2,7 @@
 
 import { api } from "./api.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData } from "./ui.js";
+import { mountAffiliate } from "./affiliate.js";
 
 let K; // các tiện ích dùng chung từ app.js: state, icon, ICON, tabsNav, panelAttr, bindTabs
 let CTX = { caseId: 0, siteId: 0, wp: false, backups: [] };
@@ -167,18 +168,20 @@ async function viewCase(main, id) {
       <progress max="${Math.max(1, c.pagesTotal)}" value="${c.pagesDone}"></progress>
       <p class="note">${c.pagesDone}/${c.pagesTotal || "?"} trang. Trang này tự cập nhật; anh có thể rời đi, việc quét vẫn chạy nền.</p></div>` : ""}
     <div class="card tabbed">
-      ${K.tabsNav("rec", [["diag", "Chẩn đoán", "spark"], ["tasks", `Việc của agent (${openTasks})`, "list"], ["findings", `Vấn đề (${findings.length})`, "shield"], ["pages", `Trang (${pages.length})`, "globe"], ["content", `Bài mới${content ? ` (${content.ideas.filter((i) => ["approved", "briefed", "drafted"].includes(i.status)).length})` : ""}`, "pen"], ["rules", "Luật an toàn", "sliders"], ["links", "Liên kết ngoài", "link"]], "diag")}
+      ${K.tabsNav("rec", [["diag", "Chẩn đoán", "spark"], ["tasks", `Việc của agent (${openTasks})`, "list"], ["findings", `Vấn đề (${findings.length})`, "shield"], ["pages", `Trang (${pages.length})`, "globe"], ["content", `Bài mới${content ? ` (${content.ideas.filter((i) => ["approved", "briefed", "drafted"].includes(i.status)).length})` : ""}`, "pen"], ["aff", "Link affiliate", "link"], ["rules", "Luật an toàn", "sliders"], ["links", "Liên kết ngoài", "link"]], "diag")}
       <div class="tab-body" ${K.panelAttr("rec", "diag", "diag")}>${diagHtml(c, d, findings, agents, tasks)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "tasks", "diag")}>${tasksHtml(tasks, agents, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "findings", "diag")}>${findingsHtml(findings)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "pages", "diag")}>${pagesHtml(pages)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "content", "diag")}>${content ? contentHtml(c, content, canEdit) : `<p class="note">Chưa có dữ liệu.</p>`}</div>
+      <div class="tab-body" id="aff-panel" ${K.panelAttr("rec", "aff", "diag")}><p class="note">Đang tải…</p></div>
       <div class="tab-body" ${K.panelAttr("rec", "rules", "diag")}>${rulesHtml(c, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "links", "diag")}>${linksHtml(c, canEdit)}</div>
     </div>
   </div>`;
   K.bindTabs(main, "rec");
   bindCase(main, c, canEdit);
+  mountAffiliate($("#aff-panel", main), c.siteId, canEdit);
   if (running) {
     const hash = location.hash;
     setTimeout(() => { if (location.hash === hash && document.contains(main)) viewCase(main, id).catch(() => {}); }, 3000);

@@ -155,6 +155,19 @@ Khi bài qua Gác cổng: bấm **Xem file sẽ đăng** hoặc **Tạo pull req
 
 Cần **GitHub fine-grained token** chỉ cho các repo site, quyền Contents và Pull requests (Read and write), nhập ở Cài đặt › API key.
 
+### Link affiliate cho bài đã đăng
+
+Ca phục hồi của site › tab **Link affiliate**:
+
+1. **Thư viện link**: mỗi sản phẩm một dòng (tên, tên gọi khác, link https, cửa hàng).
+2. **Rà bài đã đăng**: WordPress đọc tối đa 40 trang đã quét; Astro đọc file `.md/.mdx` trong thư mục bài của hồ sơ đăng bài. Với mỗi sản phẩm, agent tìm lần nhắc đầu tiên chưa có link và chỉ **bọc đúng chữ đó** bằng `<a rel="sponsored nofollow noopener">`, không đổi câu. Bài chưa có câu công khai (Werbung, affiliate, Provision…) thì đề xuất thêm câu công khai ở đầu bài; tuỳ chọn thêm nút mua sau đoạn nhắc. Tôn trọng `maxLinksPerPage` và blocklist (bị chặn thì không duyệt được); link Amazon có cảnh báo.
+3. Anh duyệt từng đề xuất hoặc **Duyệt tất cả**, rồi **Chèn vào site** (WordPress: thử trước, sao lưu, rồi ghi; **Hoàn tác** được) hoặc **Tạo pull request** (Astro, trên nhánh `duyoi/affiliate-…`, anh merge trên GitHub). Sửa hơn 3 trang một lần phải bấm xác nhận lần hai.
+4. **Đổi link**: sửa URL trong thư viện, app giữ URL cũ; bấm Rà bài để đề xuất thay URL cũ ở mọi bài (WordPress chỉ thay trong `href`, Astro thay cả link Markdown).
+
+Cần plugin Duy Ơi Connector **1.2.0** trở lên (thêm chế độ `wrap_link` và `swap_url`; plugin từ chối nếu chữ bị đổi, thiếu `rel="sponsored"`, có thẻ lạ hoặc URL không phải https). Anh tải lại `/duyoi-connector.zip` và cập nhật plugin trên từng site.
+
+Tab **Đội agent** trong Agent HQ có thêm **Văn phòng 3D**: mỗi agent một bàn trong 4 phòng; đang làm thì chuyển động, có việc chờ hiện dấu "!", bị chặn hiện đỏ, rảnh thì mờ. Bấm bàn để xem chi tiết; nút **Dạng thẻ** quay lại kiểu cũ (điện thoại mặc định dạng thẻ).
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.
@@ -198,6 +211,7 @@ src/
   dashboard.ts   tổng quan, tạm dừng, cron
   activity.ts    nhật ký
   http.ts        JSON, cookie, chặn CSRF, kiểm tra dữ liệu
+  affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request
 migrations/      schema D1
 public/          giao diện (static assets, không tính request Worker)
 tests/           test API và máy chủ chạy thử
