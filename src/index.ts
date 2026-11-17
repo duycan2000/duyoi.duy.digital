@@ -10,7 +10,7 @@ import { createUser, deleteUser, listUsers, resetUserPassword, updateUser } from
 import { aiRewriteTask, applyTask, archiveCase, createCase, decideTask, disavow, geoDraft, getCase, listCases, processRecoveryQueue, rescanCase, rollbackTask, updateRules } from "./recovery";
 import { wpSave, wpStatus, wpTest } from "./wordpress";
 import { listPrompts, reviewPrompt, spendReport } from "./manager";
-import { apiBrief, apiDraft, apiIdeaStatus, apiResearch, apiWpDraft, contentView } from "./content";
+import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
@@ -82,16 +82,21 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (path === "/api/manager/spend" && m === "GET") return spendReport(env);
 
   // Đội Nội dung
-  const ctMatch = path.match(/^\/api\/content\/(\d+)(\/research)?$/);
+  const ctMatch = path.match(/^\/api\/content\/(\d+)(\/research|\/ideas)?$/);
   if (ctMatch && !ctMatch[2] && m === "GET") return contentView(env, Number(ctMatch[1]));
-  if (ctMatch && ctMatch[2] && m === "POST") return apiResearch(env, user, Number(ctMatch[1]));
-  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp))?$/);
+  if (ctMatch && ctMatch[2] === "/research" && m === "POST") return apiResearch(env, user, Number(ctMatch[1]));
+  if (ctMatch && ctMatch[2] === "/ideas" && m === "POST") return apiCreateIdea(env, req, user, Number(ctMatch[1]));
+  const imgMatch = path.match(/^\/api\/content\/ideas\/(\d+)\/images\/([a-z0-9]{2,6})$/);
+  if (imgMatch && m === "POST") return apiUploadImage(env, req, user, Number(imgMatch[1]), imgMatch[2]!);
+  if (imgMatch && m === "DELETE") return apiDeleteImage(env, user, Number(imgMatch[1]), imgMatch[2]!);
+  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products))?$/);
   if (idMatch) {
     const iid = Number(idMatch[1]);
     if (!idMatch[2] && m === "PUT") return apiIdeaStatus(env, req, user, iid);
     if (idMatch[2] === "brief" && m === "POST") return apiBrief(env, user, iid);
     if (idMatch[2] === "draft" && m === "POST") return apiDraft(env, user, iid);
     if (idMatch[2] === "wp" && m === "POST") return apiWpDraft(env, user, iid);
+    if (idMatch[2] === "products" && m === "PUT") return apiProducts(env, req, user, iid);
   }
 
   // Phục hồi thứ hạng

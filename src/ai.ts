@@ -11,6 +11,7 @@ export interface AiRun {
   task: string;
   siteId: number | null;
   rules: string;             // luật viết chung (writingRules) chèn vào {{RULES}}
+  format?: string;           // khung định dạng (formatSpec) chèn vào {{FORMAT}}
   input: unknown;            // dữ liệu gửi kèm (JSON)
 }
 
@@ -18,7 +19,7 @@ export async function aiJson<T>(env: Env, run: AiRun): Promise<T> {
   const t = PROMPTS.find((x) => x.id === run.template);
   if (!t) throw new HttpError(500, `Prompt ${run.template} không có trong danh mục.`, "no_prompt");
   const { version, ok } = await promptApproved(env, t);
-  const system = t.system.replace("{{RULES}}", run.rules);
+  const system = t.system.replace("{{FORMAT}}", run.format || "").replace("{{RULES}}", run.rules);
   const user = JSON.stringify(run.input);
   const settings = await getSettingsMap(env);
   const model = String(settings[t.tier] || "deepseek/deepseek-v4-pro");
@@ -68,7 +69,7 @@ export function writingRules(language: string, allowedNumbers: string[], blockli
     `Write ONLY in ${LANG_NAME[language] || language}. Never mix in another language.`,
     "Do NOT invent facts. Do NOT write any number, price, percentage, duration, project count or statistic"
       + (allowedNumbers.length ? ` except these verified ones, copied exactly: ${allowedNumbers.slice(0, 30).join(" | ")}.` : "."),
-    "No superlatives you cannot prove (best, #1, guaranteed). No 'click here'. No placeholders, brackets or editorial notes in the text.",
+    "No superlatives you cannot prove (#1, guaranteed, number one). No 'click here'. No placeholders, brackets or editorial notes in the text, except the [[...]] tokens a FORMAT asks for.",
     blocklist.length ? `Never mention these names or terms in any form: ${blocklist.join(", ")}.` : "",
     "Reply with a single JSON object only."
   ].filter(Boolean).join("\n");

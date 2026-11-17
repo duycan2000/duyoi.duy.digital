@@ -49,6 +49,29 @@ export async function wpCall<T>(env: Env, siteId: number, path: string, init: { 
   return data as T;
 }
 
+// Tải ảnh lên Thư viện Media qua REST API lõi của WordPress (cùng Application Password)
+export async function wpMedia(env: Env, siteId: number, file: { bytes: Uint8Array; type: string; filename: string; alt: string; caption: string }): Promise<{ id: number; url: string; width: number | null; height: number | null }> {
+  const site = await siteOf(env, siteId);
+  const pass = await readSiteSecret(env, siteId);
+  if (!site.wp_user || !pass) throw new HttpError(400, "Site chưa kết nối WordPress: kết nối ở Site › Kết nối WordPress để tải ảnh lên.", "wp_not_connected");
+  const auth = b64(new TextEncoder().encode(`${site.wp_user}:${pass}`));
+  const q = new URLSearchParams({ alt_text: file.alt, caption: file.caption, title: file.alt.slice(0, 80) });
+  let res: Response;
+  try {
+    res = await fetch(`https://${site.domain}/wp-json/wp/v2/media?${q}`, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": file.type, "Content-Disposition": `attachment; filename="${file.filename}"`, Accept: "application/json", "User-Agent": "DuyOi/1.0" },
+      body: file.bytes.slice().buffer as ArrayBuffer,
+      signal: AbortSignal.timeout(45000)
+    });
+  } catch (e) {
+    throw new HttpError(502, `Không gửi được ảnh lên WordPress: ${(e as Error).message}`, "wp_unreachable");
+  }
+  const data = (await res.json().catch(() => ({}))) as { id?: number; source_url?: string; message?: string; media_details?: { width?: number; height?: number } };
+  if (!res.ok || !data.id || !data.source_url) throw new HttpError(502, `WordPress không nhận ảnh: ${data.message || res.status}. User cần quyền tải file (Author/Editor).`, "wp_media");
+  return { id: data.id, url: data.source_url, width: data.media_details?.width ?? null, height: data.media_details?.height ?? null };
+}
+
 export const wpGetPost = (env: Env, siteId: number, url: string) => wpCall<WpPost>(env, siteId, `/post?url=${encodeURIComponent(url)}`);
 
 export const wpApply = (env: Env, siteId: number, body: { id: number; expected_modified: string; edits: WpEdit[]; meta: Record<string, string>; dry_run?: boolean }) =>

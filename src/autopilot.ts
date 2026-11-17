@@ -6,6 +6,7 @@ import { logActivity } from "./activity";
 import { approveIdeaCore, briefCore, draftCore, getAuto, researchCore, setAuto, wpDraftCore } from "./content";
 import { aiRewriteCore, applyCore, processCase, resetForRescan } from "./recovery";
 import { readRules } from "./recovery-rules";
+import { formatOf, readProducts } from "./formats";
 import { getSettingsMap } from "./settings";
 import type { Env } from "./types";
 
@@ -73,21 +74,27 @@ async function step(env: Env, c: CaseLite): Promise<void> {
     await researchCore(env, c.id, "agent:research");
     return done("nghiên cứu từ khoá");
   }
-  // 6. Tự duyệt chủ đề tốt nhất (nếu bật), trong giới hạn bài/tháng
+  // 6. Tự duyệt chủ đề tốt nhất (nếu bật), trong giới hạn bài/tháng. Site affiliate không cần trang dịch vụ đích.
   if (rules.autoApproveIdeas) {
-    const best = await env.DB.prepare("SELECT id FROM content_ideas WHERE site_id = ? AND status = 'idea' AND covered_by IS NULL AND hub_path IS NOT NULL ORDER BY score DESC LIMIT 1").bind(c.site_id).first<{ id: number }>();
+    const best = await env.DB.prepare("SELECT i.id FROM content_ideas i JOIN sites s ON s.id = i.site_id WHERE i.site_id = ? AND i.status = 'idea' AND i.covered_by IS NULL AND (i.hub_path IS NOT NULL OR s.site_type = 'affiliate') ORDER BY i.score DESC LIMIT 1").bind(c.site_id).first<{ id: number }>();
     if (best) {
       try { await approveIdeaCore(env, best.id, "agent:planner"); return done("duyệt chủ đề"); } catch { /* hết giới hạn tháng: bỏ qua */ }
     }
   }
-  // 7. Chủ đề đã duyệt → dàn ý; dàn ý → bài nháp; bài nháp qua Gác cổng → bản nháp WordPress
-  const next = await env.DB.prepare("SELECT id, status, gate, wp_post_id FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted') ORDER BY updated_at LIMIT 10").bind(c.site_id).all<{ id: number; status: string; gate: string | null; wp_post_id: number | null }>();
-  const a = next.results.find((x) => x.status === "approved");
+  // 7. Chủ đề đã duyệt → dàn ý → bài nháp → bản nháp WordPress. Bài cần sản phẩm/ảnh thật thì chờ anh, làm bài khác.
+  const next = await env.DB.prepare("SELECT id, status, format, products, gate, wp_post_id FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted') ORDER BY updated_at LIMIT 20").bind(c.site_id).all<{ id: number; status: string; format: string; products: string | null; gate: string | null; wp_post_id: number | null }>();
+  const hasProducts = (x: { format: string; products: string | null }) => readProducts(x.products).items.length >= formatOf(x.format).minProducts;
+  const waiting: string[] = [];
+  const a = next.results.find((x) => x.status === "approved" && hasProducts(x));
   if (a) { await briefCore(env, a.id, "agent:planner"); return done("lập dàn ý"); }
+  if (next.results.some((x) => x.status === "approved" && !hasProducts(x))) waiting.push("chờ anh nhập sản phẩm");
   const b = next.results.find((x) => x.status === "briefed");
   if (b) { await draftCore(env, b.id, "agent:writer"); return done("viết bài nháp"); }
   const hasWp = await env.DB.prepare("SELECT 1 FROM secrets WHERE key = ?").bind(`wp:${c.site_id}`).first();
-  const d = next.results.find((x) => x.status === "drafted" && !x.wp_post_id && x.gate && JSON.parse(x.gate).ok);
+  const gateOf = (x: { gate: string | null }) => (x.gate ? JSON.parse(x.gate) as { ok: boolean; problems: { rule: string; level: string }[] } : null);
+  const d = next.results.find((x) => x.status === "drafted" && !x.wp_post_id && gateOf(x)?.ok);
   if (d && hasWp) { await wpDraftCore(env, d.id, "agent:writer"); return done("tạo bản nháp WordPress"); }
+  if (next.results.some((x) => x.status === "drafted" && !x.wp_post_id && gateOf(x)?.problems.some((p) => p.rule === "images" && p.level === "block"))) waiting.push("chờ anh tải ảnh thật");
+  if (waiting.length) return done(waiting.join(", "));
   return done("không có việc");
 }

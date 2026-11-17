@@ -112,6 +112,15 @@ Menu **Agent HQ** hiện đội agent theo khu (Điều hành, Tự động, Ph�
 
 Tab **Bài mới** trong ca phục hồi: bảng cấu trúc (mỗi trang dịch vụ có bao nhiêu bài dẫn link về), nghiên cứu từ khoá bằng DataForSEO (bỏ từ khoá điều hướng, blocklist, lượng tìm thấp; chủ đề đã có trang thì không viết mới), duyệt chủ đề trong giới hạn bài/tháng, lập dàn ý từ top Google và People Also Ask, viết nháp qua Gác cổng (blocklist, ngôn ngữ, số liệu không nguồn, tối thiểu 600 từ), rồi tạo **bản nháp** WordPress (plugin 1.1.0 trở lên). Không bao giờ tự đăng; chủ site thêm kinh nghiệm, ảnh thật và tác giả thật trước khi đăng.
 
+### Định dạng bài và ảnh thật
+
+Khi tạo bài (Content Studio hoặc tab **Bài mới**), chọn định dạng; app cũng tự đoán từ từ khoá: **Best X / Top N**, **Review 1 sản phẩm**, **So sánh X vs Y**, **How-to**, **Guide**, **Bài thông tin**. Khung từng định dạng nằm ở `src/formats.ts`, được ghép vào prompt qua `{{FORMAT}}` và tính vào phiên bản prompt (sửa khung là phải duyệt lại ở Agent HQ).
+
+- Bài affiliate: anh nhập sản phẩm (tên, link affiliate, nơi bán, nơi bán khác, thông số, ghi chú trải nghiệm, đã dùng thật chưa). Agent chỉ viết về sản phẩm anh nhập và không thấy URL. Hệ thống tự chèn câu công khai link affiliate trước link đầu tiên (sửa ở Luật an toàn) và nút mua có `rel="sponsored nofollow"`. Link ngoài do AI tự viết bị bỏ.
+- Gác cổng chặn bài nói "đã test" khi chưa sản phẩm nào được đánh dấu đã dùng thật, chặn review khi chưa có trải nghiệm thật, nhắc luật Amazon (câu Amazon Associate, không tải ảnh Amazon, không ghi giá cố định).
+- Ảnh thật: agent liệt kê ảnh cần có (mỗi sản phẩm, ảnh đang dùng, ảnh các bước how-to). Anh tải lên ở mục **Ảnh thật**: ảnh vào thẳng Thư viện Media WordPress qua REST API lõi (user cần quyền tải file), app xoá EXIF/GPS của JPEG, ghi nguồn ảnh (tự chụp / nhà sản xuất / chụp màn hình). Bài affiliate chỉ được tạo bản nháp WordPress khi đủ ảnh bắt buộc.
+- Không chèn schema HowTo/FAQ (Google đã bỏ rich result của hai loại này).
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.

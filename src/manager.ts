@@ -6,6 +6,7 @@ import { logActivity } from "./activity";
 import { sha256Hex } from "./crypto";
 import { getSettingsMap } from "./settings";
 import type { Env, User } from "./types";
+import { ALL_SPECS, FORMATS } from "./formats";
 
 export interface PromptTemplate {
   id: string;
@@ -35,24 +36,25 @@ export const PROMPTS: PromptTemplate[] = [
   },
   {
     id: "content_brief", agent: "planner", title: "Dàn ý bài viết mới", tier: "model_t1", maxTokens: 1500,
-    system: "You are a senior SEO editor planning ONE genuinely useful article for a B2B service website. The article must answer the searcher's real question better than the current top results, fit the site's services, and avoid overlapping existing pages listed in the input. Plan H2/H3 sections, the angle, what first-hand expertise the owner should add, and where to link to the service page. No fluff sections.\n{{RULES}}",
-    input: "Từ khoá, lượng tìm kiếm, ý định, trang dịch vụ đích, tiêu đề top kết quả Google, câu hỏi People Also Ask, các trang có sẵn của site (để tránh trùng). Trả về JSON {title, slug, angle, outline[{h2, points[], h3[]}], faq[], expert_input[], meta_description, internal_link_anchor}."
+    system: "You are a senior SEO editor planning ONE genuinely useful article for the website described in the input (site_type). The article must answer the searcher's real question better than the current top results, fit the site, follow the FORMAT below, and avoid overlapping existing pages listed in the input. Plan the H2/H3 sections in the format's order, the angle, what first-hand experience the owner should add, and where to link to the service/money page. For how-to and guide formats, list photo_requests: real photos the owner should take (keys s1, s2... for steps, g1, g2... for guide sections; at most 6). No fluff sections.\n{{FORMAT}}\n{{RULES}}",
+    input: "Định dạng bài, loại site, từ khoá, lượng tìm kiếm, ý định, trang dịch vụ đích, sản phẩm anh nhập (tên, dùng cho ai, đã dùng thật chưa), tiêu đề top kết quả Google, câu hỏi People Also Ask, các trang có sẵn của site (để tránh trùng). Trả về JSON {title, slug, angle, outline[{h2, points[], h3[]}], faq[], expert_input[], photo_requests[{key, what}], meta_description, internal_link_anchor}."
   },
   {
-    id: "article_draft", agent: "writer", title: "Viết bài nháp từ dàn ý", tier: "model_t1", maxTokens: 4000,
-    system: "You write ONE article draft from an approved outline for a B2B service website. Plain, specific, helpful; short paragraphs; no filler intros, no 'in today's world', no conclusions that repeat everything. Use only facts given in the input or general well-known industry knowledge stated without numbers. Include exactly one natural link to the service page using the given anchor. Output clean HTML using only <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <a>, <table>, <tr>, <th>, <td>.\n{{RULES}}",
-    input: "Dàn ý đã duyệt, trang dịch vụ đích + anchor, câu hỏi FAQ. Trả về JSON {title, html, meta_description}."
+    id: "article_draft", agent: "writer", title: "Viết bài nháp từ dàn ý", tier: "model_t1", maxTokens: 6000,
+    system: "You write ONE article draft from an approved outline, following the FORMAT below exactly. Plain, specific, helpful; short paragraphs; no filler intros, no 'in today's world', no conclusions that repeat everything. Use only facts given in the input (outline, products, specs, owner notes) or general well-known knowledge stated without numbers. If a service page is given, include exactly one natural internal link to it using the given anchor; no other links. Output clean HTML using only <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, plus the tokens the format asks for.\n{{FORMAT}}\n{{RULES}}",
+    input: "Định dạng, dàn ý đã duyệt, sản phẩm (tên, nơi bán, dùng cho ai, đã dùng thật chưa, ghi chú trải nghiệm, thông số, ưu/nhược anh nhập), các chỗ ảnh thật, trang dịch vụ đích + anchor, câu hỏi FAQ. Link affiliate và ảnh do hệ thống chèn, model không thấy URL. Trả về JSON {title, html, meta_description}."
   }
 ];
 
-export const promptVersion = async (t: PromptTemplate): Promise<string> => (await sha256Hex(`${t.system}\n${t.tier}\n${t.maxTokens}`)).slice(0, 12);
+// Phiên bản = băm nội dung prompt + tầng model + giới hạn token (+ toàn bộ khung định dạng nếu prompt dùng {{FORMAT}})
+export const promptVersion = async (t: PromptTemplate): Promise<string> => (await sha256Hex(`${t.system}\n${t.tier}\n${t.maxTokens}${t.system.includes("{{FORMAT}}") ? `\n${ALL_SPECS()}` : ""}`)).slice(0, 12);
 
 // Kiểm tra tự động của Quản lý trước khi admin duyệt
 export function lintPrompt(t: PromptTemplate): { ok: boolean; issues: string[] } {
   const issues: string[] = [];
   if (!t.system.includes("{{RULES}}")) issues.push("Thiếu chỗ chèn luật viết chung {{RULES}} (ngôn ngữ, cấm bịa số, blocklist).");
   if (t.system.length > 3500) issues.push("Prompt quá dài (> 3500 ký tự): tốn token mỗi lần gọi.");
-  if (t.maxTokens > 4000) issues.push("Giới hạn đầu ra > 4000 token.");
+  if (t.maxTokens > 6000) issues.push("Giới hạn đầu ra > 6000 token.");
   if (t.tier === "model_t3") issues.push("Dùng tầng đắt nhất (T3): chỉ nên dùng cho kế hoạch/kiểm định.");
   if (/\b(guarantee|best in|#1|number one)\b/i.test(t.system)) issues.push("Prompt khuyến khích lời hứa hoặc so sánh tuyệt đối.");
   return { ok: issues.length === 0, issues };
@@ -113,7 +115,7 @@ export async function listPrompts(env: Env): Promise<Response> {
     const version = await promptVersion(t);
     const r = await env.DB.prepare("SELECT status, notes, reviewed_at, reviewed_by FROM prompt_reviews WHERE template_id = ? AND version = ?").bind(t.id, version).first<{ status: string; notes: string | null; reviewed_at: number; reviewed_by: number }>();
     const uses = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS c FROM ai_calls WHERE template_id = ? AND status = 'ok' AND at >= ?").bind(t.id, monthStart()).first<{ n: number; c: number }>();
-    out.push({ ...t, version, lint: lintPrompt(t), review: r || null, usesMonth: uses?.n || 0, costMonth: uses?.c || 0 });
+    out.push({ ...t, version, lint: lintPrompt(t), review: r || null, usesMonth: uses?.n || 0, costMonth: uses?.c || 0, formats: t.system.includes("{{FORMAT}}") ? FORMATS.map((f) => ({ id: f.id, label: f.label, spec: f.spec })) : null });
   }
   return json({ prompts: out });
 }

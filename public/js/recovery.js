@@ -20,7 +20,7 @@ const lines = (arr) => (arr || []).join("\n");
 
 export async function viewRecovery(main, args, kit) {
   K = kit;
-  if (args[0] && /^\d+$/.test(args[0])) return viewCase(main, Number(args[0]));
+  if (args[0] && /^\d+$/.test(args[0])) { if (args[1]) K.state.tabs.rec = args[1]; return viewCase(main, Number(args[0])); }
   return viewList(main);
 }
 
@@ -302,10 +302,15 @@ function pagesHtml(pages) {
   </tbody></table></div>`;
 }
 
-// Bài HTML do AI viết (đã lọc ở máy chủ) hiện bằng cách esc() rồi dựng lại vài thẻ cố định: không chạy HTML lạ
+// Bài HTML (đã lọc ở máy chủ) hiện bằng cách esc() rồi dựng lại vài thẻ cố định: không chạy HTML lạ
 const renderArticle = (html) => esc(html)
-  .replace(/&lt;(\/?)(h2|h3|p|ul|ol|li|strong|em|table|thead|tbody|tr|th|td)&gt;/g, "<$1$2>")
-  .replace(/&lt;a href=&quot;([^&]*)&quot;&gt;(.*?)&lt;\/a&gt;/g, '<u>$2</u> <small class="to">→ $1</small>');
+  .replace(/&lt;(\/?)(h2|h3|p|ul|ol|li|strong|em|table|thead|tbody|tr|th|td|figure|figcaption)&gt;/g, "<$1$2>")
+  .replace(/&lt;p class=&quot;(affiliate-disclosure|buy-buttons)&quot;&gt;/g, '<p class="art-$1">')
+  .replace(/&lt;figure class=&quot;wp-block-image&quot;&gt;/g, "<figure>")
+  .replace(/&lt;img src=&quot;(https:\/\/[^"&\s]+(?:&amp;[^"&\s]+)*)&quot; alt=&quot;([^"]*?)&quot;.*?&gt;/g, '<img src="$1" alt="$2">')
+  .replace(/&lt;a class=&quot;buy-button&quot; href=&quot;(https?:\/\/[^"\s]*?)&quot;.*?&gt;(.*?)&lt;\/a&gt;/g, '<a class="buy-btn" href="$1" target="_blank" rel="noopener noreferrer">$2</a>')
+  .replace(/&lt;a href=&quot;(\/[^"]*)&quot;&gt;(.*?)&lt;\/a&gt;/g, '<u>$2</u> <small class="to">→ $1</small>')
+  .replace(/<p><em>⟪(.*?)⟫<\/em><\/p>/g, '<p class="img-need">$1</p>');
 const ISTATUS = { idea: ["Ý tưởng", ""], approved: ["Đã duyệt", "info"], briefed: ["Có dàn ý", "info"], drafted: ["Có bài nháp", "ok"], published: ["Đã đăng", "ok"], rejected: ["Đã bỏ", ""], failed: ["Lỗi", "err"] };
 
 function contentHtml(c, ct, canEdit) {
@@ -313,20 +318,75 @@ function contentHtml(c, ct, canEdit) {
   const active = ct.ideas.filter((i) => ["approved", "briefed", "drafted", "published"].includes(i.status));
   const ideas = ct.ideas.filter((i) => i.status === "idea");
   const btn = (i, act, label, cls = "") => canEdit ? `<button type="button" class="${cls}" data-idea="${i.id}" data-iact="${act}">${label}</button>` : "";
+  const F = Object.fromEntries(ct.formats.map((f) => [f.id, f]));
+  const fmtTag = (i) => `<span class="tag fmt">${esc(F[i.format]?.label || i.format)}</span>`;
+  const fmtSelect = (i) => canEdit && ["idea", "approved", "briefed"].includes(i.status) && !i.wp_post_id
+    ? `<div class="inline-field"><span>Định dạng bài</span><select data-format="${i.id}" aria-label="Định dạng bài">${ct.formats.map((f) => `<option value="${f.id}"${f.id === i.format ? " selected" : ""}>${esc(f.label)}</option>`).join("")}</select></div>` : "";
+  const productRow = (p = {}) => `<div class="prod-row">
+      <div class="form-grid">
+        <label>Tên sản phẩm <input name="name" value="${esc(p.name || "")}" maxlength="120"></label>
+        <label>Dùng tốt nhất cho (ví dụ: người mới, nhóm 5 người) <input name="bestFor" value="${esc(p.bestFor || "")}" maxlength="80"></label>
+        <label>Link affiliate (https) <input name="url" type="url" value="${esc(p.url || "")}" placeholder="https://"></label>
+        <label>Nơi bán (Amazon, tên shop…) <input name="merchant" value="${esc(p.merchant || "")}" maxlength="40"></label>
+        <label class="full">Nơi bán khác (mỗi dòng: Tên | https://link) <textarea name="links" rows="2">${esc((p.links || []).map((l) => `${l.merchant} | ${l.url}`).join("\n"))}</textarea></label>
+        <label>Thông số anh đã kiểm (agent chỉ dùng số ở đây) <textarea name="specs" rows="3">${esc(p.specs || "")}</textarea></label>
+        <label>Ghi chú trải nghiệm thật (dùng bao lâu, dùng vào việc gì, thấy gì) <textarea name="notes" rows="3">${esc(p.notes || "")}</textarea></label>
+        <label>Ưu điểm <textarea name="pros" rows="2">${esc(p.pros || "")}</textarea></label>
+        <label>Nhược điểm <textarea name="cons" rows="2">${esc(p.cons || "")}</textarea></label>
+      </div>
+      <div class="toolbar"><label class="check"><input type="checkbox" name="tested"${p.tested ? " checked" : ""}><span>Tôi/đội đã dùng thật sản phẩm này<small>Chỉ khi đúng. Không đánh dấu thì bài không được nói "đã test".</small></span></label><button type="button" class="danger" data-prod-del>Xoá</button></div>
+    </div>`;
+  const productsBox = (i) => {
+    const f = F[i.format];
+    if (!f || (!f.minProducts && !f.maxProducts)) return "";
+    const n = i.products.items.length;
+    const need = n < f.minProducts;
+    const locked = !!i.wp_post_id || !canEdit;
+    return `<details class="prod-box"${need ? " open" : ""}><summary>Sản phẩm (${n}${f.minProducts ? `/${f.minProducts} tối thiểu` : ", không bắt buộc"})</summary>
+      ${need ? `<div class="msg warn">Người viết cần anh nhập ít nhất ${f.minProducts} sản phẩm: tên, link affiliate, nơi bán, đã dùng thật hay chưa và ghi chú trải nghiệm. Agent chỉ viết về sản phẩm anh nhập, không tự thêm.</div>` : ""}
+      ${locked ? i.products.items.map((p) => `<p><b>${esc(p.name)}</b> · ${esc(p.merchant)}${p.tested ? " · đã dùng thật" : ""}</p>`).join("") : `<form data-products="${i.id}">
+        <label class="full">Cách anh chọn sản phẩm (hiện ở mục "cách chọn" trong bài) <textarea name="method" rows="2">${esc(i.products.method || "")}</textarea></label>
+        <div class="prod-list">${(n ? i.products.items : [{}]).map(productRow).join("")}</div>
+        <div class="toolbar"><button type="button" data-prod-add>${K.icon(K.ICON.plus)}Thêm sản phẩm</button><button type="submit" class="primary">Lưu sản phẩm</button></div>
+      </form>`}</details>`;
+  };
+  const slotsBox = (i) => {
+    if (!i.slots.length) return "";
+    const miss = i.slots.filter((s) => s.required && !s.image).length;
+    const locked = !!i.wp_post_id || !canEdit;
+    return `<details class="img-box"${miss && i.status === "drafted" ? " open" : ""}><summary>Ảnh thật (${i.slots.filter((s) => s.image).length}/${i.slots.length}${miss ? `, thiếu ${miss} bắt buộc` : ""})</summary>
+      ${miss ? `<div class="msg warn">Người viết cần anh tải ${miss} ảnh thật. Ảnh tự chụp khi dùng sản phẩm là tốt nhất; ảnh nhà sản xuất chỉ khi có quyền dùng. Không dùng ảnh AI, không tải ảnh lấy từ Amazon. Ảnh lên thẳng Thư viện Media WordPress, app xoá dữ liệu vị trí GPS trong ảnh JPEG.</div>` : ""}
+      ${!ct.wpConnected ? `<div class="msg">Cần kết nối WordPress (Site › Kết nối WordPress) để tải ảnh.</div>` : ""}
+      <div class="slots">${i.slots.map((s) => `<div class="slot${s.image ? " done" : ""}">
+        <div class="slot-head"><b>${esc(s.label)}</b>${tag(s.image ? ["Đã có", "ok"] : s.required ? ["Bắt buộc", "warn"] : ["Nên có", ""])}</div>
+        ${s.image ? `<figure class="thumb"><img src="${esc(s.image.url)}" alt="${esc(s.image.alt)}"><figcaption>${esc(s.image.alt)}</figcaption></figure>` : ""}
+        ${locked || !ct.wpConnected ? "" : `${s.image ? `<details><summary>Thay hoặc gỡ ảnh</summary>` : ""}<form data-upload="${i.id}" data-slot="${esc(s.key)}" class="upload">
+          <label>File ảnh (JPEG, PNG, WebP, tối đa 8 MB) <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required></label>
+          <label>Mô tả ảnh (alt) <input name="alt" required minlength="5" maxlength="160" value="${esc(s.image?.alt || "")}"></label>
+          <label>Chú thích (không bắt buộc) <input name="caption" maxlength="200" value="${esc(s.image?.caption || "")}"></label>
+          <label>Nguồn ảnh <select name="source"><option value="own">Tôi/đội tự chụp</option><option value="maker">Ảnh nhà sản xuất (có quyền dùng)</option><option value="screenshot">Ảnh chụp màn hình</option></select></label>
+          <label class="check"><input type="checkbox" name="real" required><span>Đây là ảnh thật, không phải ảnh AI</span></label>
+          <div class="toolbar"><button type="submit" class="primary">${s.image ? "Thay ảnh" : "Tải ảnh lên"}</button>${s.image ? `<button type="button" class="danger" data-img-del="${i.id}" data-slot="${esc(s.key)}">Gỡ khỏi bài</button>` : ""}</div>
+        </form>${s.image ? "</details>" : ""}`}
+      </div>`).join("")}</div></details>`;
+  };
   const card = (i) => {
     const b = i.brief, d = i.draft;
     return `<div class="task">
-      <div class="task-head"><b>${esc(d?.title || b?.title || i.keyword)}</b><span class="tags">${tag(ISTATUS[i.status] || [i.status, ""])}</span></div>
-      <p class="note">Từ khoá "${esc(i.keyword)}" · ${i.volume ?? "?"} lượt tìm/tháng · KD ${i.kd ?? "?"} · ${esc(i.intent || "")}${i.hub_path ? ` · dẫn về ${esc(i.hub_path)}` : ""}</p>
+      <div class="task-head"><b>${esc(d?.title || b?.title || i.keyword)}</b><span class="tags">${fmtTag(i)}${tag(ISTATUS[i.status] || [i.status, ""])}</span></div>
+      <p class="note">Từ khoá "${esc(i.keyword)}"${i.volume != null ? ` · ${i.volume} lượt tìm/tháng · KD ${i.kd ?? "?"}` : " · anh tự thêm"}${i.intent ? ` · ${esc(i.intent)}` : ""}${i.hub_path ? ` · dẫn về ${esc(i.hub_path)}` : ""}</p>
+      ${fmtSelect(i)}
+      ${productsBox(i)}
       ${b ? `<details><summary>Dàn ý</summary><div class="diff">${(b.outline || []).map((o) => `<b>${esc(o.h2 || "")}</b><br>${(o.points || []).map((x) => `· ${esc(x)}`).join("<br>")}`).join("<br>")}${b.expert_input?.length ? `<br><br><b>Chủ site cần bổ sung (kinh nghiệm thật):</b><br>${b.expert_input.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}${b.serp?.paa?.length ? `<br><br><b>People Also Ask:</b><br>${b.serp.paa.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}</div></details>` : ""}
+      ${slotsBox(i)}
       ${i.gate?.problems?.length ? `<ul class="gate">${i.gate.problems.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join("")}</ul>` : ""}
       ${d ? `<details><summary>Bài nháp (${d.words} từ)</summary><div class="article">${renderArticle(d.html)}</div><p class="note">Meta description: ${esc(d.meta_description)}</p></details>` : ""}
-      ${i.wp_edit_url ? `<div class="msg ok">Đã có bản nháp trên WordPress (chưa đăng). <a href="${esc(i.wp_edit_url)}" target="_blank" rel="noopener">Mở để sửa và đăng</a></div>` : ""}
+      ${i.wp_edit_url ? `<div class="msg ok">Đã có bản nháp trên WordPress (chưa đăng). <a href="${esc(i.wp_edit_url)}" target="_blank" rel="noopener">Mở để sửa, chọn tác giả thật và đăng</a></div>` : ""}
       <div class="toolbar">
-        ${i.status === "approved" ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
+        ${i.status === "approved" && i.products.items.length >= (F[i.format]?.minProducts || 0) ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
         ${i.status === "briefed" ? btn(i, "draft", "Viết bài nháp", "primary") + btn(i, "brief", "Lập lại dàn ý") : ""}
         ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? btn(i, "wp", "Tạo bản nháp WordPress", "primary") : ""}
-        ${i.status === "drafted" ? btn(i, "draft", "Viết lại") : ""}
+        ${i.status === "drafted" && !i.wp_post_id ? btn(i, "draft", "Viết lại") : ""}
         ${i.wp_post_id && i.status !== "published" ? btn(i, "published", "Đã đăng") : ""}
         ${["approved", "briefed", "drafted"].includes(i.status) ? btn(i, "rejected", "Bỏ chủ đề", "danger") : ""}
       </div></div>`;
@@ -341,12 +401,21 @@ function contentHtml(c, ct, canEdit) {
 
     <div class="task-head"><h3 class="sub">${K.icon(K.ICON.pen)}Bài mới đang làm</h3><span class="tag ${ct.limits.usedThisMonth >= ct.limits.perMonth ? "warn" : "info"}">${ct.limits.usedThisMonth}/${ct.limits.perMonth} bài tháng này</span></div>
     <div class="msg" id="idea-msg" hidden></div>
-    ${active.length ? active.map(card).join("") : `<p class="note">Chưa có. Duyệt một chủ đề bên dưới để bắt đầu.</p>`}
+    ${canEdit ? `<details class="new-idea"><summary>${K.icon(K.ICON.plus)}Tạo bài mới theo định dạng</summary>
+      <form id="idea-new" class="form-grid">
+        <label>Từ khoá chính <input name="keyword" required minlength="3" maxlength="120" placeholder="best robot vacuum for pet hair"></label>
+        <label>Định dạng <select name="format"><option value="">Tự đoán từ từ khoá</option>${ct.formats.map((f) => `<option value="${f.id}">${esc(f.label)}: ${esc(f.hint)}</option>`).join("")}</select></label>
+        ${st.hubs.length ? `<label>Dẫn về trang (không bắt buộc) <select name="hub_path"><option value="">—</option>${st.hubs.map((h) => `<option value="${esc(h.path)}">${esc(h.title)}</option>`).join("")}</select></label>` : ""}
+        <div class="toolbar full"><button type="submit" class="primary">Thêm chủ đề</button></div>
+      </form>
+      <p class="note">Chủ đề anh thêm vẫn phải qua kiểm trùng với trang có sẵn và giới hạn bài/tháng khi duyệt.</p>
+    </details>` : ""}
+    ${active.length ? active.map(card).join("") : `<p class="note">Chưa có. Tạo bài mới hoặc duyệt một chủ đề bên dưới.</p>`}
 
     <div class="task-head"><h3 class="sub">${K.icon(K.ICON.search)}Ý tưởng từ nghiên cứu từ khoá</h3>${canEdit ? `<button type="button" id="research">${K.icon(K.ICON.search)}Nghiên cứu từ khoá</button>` : ""}</div>
     <p class="note">Từ DataForSEO, đã bỏ từ khoá điều hướng, từ khoá trong blocklist và dưới ${ct.limits.minVolume} lượt tìm. Chủ đề site đã có trang thì không viết bài mới (tránh ăn thịt từ khoá): cải thiện trang đó thay vào.${ct.auto?.lastResearch ? ` Lần nghiên cứu gần nhất: ${esc(ago(ct.auto.lastResearch))}.` : ""}</p>
-    ${ideas.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Từ khoá</th><th>Lượt tìm</th><th>KD</th><th>Ý định</th><th>Dẫn về</th><th>Điểm</th><th></th></tr></thead><tbody>
-      ${ideas.map((i) => `<tr><td><b>${esc(i.keyword)}</b>${i.covered_by ? `<small>Đã có trang: ${esc(i.covered_by)}</small>` : ""}</td><td>${i.volume ?? "—"}</td><td>${i.kd ?? "—"}</td><td>${esc(i.intent || "—")}</td><td>${esc(i.hub_path || "—")}</td><td>${i.score}</td>
+    ${ideas.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Từ khoá</th><th>Định dạng</th><th>Lượt tìm</th><th>KD</th><th>Ý định</th><th>Dẫn về</th><th>Điểm</th><th></th></tr></thead><tbody>
+      ${ideas.map((i) => `<tr><td><b>${esc(i.keyword)}</b>${i.covered_by ? `<small>Đã có trang: ${esc(i.covered_by)}</small>` : ""}</td><td>${fmtTag(i)}</td><td>${i.volume ?? "—"}</td><td>${i.kd ?? "—"}</td><td>${esc(i.intent || "—")}</td><td>${esc(i.hub_path || "—")}</td><td>${i.score}</td>
         <td>${!canEdit ? "" : i.covered_by ? `<span class="note">cải thiện trang có sẵn</span>` : `${btn(i, "approved", "Duyệt", "primary")}${btn(i, "rejected", "Bỏ")}`}</td></tr>`).join("")}
     </tbody></table></div>` : `<p class="note">Chưa có ý tưởng. Bấm Nghiên cứu từ khoá (cần DataForSEO trong Cài đặt).</p>`}`;
 }
@@ -379,6 +448,8 @@ function rulesHtml(c, canEdit) {
         <label>Tối đa bài mới mỗi tháng <input type="number" name="maxNewArticlesPerMonth" min="0" max="8" value="${r.maxNewArticlesPerMonth}"${dis}></label>
         <label>Lượng tìm kiếm tối thiểu <input type="number" name="minVolume" min="0" value="${r.minVolume}"${dis}></label>
       </div>
+      <label>Câu công khai link affiliate (đặt đầu bài; trống = câu mặc định theo ngôn ngữ, có chữ "paid link"/"Werbung") <textarea name="affiliateDisclosure" rows="3" maxlength="500"${dis}>${esc(r.affiliateDisclosure || "")}</textarea></label>
+      <label>Chữ trên nút mua ({merchant} = nơi bán; trống = "Check price at {merchant}") <input name="buyButtonText" maxlength="60" value="${esc(r.buyButtonText || "")}"${dis}></label>
     </div>
     <h3 class="sub">${K.icon(K.ICON.clock)}Chế độ tự động</h3>
     <label class="check"><input type="checkbox" name="autopilot"${r.autopilot ? " checked" : ""}${dis}><span>Bật tự động cho site này<small>Cứ 15 phút agent làm tiếp một bước: quét lại định kỳ, AI viết câu chèn, nghiên cứu từ khoá, dàn ý, bài nháp, bản nháp WordPress. Mọi bước AI qua Quản lý. Không tự đăng bài.</small></span></label>
@@ -453,6 +524,54 @@ function bindCase(main, c, canEdit) {
       } catch (e) { ideaMsg(e); }
     });
   }));
+  $("#idea-new")?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const d = formData(ev.currentTarget);
+    busy(ev.submitter, "Đang thêm…", async () => {
+      try { await api(`/api/content/${c.id}/ideas`, { method: "POST", body: { keyword: d.keyword, format: d.format || undefined, hub_path: d.hub_path || undefined } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+    });
+  });
+  $$("[data-format]", main).forEach((s) => s.addEventListener("change", async () => {
+    try { await api(`/api/content/ideas/${s.dataset.format}`, { method: "PUT", body: { format: s.value } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  }));
+  $$("form[data-products]", main).forEach((f) => {
+    const list = $(".prod-list", f);
+    const tpl = list.firstElementChild.outerHTML;
+    f.addEventListener("click", (e) => {
+      if (e.target.closest("[data-prod-add]")) { list.insertAdjacentHTML("beforeend", tpl); const last = list.lastElementChild; $$("input, textarea", last).forEach((x) => { if (x.type === "checkbox") x.checked = false; else x.value = ""; }); }
+      const del = e.target.closest("[data-prod-del]");
+      if (del && list.children.length > 1) del.closest(".prod-row").remove();
+    });
+    f.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const items = $$(".prod-row", f).map((r) => {
+        const v = (n) => $(`[name="${n}"]`, r).value.trim();
+        return { name: v("name"), bestFor: v("bestFor"), url: v("url"), merchant: v("merchant"), specs: v("specs"), notes: v("notes"), pros: v("pros"), cons: v("cons"), tested: $('[name="tested"]', r).checked,
+          links: v("links").split("\n").map((l) => l.split("|").map((x) => x.trim())).filter((x) => x.length === 2 && x[1]).map(([merchant, url]) => ({ merchant, url })) };
+      }).filter((p) => p.name);
+      busy(ev.submitter, "Đang lưu…", async () => {
+        try { await api(`/api/content/ideas/${f.dataset.products}/products`, { method: "PUT", body: { method: $('[name="method"]', f).value, items } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+      });
+    });
+  });
+  $$("form[data-upload]", main).forEach((f) => f.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const file = $('[name="file"]', f).files[0];
+    if (!file) return;
+    const q = new URLSearchParams({ alt: $('[name="alt"]', f).value.trim(), caption: $('[name="caption"]', f).value.trim(), source: $('[name="source"]', f).value, real: $('[name="real"]', f).checked ? "1" : "0" });
+    busy(ev.submitter, "Đang tải lên…", async () => {
+      try {
+        if (file.size > 8 * 1024 * 1024) throw new Error("Ảnh lớn hơn 8 MB: giảm kích thước rồi tải lại.");
+        const res = await fetch(`/api/content/ideas/${f.dataset.upload}/images/${f.dataset.slot}?${q}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || `Lỗi ${res.status}`);
+        K.state.tabs.rec = "content"; await reload();
+      } catch (e) { ideaMsg(e); }
+    });
+  }));
+  $$("[data-img-del]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { await api(`/api/content/ideas/${b.dataset.imgDel}/images/${b.dataset.slot}`, { method: "DELETE" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  })));
   const rf = $("#rules-form");
   rf?.addEventListener("submit", async (ev) => {
     ev.preventDefault();

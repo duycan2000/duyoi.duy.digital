@@ -13,12 +13,13 @@ let passed = 0;
 
 function client(env) {
   let cookie = "";
-  return async function call(method, path, body, { origin = BASE, ip = "1.1.1.1" } = {}) {
+  return async function call(method, path, body, { origin = BASE, ip = "1.1.1.1", ...extra } = {}) {
     const headers = { "CF-Connecting-IP": ip };
     if (origin) headers.Origin = origin;
     if (cookie) headers.Cookie = cookie;
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    const res = await worker.fetch(new Request(BASE + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined }), env);
+    const raw = body instanceof Uint8Array;
+    if (body !== undefined) headers["Content-Type"] = raw ? extra["Content-Type"] : "application/json";
+    const res = await worker.fetch(new Request(BASE + path, { method, headers, body: body !== undefined ? (raw ? body : JSON.stringify(body)) : undefined }), env);
     const set = res.headers.get("Set-Cookie");
     if (set) cookie = set.split(";")[0].endsWith("=") ? "" : set.split(";")[0];
     let data = null;
@@ -538,6 +539,100 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     assert.equal(hq.data.manager.promptsPending, 0);
     assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 4);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+await test("định dạng bài: Best X có sản phẩm affiliate, công khai, nút mua sponsored, ảnh thật tải lên WordPress, không nói đã test khi chưa test", async () => {
+  const env5 = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const c5 = client(env5);
+  await c5("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await c5("PUT", "/api/settings", { secrets: { openrouter_api_key: "sk-or-test-123456", dataforseo_login: "me@example.com", dataforseo_password: "dfs-pass-123" } });
+  const pr = await c5("GET", "/api/manager/prompts");
+  assert.ok(pr.data.prompts.find((p) => p.id === "article_draft").formats.length === 6);
+  for (const p of pr.data.prompts) assert.equal((await c5("PUT", `/api/manager/prompts/${p.id}`, { status: "approved" })).status, 200, p.id);
+  const wp = { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ wp });
+  try {
+    const cr = await c5("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/"] } });
+    const caseId = cr.data.id;
+    const siteId = (await c5("GET", `/api/recovery/${caseId}`)).data.case.siteId;
+    await c5("PUT", `/api/sites/${siteId}/wp`, { wpUser: wp.user, appPassword: wp.pass });
+    // Đoán định dạng từ từ khoá
+    const a = await c5("POST", `/api/content/${caseId}/ideas`, { keyword: "Beste CAD Software Test" });
+    assert.equal(a.status, 201, JSON.stringify(a.data));
+    await c5("POST", `/api/content/${caseId}/ideas`, { keyword: "wie man cad zeichnungen erstellt" });
+    await c5("POST", `/api/content/${caseId}/ideas`, { keyword: "planwerk vs bauzeichner" });
+    assert.equal((await c5("POST", `/api/content/${caseId}/ideas`, { keyword: "beste cad software test" })).status, 409);
+    let ct = await c5("GET", `/api/content/${caseId}`);
+    const fmt = Object.fromEntries(ct.data.ideas.map((i) => [i.keyword, i.format]));
+    assert.deepEqual([fmt["beste cad software test"], fmt["wie man cad zeichnungen erstellt"], fmt["planwerk vs bauzeichner"]], ["roundup", "how_to", "comparison"]);
+    const id = a.data.id;
+    assert.equal((await c5("PUT", `/api/content/ideas/${id}`, { status: "approved" })).status, 200);
+    // Thiếu sản phẩm: agent hỏi anh, không lập dàn ý
+    const nb = await c5("POST", `/api/content/ideas/${id}/brief`);
+    assert.equal(nb.status, 409);
+    assert.match(nb.data.message, /ít nhất 3 sản phẩm/);
+    let hq = await c5("GET", "/api/hq");
+    assert.ok(hq.data.asks.some((x) => x.kind === "products" && x.ideaId === id));
+    const items = [
+      { name: "Planwerk Pro", url: "https://www.amazon.de/dp/B000TEST?tag=duy-21", merchant: "Amazon", bestFor: "Einsteiger", specs: "Version 2026, Windows", tested: false },
+      { name: "Bauzeichner X", url: "https://shop.example.de/bauzeichner?aff=7", merchant: "Shop", links: [{ merchant: "Hersteller", url: "https://bauzeichner.example/kaufen" }], bestFor: "Teams", specs: "Cloud", tested: false },
+      { name: "Linea CAD", url: "https://linea.example/?ref=duy", merchant: "Linea", bestFor: "Mac", specs: "macOS", tested: false }
+    ];
+    assert.equal((await c5("PUT", `/api/content/ideas/${id}/products`, { items: [...items.slice(0, 2), { name: "Ohne Link" }] })).status, 400);
+    assert.equal((await c5("PUT", `/api/content/ideas/${id}/products`, { method: "Nach Funktionen und Bedienung ausgewählt.", items })).status, 200);
+    assert.equal((await c5("POST", `/api/content/ideas/${id}/brief`)).status, 200);
+    const dr = await c5("POST", `/api/content/ideas/${id}/draft`);
+    assert.equal(dr.status, 200, JSON.stringify(dr.data));
+    const rules = dr.data.result.problems.filter((p) => p.level === "block").map((p) => p.rule);
+    assert.ok(rules.includes("images") && rules.includes("tested"), rules.join(","));
+    assert.ok(dr.data.result.problems.some((p) => p.rule === "amazon"));
+    ct = await c5("GET", `/api/content/${caseId}`);
+    let i = ct.data.ideas.find((x) => x.id === id);
+    assert.equal(i.slots.length, 3);
+    assert.ok(i.slots.every((s) => s.required && !s.image));
+    assert.match(i.draft.html, /class="affiliate-disclosure"><em>Hinweis: Dieser Artikel enthält Affiliate-Links \(Werbung\)/);
+    assert.ok(i.draft.html.indexOf("affiliate-disclosure") < i.draft.html.indexOf("buy-button"), "công khai đặt trước link mua đầu tiên");
+    assert.match(i.draft.html, /<a class="buy-button" href="https:\/\/www\.amazon\.de\/dp\/B000TEST\?tag=duy-21" rel="sponsored nofollow noopener" target="_blank">Bei Amazon ansehen<\/a>/);
+    assert.match(i.draft.html, /Bei Hersteller ansehen/);
+    assert.match(i.draft.html, /⟪Ảnh thật cần có: Ảnh thật của Planwerk Pro/);
+    assert.ok(!i.draft.html.includes("evil.example") && i.draft.html.includes("hier"), "bỏ link ngoài do AI tự viết");
+    hq = await c5("GET", "/api/hq");
+    assert.ok(hq.data.asks.some((x) => x.kind === "images" && x.ideaId === id));
+    assert.equal((await c5("POST", `/api/content/ideas/${id}/wp`)).status, 409);
+    // Anh xác nhận đã dùng thật: hết chặn "đã test"
+    await c5("PUT", `/api/content/ideas/${id}/products`, { method: "Nach Funktionen und Bedienung ausgewählt.", items: items.map((x) => ({ ...x, tested: true, notes: "Drei Monate im Büro für Grundrisse genutzt." })) });
+    // Tải ảnh thật: phải xác nhận, phải có alt; EXIF bị xoá trước khi gửi WordPress
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x11]), Buffer.from("Exif\0\0GPS-LAT-1"), Buffer.from([0xff, 0xc0, 0x00, 0x0b, 0x08, 0x02, 0x58, 0x03, 0x20, 0x01, 0x01, 0x11, 0x00, 0xff, 0xda, 0x00, 0x02, 0x00, 0xff, 0xd9])]);
+    const up = (slot, q, body = jpeg, type = "image/jpeg") => c5("POST", `/api/content/ideas/${id}/images/${slot}?${q}`, body, { "Content-Type": type });
+    assert.equal((await up("p1", "alt=Planwerk%20Pro%20am%20Arbeitsplatz&source=own")).status, 400);
+    assert.equal((await up("p1", "real=1&source=own&alt=x")).status, 400);
+    assert.equal((await up("p9", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz")).status, 404);
+    assert.equal((await up("p1", "real=1&source=own&alt=Planwerk%20Pro", Buffer.from("not an image"), "image/jpeg")).status, 400);
+    const u1 = await up("p1", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz&caption=Im%20B%C3%BCro");
+    assert.equal(u1.status, 200, JSON.stringify(u1.data));
+    assert.equal(wp.media[0].filename.endsWith("-p1.jpg"), true);
+    assert.ok(!Buffer.from(wp.media[0].bytes).includes("GPS-LAT"), "phải xoá EXIF");
+    assert.equal(u1.data.gate.ok, false);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24)]);
+    await up("p2", "real=1&source=maker&alt=Bauzeichner%20X%20Oberfl%C3%A4che", png, "image/png");
+    const u3 = await up("p3", "real=1&source=own&alt=Linea%20CAD%20auf%20dem%20Mac", png, "image/png");
+    assert.equal(u3.data.gate.ok, true, JSON.stringify(u3.data.gate));
+    ct = await c5("GET", `/api/content/${caseId}`);
+    i = ct.data.ideas.find((x) => x.id === id);
+    assert.match(i.draft.html, /<figure class="wp-block-image"><img src="https:\/\/caddemo\.de\/wp-content\/uploads\/[a-z0-9-]+-p1\.jpg" alt="Planwerk Pro am Arbeitsplatz" width="800" height="600" loading="lazy"><figcaption>Im Büro · Foto: eigene Aufnahme<\/figcaption><\/figure>/);
+    assert.match(i.draft.html, /Bild: Hersteller/);
+    const wd = await c5("POST", `/api/content/ideas/${id}/wp`);
+    assert.equal(wd.status, 200, JSON.stringify(wd.data));
+    const created = wp.calls.find((x) => x.route === "/create");
+    assert.match(created.body.content, /rel="sponsored nofollow noopener"/);
+    assert.match(created.body.content, /<figure class="wp-block-image">/);
+    assert.ok(!created.body.content.includes("⟪") && !created.body.content.includes("[["));
+    assert.equal((await c5("PUT", `/api/content/ideas/${id}`, { format: "guide" })).status, 409);
+    assert.equal((await up("p1", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz")).status, 409);
   } finally {
     globalThis.fetch = realFetch;
   }

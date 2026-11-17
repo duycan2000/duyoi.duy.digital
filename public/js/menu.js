@@ -26,7 +26,7 @@ export const MENU = [
   ]},
   { group: "Nội dung", key: "content", items: [
     { id: "keywords", label: "Keyword Hub", phase: 2, plan: ["Từ khoá theo cụm, intent, volume, KD", "Câu hỏi thật: PAA (mở 4 lớp), autocomplete, diễn đàn"] },
-    { id: "content", label: "Content Studio", phase: 3, plan: ["Gói nghiên cứu, hỏi anh 2–3 câu kinh nghiệm thật", "Writer → Auditor 100 điểm, tự viết lại phần lỗi tối đa 3 vòng", "Ảnh bài viết bằng model trả phí, chân thực; đăng lên WordPress hoặc mở PR cho Astro"] },
+    { id: "content", label: "Content Studio", live: true },
     { id: "wins", label: "Quick wins", phase: 3, plan: ["Trang vị trí 8–20, CTR thấp, bài tụt hạng", "Đề xuất title/meta, làm mới bài"] },
     { id: "pages", label: "So sánh & free tool", phase: 3, plan: ["Trang so sánh, alternative, công cụ tính miễn phí để lấy link"] }
   ]},

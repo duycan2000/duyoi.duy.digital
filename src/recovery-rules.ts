@@ -26,6 +26,8 @@ export interface SiteRules {
   autoRescanDays: number;      // quét lại sau bao nhiêu ngày
   autoApproveIdeas: boolean;   // tự duyệt chủ đề tốt nhất trong giới hạn tháng
   autoApplyApproved: boolean;  // tự áp dụng việc đã được người duyệt (tối đa 3 trang/ngày)
+  affiliateDisclosure: string; // câu công khai link affiliate đặt đầu bài (trống = câu mặc định theo ngôn ngữ)
+  buyButtonText: string;       // chữ trên nút mua, {merchant} = tên nơi bán
 }
 
 export const DEFAULT_RULES: SiteRules = {
@@ -50,7 +52,9 @@ export const DEFAULT_RULES: SiteRules = {
   autopilot: false,
   autoRescanDays: 7,
   autoApproveIdeas: false,
-  autoApplyApproved: false
+  autoApplyApproved: false,
+  affiliateDisclosure: "",
+  buyButtonText: ""
 };
 
 const list = (v: unknown, max = 300, itemMax = 200): string[] => {
@@ -109,6 +113,8 @@ export function parseRules(input: unknown, base: SiteRules = DEFAULT_RULES): Sit
   if (b.autopilot !== undefined) out.autopilot = b.autopilot === true;
   if (b.autoApproveIdeas !== undefined) out.autoApproveIdeas = b.autoApproveIdeas === true;
   if (b.autoApplyApproved !== undefined) out.autoApplyApproved = b.autoApplyApproved === true;
+  if (b.affiliateDisclosure !== undefined) out.affiliateDisclosure = String(b.affiliateDisclosure).trim().slice(0, 500);
+  if (b.buyButtonText !== undefined) out.buyButtonText = String(b.buyButtonText).trim().slice(0, 60);
   if (b.ga4Property !== undefined) {
     const v = String(b.ga4Property).trim().replace(/^properties\//, "");
     if (v && !/^\d{5,15}$/.test(v)) throw new HttpError(400, "GA4 property là dãy số (Admin › Property details › Property ID).", "validation");

@@ -19,6 +19,7 @@ export async function viewHq(main, args, kit) {
   <div class="page">
     <div class="page-head"><div><h2>Agent HQ</h2><p>Đội agent làm việc cho các site của anh. Mọi prompt phải được Quản lý duyệt, mọi lần gọi AI và DataForSEO đều được kiểm trần chi phí và ghi lại.</p></div>
       <div class="toolbar"><button type="button" id="hq-refresh">${K.icon(K.ICON.clock)}Làm mới</button></div></div>
+    ${hq.asks?.length ? `<div class="msg warn"><b>Agent đang hỏi anh (${hq.asks.length}):</b> ${hq.asks.slice(0, 4).map((a) => `<a href="#/recovery/${a.caseId}/content">${esc(a.domain)} · "${esc(a.keyword)}"</a>: ${esc(a.text)}`).join(" · ")}</div>` : ""}
     ${hq.manager.promptsPending ? `<div class="msg warn">${hq.manager.promptsPending} prompt chưa được duyệt: agent dùng prompt đó sẽ bị chặn. ${admin ? `<a href="#/hq/prompts" data-tab-go="prompts">Duyệt ngay</a>` : "Nhờ admin duyệt."}</div>` : ""}
     <div class="card tabbed">
       ${K.tabsNav("hq", [["team", "Đội agent", "users"], ["prompts", `Quản lý prompt${hq.manager.promptsPending ? ` (${hq.manager.promptsPending})` : ""}`, "shield"], ["spend", "Chi tiêu", "money"], ["auto", "Tự động", "clock"]], "team")}
@@ -70,6 +71,7 @@ function promptsHtml(prompts, admin) {
     <div class="prompts">${prompts.map((p) => `<div class="task">
       <div class="task-head"><b>${esc(p.title)}</b><span class="tags">${tag(p.review?.status === "approved" ? ["Đã duyệt", "ok"] : p.review?.status === "rejected" ? ["Đã từ chối", "err"] : ["Chờ duyệt", "warn"])}${tag(p.lint.ok ? ["Qua kiểm tra tự động", "ok"] : ["Không qua kiểm tra", "err"])}</span></div>
       <p class="note">Agent: ${esc(p.agent)} · model ${esc(p.tier.replace("model_", "").toUpperCase())} · tối đa ${p.maxTokens} token đầu ra · phiên bản <code>${esc(p.version)}</code>${p.review ? ` · ${p.review.status === "approved" ? "duyệt" : "từ chối"} ${esc(ago(p.review.reviewed_at))}` : ""} · tháng này ${p.usesMonth} lần, ${money(p.costMonth)}</p>
+      ${p.formats ? `<details><summary>Khung định dạng (${p.formats.length}) ghép vào prompt</summary>${p.formats.map((f) => `<p><b>${esc(f.label)}</b></p><pre class="prompt">${esc(f.spec)}</pre>`).join("")}</details>` : ""}
       ${p.lint.issues.length ? `<ul class="gate">${p.lint.issues.map((x) => `<li class="block">${esc(x)}</li>`).join("")}</ul>` : ""}
       <details><summary>Xem prompt</summary><pre class="prompt">${esc(p.system)}</pre><p class="note">Dữ liệu gửi kèm: ${esc(p.input)}</p></details>
       ${admin ? `<div class="toolbar">${p.review?.status !== "approved" ? `<button type="button" class="primary" data-review="approved" data-id="${esc(p.id)}">Duyệt phiên bản này</button>` : ""}${p.review?.status !== "rejected" ? `<button type="button" class="danger" data-review="rejected" data-id="${esc(p.id)}">Từ chối</button>` : ""}</div>` : ""}

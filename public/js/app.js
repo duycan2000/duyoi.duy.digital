@@ -4,6 +4,7 @@ import { api, ApiError } from "./api.js";
 import { MENU, ITEMS, PHASES } from "./menu.js";
 import { viewRecovery } from "./recovery.js";
 import { viewHq } from "./hq.js";
+import { viewStudio } from "./studio.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
 const app = $("#app");
@@ -387,7 +388,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }

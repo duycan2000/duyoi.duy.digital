@@ -114,6 +114,12 @@ export function fakeSite(opts = {}) {
     let content;
     if (/planning ONE genuinely useful article/.test(sys)) {
       content = { title: `${user.keyword}: Leitfaden für Planer`, slug: user.keyword.replace(/\s+/g, "-"), angle: "Praxisnah", outline: [{ h2: "Worauf es ankommt", points: ["Grundlagen"], h3: [] }, { h2: "Ablauf", points: ["Schritte"], h3: [] }], faq: user.people_also_ask, expert_input: ["Eigenes Projektbeispiel"], meta_description: "Leitfaden für Planer.", internal_link_anchor: "CAD-Dienstleistung TGA" };
+    } else if (/write ONE article draft/.test(sys) && user.format !== "article") {
+      const para = (n, i) => `<p>Bei der Auswahl für ${n} zählt vor allem, wie gut das Werkzeug zum eigenen Arbeitsablauf passt, wie verständlich die Bedienung ist und wie zuverlässig der Hersteller Aktualisierungen bereitstellt (Teil ${String.fromCharCode(65 + i)}).</p>`;
+      const prods = user.products.map((p) => `<h2>${p.n}. ${p.name}: ${p.best_for}</h2>[[IMG:p${p.n}]]${[0, 1, 2, 3, 4, 5, 6, 7].map((i) => para(p.name, i)).join("")}<h3>Nachteile</h3><p>Die Einarbeitung braucht etwas Geduld.</p><ul><li>${p.specs}</li></ul>[[BUY:${p.n}]]`).join("");
+      const claim = /test/.test(user.keyword) ? "<p>Wir haben alle Programme getestet.</p>" : "";
+      const html = `<p>Diese Übersicht richtet sich an Planer, die ein passendes Programm suchen.</p>[[DISCLOSURE]]${claim}<h2>Schnellauswahl</h2><table><tr><th>Programm</th><th>Geeignet für</th></tr>${user.products.map((p) => `<tr><td>${p.name}</td><td>${p.best_for}</td></tr>`).join("")}</table>${prods}<h2>Kaufberatung</h2>${[5, 6, 7, 8].map((i) => para("Planer", i)).join("")}<p>Mehr dazu <a href="https://evil.example/x">hier</a>.</p>`;
+      content = { title: user.outline.title, html, meta_description: "Übersicht für Planer." };
     } else if (/write ONE article draft/.test(sys)) {
       const bad = /planung/.test(user.keyword);
       const para = (i) => `<p>Bei der Planung der technischen Gebäudeausrüstung ist eine klare Abstimmung zwischen allen Beteiligten wichtig, damit die Zeichnungen später ohne Rückfragen umgesetzt werden können und keine Lücken entstehen (Abschnitt ${String.fromCharCode(65 + i)}).</p>`;
@@ -128,6 +134,14 @@ export function fakeSite(opts = {}) {
   }
   return async (input, init) => {
     const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === host && u.pathname === "/wp-json/wp/v2/media" && init?.method === "POST") {
+      if ((init.headers?.Authorization || "") !== `Basic ${Buffer.from(`${wp.user}:${wp.pass}`).toString("base64")}`) return jsonRes({ code: "rest_not_logged_in", message: "Sorry" }, 401);
+      const filename = /filename="([^"]+)"/.exec(init.headers["Content-Disposition"])[1];
+      const bytes = new Uint8Array(init.body);
+      wp.media = wp.media || [];
+      wp.media.push({ filename, type: init.headers["Content-Type"], alt: u.searchParams.get("alt_text"), bytes });
+      return jsonRes({ id: 900 + wp.media.length, source_url: `https://${host}/wp-content/uploads/${filename}`, media_details: { width: 800, height: 600 } }, 201);
+    }
     if (u.hostname === "openrouter.ai") return openrouter(init);
     if (u.hostname === "api.dataforseo.com") return dataforseo(u, init);
     const g = await google(u, init);

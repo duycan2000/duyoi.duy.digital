@@ -5,13 +5,14 @@ import { PROMPTS, promptApproved } from "./manager";
 import { RECOVERY_AGENTS } from "./recovery-analyze";
 import { readRules } from "./recovery-rules";
 import { getAuto } from "./content";
+import { formatOf, readProducts } from "./formats";
 import type { Env } from "./types";
 
 const CONTENT_AGENTS = [
   { id: "research", name: "Nghiên cứu từ khoá", icon: "search", role: "Lấy gợi ý từ khoá (DataForSEO), bỏ từ site đã có trang, chấm điểm theo lượng tìm, độ khó, ý định và trang dịch vụ liên quan." },
   { id: "architect", name: "Kiến trúc nội dung", icon: "layers", role: "Rà cấu trúc: mỗi trang dịch vụ có bao nhiêu bài hỗ trợ dẫn về, bài nào chưa gắn cụm, cụm nào còn thiếu." },
   { id: "planner", name: "Biên tập viên", icon: "list", role: "Lập dàn ý từ top Google và People Also Ask; nêu chỗ chủ site cần thêm kinh nghiệm thật." },
-  { id: "writer", name: "Người viết", icon: "pen", role: "Viết bài nháp từ dàn ý đã duyệt, qua Gác cổng, tạo bản nháp WordPress. Không bao giờ tự đăng." }
+  { id: "writer", name: "Người viết", icon: "pen", role: "Viết bài theo khung chuẩn (thông tin, Best X/Top N, review, so sánh, how-to, guide), chèn công khai affiliate, nút mua và ảnh thật anh tải lên, qua Gác cổng, tạo bản nháp WordPress. Không bao giờ tự đăng." }
 ];
 
 export async function hqView(env: Env): Promise<Response> {
@@ -44,17 +45,29 @@ export async function hqView(env: Env): Promise<Response> {
       state: agentState(a.id, { working: a.id === "doctor" && scanning.length > 0, waiting: t.open + t.approved, blockedPrompt }),
       detail: a.id === "doctor" && scanning.length ? `Đang quét ${scanning.map((c) => `${c.domain} (${c.pages_done}/${c.pages_total || "?"})`).join(", ")}` : "" };
   });
+  // Việc chờ anh: bài cần sản phẩm, bài cần ảnh thật
+  const act = await env.DB.prepare("SELECT i.id, i.keyword, i.status, i.format, i.products, i.gate, i.case_id, s.domain FROM content_ideas i JOIN sites s ON s.id = i.site_id WHERE i.status IN ('approved', 'briefed', 'drafted') AND i.wp_post_id IS NULL").all<{ id: number; keyword: string; status: string; format: string; products: string | null; gate: string | null; case_id: number; domain: string }>();
+  const asks = act.results.flatMap((r) => {
+    const f = formatOf(r.format);
+    const out: { kind: "products" | "images"; ideaId: number; caseId: number; keyword: string; domain: string; text: string }[] = [];
+    if (r.status === "approved" && readProducts(r.products).items.length < f.minProducts) out.push({ kind: "products", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: `Nhập ít nhất ${f.minProducts} sản phẩm (link affiliate, đã dùng thật chưa) cho bài ${f.label}` });
+    const img = r.gate ? (JSON.parse(r.gate) as { problems: { rule: string; level: string; message: string }[] }).problems.find((p) => p.rule === "images" && p.level === "block") : null;
+    if (r.status === "drafted" && img) out.push({ kind: "images", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: img.message });
+    return out;
+  });
   const content = CONTENT_AGENTS.map((a) => {
     const blockedPrompt = prompts.some((p) => p.agent === a.id && !p.ok);
     const waiting = a.id === "research" ? ideas.idea || 0 : a.id === "planner" ? ideas.approved || 0 : a.id === "writer" ? (ideas.briefed || 0) + (ideas.drafted || 0) : 0;
-    return { ...a, zone: "content", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt, state: agentState(a.id, { waiting, blockedPrompt }), waiting };
+    const mine = a.id === "writer" ? asks : [];
+    const detail = mine.length ? `Chờ anh: ${mine.filter((x) => x.kind === "images").length} bài cần ảnh thật, ${mine.filter((x) => x.kind === "products").length} bài cần sản phẩm` : "";
+    return { ...a, zone: "content", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt, state: agentState(a.id, { waiting: waiting + mine.length, blockedPrompt }), waiting, detail };
   });
   const autoSites = await Promise.all(cases.results.filter((c) => readRules(c.rules).autopilot).map(async (c) => ({ siteId: c.site_id, caseId: c.id, domain: c.domain, ...(await getAuto(env, c.site_id)) })));
   return json({
     manager: { promptsTotal: prompts.length, promptsPending: promptPending.length, spend: spend.results, last: recent.results.find((r) => r.actor === "agent:manager") || null },
     zones: { recovery, content },
     autopilot: { sites: autoSites, last: lastOf("autopilot") },
-    ideas,
+    ideas, asks,
     recent: recent.results.slice(0, 25)
   });
 }
