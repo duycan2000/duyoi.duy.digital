@@ -115,16 +115,17 @@ export async function apiLeadSend(env: Env, req: Request, user: User): Promise<R
   if (!msg) throw new HttpError(400, "Nhập câu hỏi hoặc yêu cầu.", "validation");
   const history = (await env.DB.prepare("SELECT role, content FROM lead_messages WHERE user_id = ? ORDER BY id DESC LIMIT 8").bind(user.id).all<{ role: string; content: string }>()).results.reverse();
   await env.DB.prepare("INSERT INTO lead_messages (user_id, role, content, at) VALUES (?, 'user', ?, ?)").bind(user.id, msg, now()).run();
-  const r = await aiJson<{ reply?: string; plan?: unknown[]; needs_from_owner?: unknown[] }>(env, {
+  const r = await aiJson<{ reply?: string; plan?: unknown[]; needs_from_owner?: unknown[]; playbook_add?: unknown[] }>(env, {
     template: "lead_plan", task: "lead.plan", siteId: null,
     rules: "Never reveal API keys or settings values. Reply with a single JSON object only.",
-    input: { owner_message: msg, recent_conversation: history.map((h) => ({ from: h.role === "user" ? "owner" : "lead", text: h.content.slice(0, 800) })), state: await leadState(env) }
+    input: { owner_message: msg, playbook: (await readPlaybook(env)).body || "(trống)", recent_conversation: history.map((h) => ({ from: h.role === "user" ? "owner" : "lead", text: h.content.slice(0, 800) })), state: await leadState(env) }
   });
   const plan = await validate(env, Array.isArray(r.plan) ? r.plan : []);
   const needs = (Array.isArray(r.needs_from_owner) ? r.needs_from_owner : []).slice(0, 8).map((x) => String(x).slice(0, 300));
+  const playbookAdd = (Array.isArray(r.playbook_add) ? r.playbook_add : []).slice(0, 5).map((x) => String(x).replace(/\s+/g, " ").trim().slice(0, 300)).filter(Boolean);
   const reply = String(r.reply || "Em chưa có câu trả lời.").slice(0, 4000);
-  const row = await env.DB.prepare("INSERT INTO lead_messages (user_id, role, content, plan, at) VALUES (?, 'lead', ?, ?, ?) RETURNING id").bind(user.id, reply, JSON.stringify({ items: plan, needs }), now()).first<{ id: number }>();
-  return json({ id: row!.id, reply, plan, needs });
+  const row = await env.DB.prepare("INSERT INTO lead_messages (user_id, role, content, plan, at) VALUES (?, 'lead', ?, ?, ?) RETURNING id").bind(user.id, reply, JSON.stringify({ items: plan, needs, playbookAdd }), now()).first<{ id: number }>();
+  return json({ id: row!.id, reply, plan, needs, playbookAdd });
 }
 
 // GET /api/lead → hội thoại + hàng việc
@@ -132,6 +133,7 @@ export async function apiLeadView(env: Env, user: User): Promise<Response> {
   const msgs = (await env.DB.prepare("SELECT id, role, content, plan, ran_at, at FROM lead_messages WHERE user_id = ? ORDER BY id DESC LIMIT 40").bind(user.id).all<Record<string, unknown>>()).results.reverse();
   const jobs = (await env.DB.prepare("SELECT j.id, j.site_id, s.domain, j.action, j.params, j.agent, j.why, j.status, j.result, j.error, j.created_at, j.finished_at FROM agent_jobs j LEFT JOIN sites s ON s.id = j.site_id ORDER BY j.id DESC LIMIT 30").all<Record<string, unknown>>()).results;
   return json({
+    playbook: await playbookView(env),
     messages: msgs.map((m) => ({ ...m, plan: m.plan ? JSON.parse(String(m.plan)) : null })),
     jobs: jobs.map((j) => ({ ...j, params: JSON.parse(String(j.params)), label: ACTIONS[j.action as Action]?.label || j.action }))
   });
@@ -204,4 +206,62 @@ export async function processJobs(env: Env, n = 2): Promise<void> {
   await env.DB.prepare("UPDATE agent_jobs SET status = 'failed', error = 'Quá thời gian chạy', finished_at = ? WHERE status = 'running' AND started_at < ?").bind(now(), now() - 20 * 60000).run();
   const q = await env.DB.prepare("SELECT id FROM agent_jobs WHERE status = 'queued' ORDER BY id LIMIT ?").bind(n).all<{ id: number }>();
   for (const j of q.results) await runJob(env, j.id);
+}
+
+// ---------------- Sổ tay Trưởng nhóm ----------------
+
+export const PLAYBOOK_MAX = 8000;
+
+export async function readPlaybook(env: Env): Promise<{ id: number | null; body: string; by: string | null; at: number | null }> {
+  const r = await env.DB.prepare("SELECT id, body, by, at FROM lead_playbook ORDER BY id DESC LIMIT 1").first<{ id: number; body: string; by: string; at: number }>();
+  return r ? r : { id: null, body: "", by: null, at: null };
+}
+
+async function playbookView(env: Env) {
+  const cur = await readPlaybook(env);
+  const versions = (await env.DB.prepare("SELECT id, note, by, at, length(body) AS chars FROM lead_playbook ORDER BY id DESC LIMIT 20").all<{ id: number; note: string | null; by: string; at: number; chars: number }>()).results;
+  return { ...cur, versions };
+}
+
+async function savePlaybook(env: Env, body: string, note: string, by: string): Promise<void> {
+  const clean = body.replace(/\r/g, "").trim();
+  if (clean.length > PLAYBOOK_MAX) throw new HttpError(400, `Sổ tay dài quá ${PLAYBOOK_MAX} ký tự: gộp bớt các dòng.`, "too_long");
+  if ((await readPlaybook(env)).body === clean) return;
+  await env.DB.prepare("INSERT INTO lead_playbook (body, note, by, at) VALUES (?, ?, ?, ?)").bind(clean, note.slice(0, 120), by, now()).run();
+  await env.DB.prepare("DELETE FROM lead_playbook WHERE id NOT IN (SELECT id FROM lead_playbook ORDER BY id DESC LIMIT 50)").run();
+  await logActivity(env, by, "lead.playbook", `Sổ tay Trưởng nhóm: ${note}`, null);
+}
+
+const canWrite = (u: User) => { if (u.role === "viewer") throw new HttpError(403, "Tài khoản chỉ xem.", "forbidden"); };
+
+// GET /api/lead/playbook
+export async function apiPlaybook(env: Env): Promise<Response> { return json(await playbookView(env)); }
+
+// PUT /api/lead/playbook { body }
+export async function apiSavePlaybook(env: Env, req: Request, user: User): Promise<Response> {
+  canWrite(user);
+  const { body } = await readJson<{ body?: string }>(req);
+  await savePlaybook(env, String(body ?? ""), "anh sửa", `user:${user.id}`);
+  return json(await playbookView(env));
+}
+
+// POST /api/lead/playbook/append { text } — ghi dòng Trưởng nhóm đề xuất từ chat (anh bấm đồng ý)
+export async function apiAppendPlaybook(env: Env, req: Request, user: User): Promise<Response> {
+  canWrite(user);
+  const { text } = await readJson<{ text?: string }>(req);
+  const line = String(text || "").replace(/\s+/g, " ").trim().slice(0, 300);
+  if (!line) throw new HttpError(400, "Không có nội dung.", "validation");
+  const cur = (await readPlaybook(env)).body;
+  if (cur.split("\n").some((l) => l.replace(/^[-*]\s*/, "").trim() === line)) return json(await playbookView(env));
+  await savePlaybook(env, `${cur}${cur ? "\n" : ""}- ${line}`, "thêm từ chat", `user:${user.id}`);
+  return json(await playbookView(env));
+}
+
+// POST /api/lead/playbook/restore/:id
+export async function apiRestorePlaybook(env: Env, user: User, id: number): Promise<Response> {
+  canWrite(user);
+  const v = await env.DB.prepare("SELECT body, at FROM lead_playbook WHERE id = ?").bind(id).first<{ body: string; at: number }>();
+  if (!v) throw new HttpError(404, "Không có phiên bản này.", "not_found");
+  await savePlaybook(env, v.body, `khôi phục bản #${id}`, `user:${user.id}`);
+  return json(await playbookView(env));
 }

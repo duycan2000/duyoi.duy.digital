@@ -12,7 +12,7 @@ import { wpSave, wpStatus, wpTest } from "./wordpress";
 import { listPrompts, reviewPrompt, spendReport } from "./manager";
 import { apiCheckMedia, apiSetupMedia } from "./cfmedia";
 import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc } from "./docs";
-import { apiLeadRun, apiLeadSend, apiLeadView, apiRunJob, processJobs } from "./lead";
+import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiReview, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { runAutopilot } from "./autopilot";
@@ -98,6 +98,11 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (docMatch[2] === "profile" && m === "PUT") return apiSaveProfile(env, req, user, sid);
   }
   if (path === "/api/lead" && m === "GET") return apiLeadView(env, user);
+  if (path === "/api/lead/playbook" && m === "GET") return apiPlaybook(env);
+  if (path === "/api/lead/playbook" && m === "PUT") return apiSavePlaybook(env, req, user);
+  if (path === "/api/lead/playbook/append" && m === "POST") return apiAppendPlaybook(env, req, user);
+  const pbMatch = path.match(/^\/api\/lead\/playbook\/restore\/(\d+)$/);
+  if (pbMatch && m === "POST") return apiRestorePlaybook(env, user, Number(pbMatch[1]));
   if (path === "/api/lead/messages" && m === "POST") return apiLeadSend(env, req, user);
   const leadMatch = path.match(/^\/api\/lead\/(messages|jobs)\/(\d+)\/run$/);
   if (leadMatch && m === "POST") return leadMatch[1] === "messages" ? apiLeadRun(env, req, user, Number(leadMatch[2])) : apiRunJob(env, user, Number(leadMatch[2]));

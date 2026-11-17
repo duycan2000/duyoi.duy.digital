@@ -124,6 +124,7 @@ export function fakeSite(opts = {}) {
     } else if (/team lead of an SEO agent team/.test(sys)) {
       const s0 = user.state.sites[0];
       const approved = s0.ideas.find((i) => i.status === "approved");
+      if (/từ nay/i.test(user.owner_message)) { content = { reply: `Em ghi nhận. Sổ tay hiện: ${user.playbook}`, plan: [], needs_from_owner: [], playbook_add: ["Ưu tiên caddemo.de, mỗi tháng 3 bài how-to"] }; return jsonRes({ choices: [{ message: { content: JSON.stringify(content) } }], usage: { prompt_tokens: 100, completion_tokens: 50, cost: 0.001 } }); }
       content = { reply: `Em thấy ${s0.domain} có ${s0.profile.ideas_from_documents.length} gợi ý từ tài liệu.`, plan: [
         { action: "create_article", site_id: s0.site_id, keyword: "cad layer vorlagen", format: "how_to", why: "Từ tài liệu" },
         ...(approved ? [{ action: "write_brief", site_id: s0.site_id, idea_id: approved.idea_id, why: "Đã duyệt" }] : []),

@@ -118,9 +118,28 @@ function autoHtml(hq) {
 const ACTION_LABEL = { research_keywords: "Nghiên cứu từ khoá", create_article: "Tạo chủ đề bài mới", write_brief: "Lập dàn ý", write_draft: "Viết bài nháp (kèm chấm)", review_draft: "Sửa và chấm lại", rescan_site: "Quét lại site" };
 const FMT = { roundup: "Best X / Top N", review: "Review", comparison: "So sánh", how_to: "How-to", guide: "Guide", article: "Bài thông tin" };
 const JSTATUS = { queued: ["Chờ chạy", "warn"], running: ["Đang chạy", "info"], done: ["Xong", "ok"], failed: ["Lỗi", "err"] };
-const SUGGEST = ["Tháng này nên viết bài gì cho từng site?", "Bài nào đang chờ tôi (sản phẩm, ảnh)?", "Site nào nên ưu tiên phục hồi trước?", "Tài liệu tôi tải lên gợi ý được bài nào?"];
+const SUGGEST = ["Từ nay ưu tiên site …, mỗi tháng … bài loại …", "Tháng này nên viết bài gì cho từng site?", "Bài nào đang chờ tôi (sản phẩm, ảnh)?", "Site nào nên ưu tiên phục hồi trước?", "Tài liệu tôi tải lên gợi ý được bài nào?"];
+
+const PB_EXAMPLE = `Ví dụ:
+- Ưu tiên: site A trước, rồi site B. Site C tạm dừng viết bài.
+- Site affiliate: ưu tiên Best X / review; mỗi tháng tối đa 3 bài.
+- Site dịch vụ: ưu tiên guide và how-to dẫn về trang dịch vụ.
+- caddienstleistungen.de: chỉ tiếng Đức, không nhắc đối thủ.
+- Bài mới phải dựa trên tài liệu site khi có.`;
+let BOOK = "";
+const inBook = (t) => BOOK.split("\n").some((l) => l.replace(/^[-*]\s*/, "").trim() === t.trim());
+
+function playbookHtml(pb) {
+  return `<details class="pb-box" open><summary>${K.icon(K.ICON.list)}Sổ tay Trưởng nhóm</summary>
+    <p class="note">Cách anh muốn Trưởng nhóm ra quyết định: site nào ưu tiên, mỗi site viết loại bài gì, luật riêng. Trưởng nhóm đọc sổ tay mỗi lần trả lời. Sổ tay không vượt được Gác cổng và luật sản phẩm.</p>
+    <form id="pb-form"><textarea name="body" rows="9" maxlength="8000" placeholder="${esc(PB_EXAMPLE)}" aria-label="Sổ tay Trưởng nhóm">${esc(pb.body)}</textarea>
+      <div class="toolbar"><button type="submit" class="primary">Lưu sổ tay</button>${pb.at ? `<small class="note">Sửa ${esc(ago(pb.at))}</small>` : ""}</div></form>
+    ${pb.versions.length > 1 ? `<details><summary>Phiên bản trước (${pb.versions.length - 1})</summary><div class="pb-versions">${pb.versions.slice(1).map((v) => `<div><small>${esc(fmtTime(v.at))} · ${esc(v.note || "")} · ${v.chars} ký tự</small><button type="button" data-pb-restore="${v.id}">Khôi phục</button></div>`).join("")}</div></details>` : ""}
+  </details>`;
+}
 
 function leadHtml(lead, hq, admin) {
+  BOOK = lead.playbook.body || "";
   const domains = Object.fromEntries((hq.autopilot.sites || []).map((s) => [s.siteId, s.domain]));
   const msg = (m) => {
     if (m.role === "user") return `<div class="bubble me"><p>${esc(m.content).replace(/\n/g, "<br>")}</p><time>${esc(fmtTime(m.at))}</time></div>`;
@@ -132,6 +151,7 @@ function leadHtml(lead, hq, admin) {
         ${x.why ? `<small>${esc(x.why)}</small>` : ""}${x.ok ? "" : `<small class="err">Không giao được: ${esc(x.problem || "")}</small>`}</span></label>`).join("")}
         ${can ? `<div class="toolbar"><button type="submit" class="primary">Giao việc đã chọn</button></div>` : m.ran_at ? `<small class="note">Đã giao ${esc(fmtTime(m.ran_at))}</small>` : ""}
       </form>` : ""}
+      ${m.plan?.playbookAdd?.length ? `<div class="pb-add"><b>Ghi vào Sổ tay Trưởng nhóm?</b>${m.plan.playbookAdd.map((t) => `<div class="pb-line"><span>${esc(t)}</span>${inBook(t) ? `<small class="ok">Đã có trong sổ tay</small>` : `<button type="button" data-pb-add="${esc(t)}">Ghi vào sổ tay</button>`}</div>`).join("")}</div>` : ""}
       ${m.plan?.needs?.length ? `<div class="needs"><b>Anh cần đưa:</b><ul>${m.plan.needs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       <time>${esc(fmtTime(m.at))}</time></div>`;
   };
@@ -147,6 +167,7 @@ function leadHtml(lead, hq, admin) {
       </form>
     </div>
     <div class="jobs">
+      ${playbookHtml(lead.playbook)}
       <h3 class="sub">${K.icon(K.ICON.list)}Hàng việc</h3>
       <p class="note">Việc nhẹ chạy ngay khi giao; việc nặng (dàn ý, viết, chấm, quét lại) chạy ở lượt cron 15 phút kế tiếp, hoặc anh bấm Chạy ngay.</p>
       ${lead.jobs.length ? lead.jobs.map((j) => `<div class="job">
@@ -187,6 +208,21 @@ function bindLead(main) {
       catch (e) { showMsg($("#lead-msg", main), e.message); }
     });
   }));
+  $("#pb-form", main)?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    busy(ev.submitter, "Đang lưu…", async () => {
+      try { await api("/api/lead/playbook", { method: "PUT", body: { body: $("textarea", ev.currentTarget).value } }); await again(); }
+      catch (e) { showMsg($("#lead-msg", main), e.message); }
+    });
+  });
+  $$("[data-pb-add]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang ghi…", async () => {
+    try { await api("/api/lead/playbook/append", { method: "POST", body: { text: b.dataset.pbAdd } }); await again(); }
+    catch (e) { showMsg($("#lead-msg", main), e.message); }
+  })));
+  $$("[data-pb-restore]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { await api(`/api/lead/playbook/restore/${b.dataset.pbRestore}`, { method: "POST" }); await again(); }
+    catch (e) { showMsg($("#lead-msg", main), e.message); }
+  })));
   $$("[data-job-run]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang chạy…", async () => {
     try { const r = await api(`/api/lead/jobs/${b.dataset.jobRun}/run`, { method: "POST" }); if (!r.ok) showMsg($("#lead-msg", main), r.error); await again(); }
     catch (e) { showMsg($("#lead-msg", main), e.message); }

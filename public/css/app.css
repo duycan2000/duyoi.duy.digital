@@ -564,3 +564,11 @@ small.ok { color: #3f8a00; }
 @media (max-width: 960px) { .lead-wrap { grid-template-columns: 1fr; } .bubble { max-width: 100%; } }
 label.plan-item { flex-direction: row; font-size: 13px; color: var(--text, inherit); }
 .plan-item input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; flex: none; padding: 0; margin: 3px 0 0; }
+.pb-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px; }
+.pb-box > summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.pb-box textarea { width: 100%; font-size: 13px; }
+.pb-versions { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.pb-versions div { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pb-add { background: rgba(38, 76, 200, 0.07); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.pb-line { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
+.pb-line button { flex: none; }

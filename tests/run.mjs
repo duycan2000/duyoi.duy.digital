@@ -769,6 +769,22 @@ await test("tài liệu PDF → Hồ sơ site, Biên tập viên chấm và sử
     lv = await c6("GET", "/api/lead");
     assert.equal(lv.data.messages.length, 2);
     assert.ok(lv.data.messages[1].ran_at);
+    // Sổ tay Trưởng nhóm: anh viết, Trưởng nhóm đọc; quy tắc mới từ chat chỉ vào sổ tay khi anh bấm ghi
+    assert.equal((await c6("PUT", "/api/lead/playbook", { body: "- Site affiliate: ưu tiên Best X và review" })).status, 200);
+    const pb1 = await c6("POST", "/api/lead/messages", { text: "Từ nay ưu tiên caddemo.de" });
+    assert.match(pb1.data.reply, /Site affiliate: ưu tiên Best X/, "Trưởng nhóm nhận được sổ tay");
+    assert.deepEqual(pb1.data.playbookAdd, ["Ưu tiên caddemo.de, mỗi tháng 3 bài how-to"]);
+    let pb = await c6("GET", "/api/lead/playbook");
+    assert.ok(!pb.data.body.includes("3 bài how-to"), "chưa bấm thì chưa ghi");
+    pb = await c6("POST", "/api/lead/playbook/append", { text: pb1.data.playbookAdd[0] });
+    assert.equal(pb.data.body, "- Site affiliate: ưu tiên Best X và review\n- Ưu tiên caddemo.de, mỗi tháng 3 bài how-to");
+    await c6("POST", "/api/lead/playbook/append", { text: pb1.data.playbookAdd[0] });
+    pb = await c6("GET", "/api/lead/playbook");
+    assert.equal(pb.data.versions.length, 2, "ghi trùng không tạo bản mới");
+    pb = await c6("POST", `/api/lead/playbook/restore/${pb.data.versions[1].id}`);
+    assert.equal(pb.data.body, "- Site affiliate: ưu tiên Best X và review");
+    assert.equal(pb.data.versions.length, 3);
+    assert.equal((await c6("PUT", "/api/lead/playbook", { body: "x".repeat(8001) })).status, 400);
     const hq = await c6("GET", "/api/hq");
     assert.equal(hq.data.lead.done, 2);
     assert.ok(hq.data.zones.content.some((a) => a.id === "editor") && hq.data.zones.content.some((a) => a.id === "docs"));
