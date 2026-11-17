@@ -554,8 +554,9 @@ await test("định dạng bài: Best X có sản phẩm affiliate, công khai, 
   assert.ok(pr.data.prompts.find((p) => p.id === "article_draft").formats.length === 6);
   for (const p of pr.data.prompts) assert.equal((await c5("PUT", `/api/manager/prompts/${p.id}`, { status: "approved" })).status, 200, p.id);
   const wp = { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" };
+  const cfState = { token: "cf-token", buckets: {}, workers: {}, routes: [] };
   const realFetch = globalThis.fetch;
-  globalThis.fetch = fakeSite({ wp });
+  globalThis.fetch = fakeSite({ wp, cf: cfState });
   try {
     const cr = await c5("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/"] } });
     const caseId = cr.data.id;
@@ -682,6 +683,9 @@ await test("định dạng bài: Best X có sản phẩm affiliate, công khai, 
     ct2 = await c5("GET", `/api/content/${caseId}`);
     assert.equal(ct2.data.media.verified, true);
     assert.equal((await c5("POST", `/api/sites/${siteId}/media`)).data.ok, true, "chạy lại không tạo route trùng");
+    const code = Object.values(cfState.workers)[0].code;
+    assert.match(code, /if \(!obj\) return fetch\(req\);/, "ảnh không có trong bucket thì chuyển về site");
+    assert.ok(!/Not found/.test(code));
     assert.equal((await up("p1", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz")).status, 409);
   } finally {
     globalThis.fetch = realFetch;

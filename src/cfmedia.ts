@@ -12,7 +12,8 @@ const slug = (domain: string) => domain.toLowerCase().replace(/^www\./, "").repl
 export const bucketNameFor = (domain: string) => `img-${slug(domain)}`.slice(0, 63).replace(/-$/, "");
 export const workerNameFor = (domain: string) => `duyoi-img-${slug(domain)}`.slice(0, 63).replace(/-$/, "");
 
-// Mã Worker phục vụ ảnh (chỉ GET/HEAD dưới /images/, có cache để ít lượt đọc R2)
+// Mã Worker phục vụ ảnh (chỉ GET/HEAD dưới /images/, có cache để ít lượt đọc R2).
+// Route được ưu tiên hơn Custom Domain cùng tên miền và fetch(req) gọi tiếp Worker của site, nên không che ảnh có sẵn của site.
 export const IMAGE_WORKER = `export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -23,7 +24,8 @@ export const IMAGE_WORKER = `export default {
     if (hit) return hit;
     const key = decodeURIComponent(url.pathname.slice(${IMAGE_PREFIX.length}));
     const obj = await env.IMAGES.get(key);
-    if (!obj) return new Response("Not found", { status: 404 });
+    // Không có trong bucket: chuyển tiếp về site (Custom Domain), để ảnh sẵn có trong public/images/ của Astro vẫn hiện
+    if (!obj) return fetch(req);
     const h = new Headers();
     obj.writeHttpMetadata(h);
     h.set("etag", obj.httpEtag);
