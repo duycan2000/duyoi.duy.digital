@@ -276,7 +276,19 @@ export async function listCases(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     "SELECT c.*, s.domain, s.name, (SELECT COUNT(*) FROM recovery_tasks t WHERE t.case_id = c.id AND t.status IN ('proposed', 'blocked')) AS open_tasks FROM recovery_cases c JOIN sites s ON s.id = c.site_id WHERE c.status != 'archived' ORDER BY c.id DESC LIMIT 100"
   ).all<CaseRow & { open_tasks: number }>();
-  return json({ cases: results.map((c) => ({ ...caseApi(c), openTasks: c.open_tasks })), agents: RECOVERY_AGENTS });
+  // Trạng thái cài đặt cho phần hướng dẫn (không trả bí mật, chỉ biết đã có hay chưa)
+  const sec = await env.DB.prepare("SELECT key, hint FROM secrets WHERE key IN ('google_service_account', 'openrouter_api_key') OR key LIKE 'wp:%'").all<{ key: string; hint: string }>();
+  const has = (k: string) => sec.results.find((r) => r.key === k);
+  const wpSites = await env.DB.prepare("SELECT id, domain, platform, wp_user FROM sites WHERE status != 'archived' AND platform != 'astro' ORDER BY domain").all<{ id: number; domain: string; platform: string; wp_user: string | null }>();
+  const rulesRows = await env.DB.prepare("SELECT c.site_id, c.rules FROM recovery_cases c WHERE c.id IN (SELECT MAX(id) FROM recovery_cases GROUP BY site_id)").all<{ site_id: number; rules: string }>();
+  const ruleOf = new Map(rulesRows.results.map((r) => [r.site_id, readRules(r.rules)]));
+  const setup = {
+    googleServiceAccount: Boolean(has("google_service_account")),
+    googleEmail: has("google_service_account")?.hint || null,
+    openrouter: Boolean(has("openrouter_api_key")),
+    sites: wpSites.results.map((x) => ({ id: x.id, domain: x.domain, wpConnected: Boolean(x.wp_user && has(`wp:${x.id}`)), gscProperty: ruleOf.get(x.id)?.gscProperty || "", ga4Property: ruleOf.get(x.id)?.ga4Property || "" }))
+  };
+  return json({ cases: results.map((c) => ({ ...caseApi(c), openTasks: c.open_tasks })), agents: RECOVERY_AGENTS, setup });
 }
 
 // GET /api/recovery/:id

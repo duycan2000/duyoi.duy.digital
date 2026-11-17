@@ -27,7 +27,7 @@ export async function viewRecovery(main, args, kit) {
 // ---------------- Danh sách ca + form nhập site ----------------
 
 async function viewList(main) {
-  const { cases, agents } = await api("/api/recovery");
+  const { cases, agents, setup } = await api("/api/recovery");
   const canEdit = K.state.user.role !== "viewer";
   main.innerHTML = `
   <div class="page">
@@ -55,8 +55,10 @@ async function viewList(main) {
           <td>${esc(ago(c.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="empty"><b>Chưa có site nào được chẩn đoán</b><span>Nhập địa chỉ site ở trên để đội agent bắt đầu.</span></div>`}
     </div>
+    ${guideHtml(setup)}
     <div class="card"><h3>Đội agent phục hồi</h3>${agentGrid(agents)}</div>
   </div>`;
+  try { if (sessionStorage.getItem("duyoi_open_guide")) { sessionStorage.removeItem("duyoi_open_guide"); const g = $("#guide"); g.open = true; g.scrollIntoView({ block: "start" }); } } catch { /* bỏ qua */ }
   $$("tr[data-href]", main).forEach((tr) => {
     const go = () => { location.hash = tr.dataset.href; };
     tr.addEventListener("click", go);
@@ -75,6 +77,65 @@ async function viewList(main) {
       } catch (e) { showMsg($("#rec-msg"), e.message); }
     });
   });
+}
+
+// ---------------- Hướng dẫn cài đặt (cho mọi người dùng app) ----------------
+
+const done = (ok) => `<span class="step-ic ${ok ? "ok" : ""}">${ok ? "✓" : "!"}</span>`;
+
+function guideHtml(st) {
+  const admin = K.state.user.role === "admin";
+  const sites = st?.sites || [];
+  const allWp = sites.length > 0 && sites.every((x) => x.wpConnected);
+  const allGsc = sites.length > 0 && sites.every((x) => x.gscProperty);
+  const complete = st && st.googleServiceAccount && st.openrouter && allWp && allGsc;
+  return `<details class="card guide" id="guide"${complete ? "" : " open"}>
+    <summary><h3>Hướng dẫn cài đặt để chạy với site thật</h3><span class="tag ${complete ? "ok" : "warn"}">${complete ? "Đã đủ" : "Còn thiếu bước"}</span></summary>
+    <p class="note">Không có các bước này, app vẫn quét và chẩn đoán được (chỉ đọc site như Googlebot). Các bước dưới đây để app <b>áp dụng việc đã duyệt</b>, <b>đọc traffic thật</b> và <b>dùng AI viết</b>.</p>
+
+    <div class="guide-step">
+      <div class="guide-head">${done(allWp)}<b>1. Kết nối WordPress (làm cho từng site)</b></div>
+      <ol class="steps">
+        <li><a href="/duyoi-connector.zip" download>Tải plugin Duy Ơi Connector</a>. Vào WordPress › Plugins › Add New › Upload Plugin, chọn file zip, cài và bật.</li>
+        <li>Vào Users › Add New: tạo user riêng cho app, ví dụ <code>duyoi-bot</code>, quyền <b>Editor</b>. Không dùng tài khoản admin.</li>
+        <li>Đăng nhập bằng user đó › Users › Profile › mục <b>Application Passwords</b>: đặt tên "Duy Ơi" › Add New Application Password. Copy mật khẩu (dạng <code>xxxx xxxx xxxx xxxx</code>, chỉ hiện một lần).</li>
+        <li>Trong app: Site › chọn site › khung <b>Kết nối WordPress</b> › nhập user và mật khẩu › Lưu kết nối › <b>Thử kết nối</b>. Thấy "Kết nối được" là xong.</li>
+      </ol>
+      ${sites.length ? `<ul class="site-status">${sites.map((x) => `<li>${done(x.wpConnected)}<a href="#/sites/${x.id}">${esc(x.domain)}</a><span class="note">${x.wpConnected ? "đã kết nối" : "chưa kết nối"}</span></li>`).join("")}</ul>` : `<p class="note">Chưa có site WordPress nào. Site sẽ được thêm khi anh chẩn đoán ở trên.</p>`}
+    </div>
+
+    <div class="guide-step">
+      <div class="guide-head">${done(st?.googleServiceAccount)}<b>2. Google Search Console và GA4 (làm một lần cho cả app)</b></div>
+      <ol class="steps">
+        <li>Vào <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>, tạo (hoặc chọn) một project.</li>
+        <li>APIs &amp; Services › Library: bật <b>Google Search Console API</b> và <b>Google Analytics Data API</b>.</li>
+        <li>IAM &amp; Admin › Service Accounts › Create service account (không cần cấp role). Mở service account › Keys › Add key › JSON: file JSON được tải về.</li>
+        <li>Trong app: ${admin ? `<a href="#/settings/keys">Cài đặt › API key</a>` : "Cài đặt › API key (admin làm)"} › <b>Google service account (JSON)</b> › dán nguyên nội dung file › Lưu.</li>
+        <li>Search Console › chọn property › Settings › Users and permissions › Add user: dán email service account${st?.googleEmail ? ` (<code>${esc(st.googleEmail)}</code>)` : ""}, quyền <b>Restricted</b>. Làm cho từng site.</li>
+        <li>GA4 › Admin › Property access management › thêm cùng email đó, quyền <b>Viewer</b>. Lấy <b>Property ID</b> (dãy số) ở Admin › Property details.</li>
+        <li>Mở ca phục hồi của từng site › tab <b>Luật an toàn</b> › nhập property: Domain property ghi <code>sc-domain:ten-mien.de</code>, URL-prefix ghi nguyên <code>https://ten-mien.com/</code> (có dấu / cuối); nhập GA4 property ID › Lưu. Ghi sai loại property sẽ báo "không có quyền" dù đã cấp quyền.</li>
+      </ol>
+      ${sites.length ? `<ul class="site-status">${sites.map((x) => `<li>${done(Boolean(x.gscProperty))}<span>${esc(x.domain)}</span><span class="note">${x.gscProperty ? esc(x.gscProperty) : "chưa nhập property Search Console"}${x.ga4Property ? ` · GA4 ${esc(x.ga4Property)}` : " · chưa có GA4"}</span></li>`).join("")}</ul>` : ""}
+    </div>
+
+    <div class="guide-step">
+      <div class="guide-head">${done(st?.openrouter)}<b>3. AI viết (OpenRouter)</b></div>
+      <ol class="steps">
+        <li>Tạo key tại <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai › Keys</a>, nên đặt giới hạn chi tiêu ngay trên OpenRouter.</li>
+        <li>Dán vào ${admin ? `<a href="#/settings/keys">Cài đặt › API key</a>` : "Cài đặt › API key"} › OpenRouter API key. Trần chi phí tháng chỉnh ở tab Model AI &amp; chi phí.</li>
+      </ol>
+    </div>
+
+    <div class="guide-step">
+      <div class="guide-head"><span class="step-ic">i</span><b>Quy trình làm việc an toàn</b></div>
+      <ol class="steps">
+        <li>Chẩn đoán site › đọc tab Chẩn đoán › mở tab Việc của agent.</li>
+        <li>Đọc diff từng việc, bấm <b>Duyệt</b>. Việc "Khó đảo ngược" (redirect, xoá trang, canonical, disavow) chỉ admin duyệt và người làm tay.</li>
+        <li>Bấm <b>Áp dụng lên site</b>: app chạy thử, sao lưu bản gốc rồi mới ghi, tự xoá cache. Mở trang ra kiểm tra; sai thì bấm <b>Hoàn tác</b>.</li>
+        <li>Mỗi lần chỉ sửa vài trang. Lần đầu nên thử một việc chèn link rồi thử Hoàn tác để chắc mọi thứ chạy đúng.</li>
+      </ol>
+    </div>
+  </details>`;
 }
 
 const agentGrid = (agents, tasks = []) => `<div class="agent-grid">${agents.map((a) => {
@@ -97,7 +158,7 @@ async function viewCase(main, id) {
   <div class="page">
     <div class="page-head">
       <div><h2>${esc(c.domain)}</h2><p>${tag([STATUS[c.status] || c.status, c.status === "ready" ? "ok" : c.status === "failed" ? "err" : "info"])} ${c.finishedAt ? `Chẩn đoán lúc ${esc(fmtTime(c.finishedAt))}` : ""}${c.dropMonth ? ` · tụt từ ${esc(c.dropMonth)}` : ""}</p></div>
-      <div class="toolbar"><a class="btn" href="#/recovery">← Danh sách</a>${canEdit ? `<button type="button" id="rec-rescan"${running ? " disabled" : ""}>${K.icon(K.ICON.search)}Quét lại</button>` : ""}<a class="btn" href="https://${esc(c.domain)}/" target="_blank" rel="noopener">Mở site</a></div>
+      <div class="toolbar"><a class="btn" href="#/recovery">← Danh sách</a>${canEdit ? `<button type="button" id="rec-rescan"${running ? " disabled" : ""}>${K.icon(K.ICON.search)}Quét lại</button>` : ""}<a class="btn" href="https://${esc(c.domain)}/" target="_blank" rel="noopener">Mở site</a><a class="btn" href="#/recovery" data-guide>Hướng dẫn</a></div>
     </div>
     <div class="msg" id="case-msg" hidden></div>
     ${c.status === "failed" ? `<div class="msg err">${esc(c.error || "Quét thất bại.")}</div>` : ""}
@@ -283,6 +344,7 @@ function linksHtml(c, canEdit) {
 
 function bindCase(main, c, canEdit) {
   const reload = () => viewCase(main, c.id);
+  $("[data-guide]", main)?.addEventListener("click", () => { sessionStorage.setItem("duyoi_open_guide", "1"); });
   const rescan = $("#rec-rescan");
   if (rescan) rescan.addEventListener("click", () => busy(rescan, "Đang bắt đầu…", async () => {
     try { await api(`/api/recovery/${c.id}/rescan`, { method: "POST" }); await reload(); } catch (e) { showMsg($("#case-msg"), e.message); }

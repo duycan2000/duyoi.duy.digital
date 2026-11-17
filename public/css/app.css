@@ -346,6 +346,17 @@ ul.urls { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--mut
 .traffic-box b { font-size: 20px; font-weight: 500; }
 .traffic-box small { color: var(--muted); font-size: 12px; }
 ol.steps { margin: 0; padding-left: 20px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.guide summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; list-style: none; color: var(--text); font-size: inherit; }
+.guide summary::-webkit-details-marker { display: none; }
+.guide summary h3::before { content: "▸ "; color: var(--muted); }
+.guide[open] summary h3::before { content: "▾ "; }
+.guide-step { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.guide-head { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.guide-head b { font-weight: 600; }
+.step-ic { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; flex: none; font-size: 13px; font-weight: 600; background: rgba(255, 180, 0, 0.16); color: #b07e00; }
+.step-ic.ok { background: rgba(86, 202, 0, 0.14); color: #3f9700; }
+.site-status { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.site-status li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Thành viên */
 .member { display: flex; align-items: center; gap: 12px; }
@@ -450,3 +461,5 @@ pre.cred { margin: 0; padding: 14px 16px; background: var(--bg); border-radius: 
   .auth { padding: 24px 14px 160px; }
   .auth-card { padding: 30px 22px; }
 }
+.guide > * + * { margin-top: 14px; }
+.guide > p.note { margin-top: 10px; }
