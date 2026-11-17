@@ -537,7 +537,7 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     // Agent HQ
     const hq = await c4("GET", "/api/hq");
     assert.equal(hq.status, 200);
-    assert.equal(hq.data.manager.promptsPending, 5, "chưa duyệt: đọc tài liệu, giọng văn, chấm bài, sửa bài, Trưởng nhóm");
+    assert.equal(hq.data.manager.promptsPending, 6, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm");
     assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 6);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
@@ -797,6 +797,26 @@ await test("tài liệu PDF → Hồ sơ site, Biên tập viên chấm và sử
     assert.match(oi.draft.html, /<li><strong>Grundrisse<\/strong> als DWG<\/li>/);
     assert.equal(oi.gate.problems.find((p) => p.rule === "numbers")?.level, "warn", "anh tự viết: số liệu chỉ nhắc, không chặn");
     assert.deepEqual(oi.draft.review.rounds, [62]);
+
+    // Anh không có trải nghiệm: bỏ qua phỏng vấn → agent tra Google, dữ kiện có nguồn, link nguồn giữ lại trong bài
+    const wfI = await c6("POST", `/api/content/${caseId}/ideas`, { keyword: "tga ablauf hoai leistungsphasen", format: "article", hub_path: "/cad-dienstleistung-tga/" });
+    await c6("PUT", `/api/content/ideas/${wfI.data.id}`, { status: "approved" });
+    await c6("POST", `/api/content/ideas/${wfI.data.id}/brief`);
+    await c6("PUT", `/api/content/ideas/${wfI.data.id}/interview`, { skip: true });
+    ctI = await c6("GET", `/api/content/${caseId}`);
+    const wfIdea = ctI.data.ideas.find((x) => x.id === wfI.data.id);
+    assert.deepEqual(wfIdea.brief.web_facts, [{ text: "Die HOAI gliedert die Planung in die Leistungsphasen 1 bis 9.", source_url: "https://example.de/a", source_title: "TGA-Ratgeber" }], "chỉ giữ dữ kiện có nguồn thật trong các trang đã đọc");
+    await c6("PUT", `/api/content/ideas/${wfI.data.id}`, { author: "agent" });
+    const wd = await c6("POST", `/api/content/ideas/${wfI.data.id}/draft`);
+    assert.equal(wd.status, 200, JSON.stringify(wd.data));
+    const wdIn = JSON.parse(seen.filter((x) => /write ONE article draft/.test(x.template)).pop().body.messages[1].content);
+    assert.equal(wdIn.web_facts.length, 1);
+    ctI = await c6("GET", `/api/content/${caseId}`);
+    const wdIdea = ctI.data.ideas.find((x) => x.id === wfI.data.id);
+    assert.match(wdIdea.draft.html, /Laut <a href="https:\/\/example\.de\/a" rel="noopener" target="_blank">TGA-Ratgeber<\/a>/);
+    assert.ok(!wdIdea.draft.html.includes("evil.example"), "link ngoài không phải nguồn bị bỏ");
+    assert.ok(!wdIdea.gate.problems.some((p) => p.rule === "numbers"), JSON.stringify(wdIdea.gate.problems.find((p) => p.rule === "numbers")));
+    assert.match((await c6("GET", `/api/content/ideas/${wfI.data.id}/handoff.md`)).text, /Dữ liệu tra từ Google[\s\S]*\[TGA-Ratgeber\]\(https:\/\/example\.de\/a\)/);
 
     // Trưởng nhóm: trả lời từ tình trạng thật, việc lạ/ID bịa bị đánh dấu không hợp lệ
     const ap = await c6("POST", `/api/content/${caseId}/ideas`, { keyword: "bim modellierung kosten", format: "guide" });

@@ -12,6 +12,7 @@ import { readRules, type SiteRules } from "./recovery-rules";
 import { wpCall } from "./wordpress";
 import { mediaReady, mediaSite, storeImage } from "./media";
 import { profileFor, profileNumbers, readProfile, type Profile } from "./docs";
+import { clean as decodeText } from "./recovery-extract";
 import { checkStructure, checkVoice, clichesFor, markdownToHtml } from "./style";
 import { imageSize, MAX_IMAGE_BYTES, sniffImage, stripJpegMeta } from "./images";
 import { checkFormat, detectFormat, FORMATS, formatOf, formatSpec, parseProducts, productNumbers, readImages, readProducts, renderDraft, slotsFor, type FormatId, type Slot, type UploadedImage } from "./formats";
@@ -173,7 +174,10 @@ export async function briefCore(env: Env, ideaId: number, actor: string): Promis
 // ---------------- Bài nháp ----------------
 
 const ALLOWED = new Set(["h2", "h3", "p", "ul", "ol", "li", "strong", "em", "a", "table", "thead", "tbody", "tr", "th", "td", "br"]);
-export function cleanHtml(html: string): string {
+// allowExternal: danh sách link nguồn được phép (dữ liệu tra Google), hoặc "all" cho bài anh tự viết
+export function cleanHtml(html: string, allowExternal: string[] | "all" = []): string {
+  const norm = (u: string) => u.replace(/#.*$/, "").replace(/\/$/, "");
+  const okExt = (href: string) => /^https?:\/\//i.test(href) && (allowExternal === "all" || allowExternal.some((x) => norm(x) === norm(href)));
   return html
     .replace(/<(script|style|iframe|object|embed)\b[\s\S]*?<\/\1>/gi, "")
     .replace(/<\/?([a-z0-9]+)\b([^>]*)>/gi, (m, tag: string, attrs: string) => {
@@ -181,7 +185,12 @@ export function cleanHtml(html: string): string {
       if (!ALLOWED.has(t)) return "";
       if (m.startsWith("</")) return `</${t}>`;
       // Chỉ giữ link nội bộ: model không được tự viết URL ngoài (link affiliate do hệ thống chèn)
-      if (t === "a") { const href = (attrs.match(/href\s*=\s*"([^"]*)"/i) || [])[1] || ""; return /^\/(?!\/)/.test(href) ? `<a href="${href.replace(/"/g, "")}">` : "<a>"; }
+      if (t === "a") {
+        const href = ((attrs.match(/href\s*=\s*"([^"]*)"/i) || attrs.match(/href\s*=\s*'([^']*)'/i) || [])[1] || "").replace(/&amp;/g, "&");
+        if (/^\/(?!\/)/.test(href)) return `<a href="${href.replace(/"/g, "")}">`;
+        if (okExt(href) && !/^javascript:/i.test(href)) return `<a href="${href.replace(/"/g, "%22")}" rel="noopener" target="_blank">`;
+        return "<a>";
+      }
       return `<${t}>`;
     })
     .replace(/<a>([\s\S]*?)<\/a>/g, "$1")
@@ -228,15 +237,57 @@ const answered = (iv: Interview | null) => (iv ? iv.questions.map((q, n) => ({ q
 // Agent còn chờ anh trả lời phỏng vấn?
 export const waitingInterview = (iv: Interview | null, required: boolean) => required && !!iv && iv.questions.length > 0 && !iv.skipped && answered(iv).length === 0;
 const interviewNumbers = (iv: Interview | null) => answered(iv).flatMap((x) => extractNumbers(x.a));
+interface WebFact { text: string; source_url: string; source_title: string }
+const webFactsOf = (brief: unknown): WebFact[] => { const w = (brief as { web_facts?: WebFact[] } | null)?.web_facts; return Array.isArray(w) ? w : []; };
+const webNumbers = (brief: unknown) => webFactsOf(brief).flatMap((f) => extractNumbers(f.text));
+const webSources = (brief: unknown) => [...new Set(webFactsOf(brief).map((f) => f.source_url))];
+
+// Không có trải nghiệm của anh: tra top Google, rút dữ kiện có nguồn (agent Nghiên cứu)
+export async function webFactsCore(env: Env, ideaId: number, actor: string): Promise<number> {
+  const i = await idea(env, ideaId);
+  if (!i.brief) throw new HttpError(409, "Cần lập dàn ý trước.", "no_brief");
+  const c = await caseInfo(env, i.case_id!);
+  const rules = readRules(c.rules);
+  const brief = JSON.parse(i.brief) as Record<string, unknown> & { serp?: { top?: { title: string; url: string }[] }; outline?: { h2?: string }[] };
+  let top = brief.serp?.top || [];
+  if (!top.length) top = (await serpInfo(env, c.site_id, i.keyword, c.market || "US", rules.language || c.language)).top;
+  const own = c.domain.replace(/^www\./, "");
+  const skip = [own, ...rules.relatedDomains, ...rules.blocklist].map((d) => d.toLowerCase()).filter(Boolean);
+  const pages: { url: string; title: string; text: string }[] = [];
+  for (const t of top) {
+    if (pages.length >= 5) break;
+    let host = "";
+    try { host = new URL(t.url).hostname.replace(/^www\./, "").toLowerCase(); } catch { continue; }
+    if (skip.some((d) => host === d || host.endsWith(`.${d}`) || t.url.toLowerCase().includes(d))) continue;
+    const res = await fetch(t.url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DuyOi/1.0)" }, signal: AbortSignal.timeout(12000) }).catch(() => null);
+    if (!res?.ok || !/html/i.test(res.headers.get("content-type") || "html")) continue;
+    const html = (await res.text()).slice(0, 600000);
+    const main = (html.match(/<article[\s\S]*?<\/article>/i) || html.match(/<main[\s\S]*?<\/main>/i) || [html])[0].replace(/<(script|style|nav|header|footer|aside|form)[\s\S]*?<\/\1>/gi, " ");
+    const text = decodeText(main).split(" ").slice(0, 1500).join(" ");
+    if (text.split(" ").length >= 120) pages.push({ url: t.url, title: t.title, text });
+  }
+  if (!pages.length) throw new HttpError(502, "Không đọc được trang nào trong top Google cho từ khoá này.", "no_sources");
+  const r = await aiJson<{ facts?: unknown[] }>(env, {
+    template: "web_facts", task: "content.web_facts", siteId: c.site_id,
+    rules: `${writingRules(rules.language || c.language, [], rules.blocklist).replace(/Do NOT write any number[^\n]*/, "Copy numbers exactly as the source states them; never add numbers.")}`,
+    input: { keyword: i.keyword, outline: (brief.outline || []).map((o) => o.h2), sources: pages }
+  });
+  const urls = new Set(pages.map((p) => p.url));
+  const facts: WebFact[] = (Array.isArray(r.facts) ? r.facts : []).slice(0, 15).map((f) => { const x = (f || {}) as Record<string, unknown>; return { text: String(x.text || "").trim().slice(0, 400), source_url: String(x.source_url || ""), source_title: String(x.source_title || "").slice(0, 160) }; })
+    .filter((f) => f.text && urls.has(f.source_url)).map((f) => ({ ...f, source_title: f.source_title || pages.find((p) => p.url === f.source_url)!.title }));
+  await env.DB.prepare("UPDATE content_ideas SET brief = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify({ ...brief, web_facts: facts, web_facts_at: now() }), now(), ideaId).run();
+  await logActivity(env, actor, "content.web_facts", `Tra Google cho "${i.keyword}": ${facts.length} dữ kiện có nguồn từ ${pages.length} trang`, c.site_id);
+  return facts.length;
+}
 
 const writerInput = (x: Ctx) => ({
   format: x.i.format, keyword: x.i.keyword,
   outline: { title: x.brief.title, sections: x.brief.outline },
   products: x.products.items.map((p, n) => ({ n: n + 1, name: p.name, best_for: p.bestFor, tested: p.tested, owner_notes: p.notes, specs: p.specs, pros: p.pros, cons: p.cons })),
-  voice: profileFor(x.profile, x.i.keyword).voice, owner_interview: answered(readInterview(x.i.interview)),
+  voice: profileFor(x.profile, x.i.keyword).voice, owner_interview: answered(readInterview(x.i.interview)), web_facts: webFactsOf(x.brief),
   site_profile: profileFor(x.profile, x.i.keyword), paa: x.brief.serp?.paa || []
 });
-const rulesFor = (x: Ctx) => `${writingRules(x.lang, [...x.rules.verifiedNumbers, ...productNumbers(x.products), ...profileNumbers(x.profile), ...interviewNumbers(readInterview(x.i.interview))], blockOf(x.rules, x.profile))}\nNever use these stock phrases: ${clichesFor(x.lang).join(" | ")}.`;
+const rulesFor = (x: Ctx) => `${writingRules(x.lang, [...x.rules.verifiedNumbers, ...productNumbers(x.products), ...profileNumbers(x.profile), ...interviewNumbers(readInterview(x.i.interview)), ...webNumbers(x.brief)], blockOf(x.rules, x.profile))}\nNever use these stock phrases: ${clichesFor(x.lang).join(" | ")}.`;
 
 // Biên tập viên chấm (model khác người viết)
 async function reviewOnce(env: Env, x: Ctx, raw: string): Promise<Omit<Review, "rounds" | "at">> {
@@ -260,7 +311,7 @@ async function reviseOnce(env: Env, x: Ctx, raw: string, issues: Review["issues"
     template: "article_revise", task: "content.revise", siteId: x.c.site_id, format: formatSpec(x.i.format),
     rules: rulesFor(x), input: { ...writerInput(x), draft_html: raw, issues }
   });
-  const out = cleanHtml(String(r.html || ""));
+  const out = cleanHtml(String(r.html || ""), x.i.author === "owner" ? "all" : webSources(x.brief));
   const need = tokensOf(raw);
   const have = tokensOf(out);
   if (!out || [...need].some((t) => !have.has(t))) return raw;
@@ -303,13 +354,15 @@ async function regate(env: Env, i: IdeaRow, c: CaseInfo, draft: Draft): Promise<
   const profile = await readProfile(env, c.site_id);
   const extra = checkFormat({ format: i.format, title: draft.title, html, products, slots, rules });
   extra.push(...checkStructure(i.format, draft.raw ?? draft.html, products, slots), ...checkVoice(html, rules.language || c.language));
+  const wf = webSources(i.brief ? JSON.parse(i.brief) : null);
+  if (wf.length && draft.author !== "owner" && !wf.some((u) => html.includes(u.replace(/"/g, "%22")))) extra.push({ rule: "sources", level: "warn", message: "Bài dùng dữ liệu tra từ Google nhưng chưa có link nguồn nào: thêm link tới nguồn trong câu có số liệu." });
   const rv = draft.review;
   if (!rv) extra.push({ rule: "quality", level: "warn", message: `Chưa được Biên tập viên chấm${draft.reviewError ? `: ${draft.reviewError}` : ""}.` });
   else if (rv.score < 60) extra.push({ rule: "quality", level: "block", message: `Biên tập viên chấm ${rv.score}/100 (dưới 60): bấm "Sửa theo nhận xét" hoặc viết lại.` });
   else if (rv.score < rules.minQualityScore) extra.push({ rule: "quality", level: "warn", message: `Biên tập viên chấm ${rv.score}/100, dưới mức anh đặt (${rules.minQualityScore}).` });
   const media = await mediaReady(env, await mediaSite(env, c.site_id));
   if (!media.verified && slots.some((s) => s.image)) extra.push({ rule: "media", level: "block", message: `Site chưa phục vụ ảnh ở ${media.base}: bấm "Dựng kho ảnh" (hoặc Kiểm tra lại) ở mục Ảnh thật.` });
-  const gate = checkArticle(html, { ...rules, blocklist: blockOf(rules, profile) }, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: [...productNumbers(products), ...profileNumbers(profile), ...interviewNumbers(readInterview(i.interview))], extra, numbersLevel: draft.author === "owner" ? "warn" : "block" });
+  const gate = checkArticle(html, { ...rules, blocklist: blockOf(rules, profile) }, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: [...productNumbers(products), ...profileNumbers(profile), ...interviewNumbers(readInterview(i.interview)), ...webNumbers(i.brief ? JSON.parse(i.brief) : null)], extra, numbersLevel: draft.author === "owner" ? "warn" : "block" });
   const out = { ...draft, raw: draft.raw ?? draft.html, html, words: wordCount(html.replace(/<[^>]+>/g, " ")) };
   await env.DB.prepare("UPDATE content_ideas SET draft = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(out), JSON.stringify(gate), now(), i.id).run();
   return { draft: out, gate, slots };
@@ -330,19 +383,24 @@ export async function draftCore(env: Env, ideaId: number, actor: string): Promis
   const iv = readInterview(i.interview);
   if (waitingInterview(iv, rules.requireInterview)) throw new HttpError(409, "Agent đang chờ anh trả lời phỏng vấn trải nghiệm (hoặc bấm Bỏ qua).", "need_interview");
   void lang;
-  const x0 = await ctxOf(env, i);
+  // Anh không có trải nghiệm để kể: agent tra Google lấy dữ kiện có nguồn trước khi viết
+  if (!answered(iv).length && !(brief as { web_facts_at?: number }).web_facts_at) {
+    try { await webFactsCore(env, ideaId, "agent:research"); } catch { /* không tra được thì viết với dữ kiện sẵn có */ }
+  }
+  const fresh0 = await idea(env, ideaId);
+  const x0 = await ctxOf(env, fresh0);
   const r = await aiJson<{ title?: string; html?: string; meta_description?: string }>(env, {
     template: "article_draft", task: "content.draft", siteId: c.site_id, format: formatSpec(f.id),
     rules: rulesFor(x0),
     input: {
-      format: f.id, keyword: i.keyword, voice: x0.profile.voice ? profileFor(x0.profile, i.keyword).voice : null, owner_interview: answered(iv),
+      format: f.id, keyword: i.keyword, voice: x0.profile.voice ? profileFor(x0.profile, i.keyword).voice : null, owner_interview: answered(iv), web_facts: webFactsOf(x0.brief),
       outline: { title: brief.title, angle: brief.angle, sections: brief.outline, faq: brief.faq },
       products: products.items.map((p, n) => ({ n: n + 1, name: p.name, merchant: p.merchant, best_for: p.bestFor, tested: p.tested, owner_notes: p.notes, specs: p.specs, pros: p.pros, cons: p.cons })),
       method: products.method, photo_slots: slots.map((s) => ({ key: s.key, what: s.label })), site_profile: profileFor(await readProfile(env, c.site_id), i.keyword),
       service_page: f.affiliate ? null : i.hub_path, anchor: f.affiliate ? null : brief.internal_link_anchor, paa: brief.serp?.paa || []
     }
   });
-  let raw = cleanHtml(String(r.html || ""));
+  let raw = cleanHtml(String(r.html || ""), webSources(x0.brief));
   let review: Review | null = null;
   let reviewError = "";
   try {
@@ -396,6 +454,7 @@ export async function apiInterview(env: Env, req: Request, user: User, id: numbe
   const answers = iv.questions.map((_, n) => String((Array.isArray(body.answers) ? body.answers[n] : "") ?? "").trim().slice(0, 2000));
   const next: Interview = { questions: iv.questions, answers, skipped: body.skip === true && !answers.some(Boolean) };
   await env.DB.prepare("UPDATE content_ideas SET interview = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now(), id).run();
+  if (next.skipped) { try { await webFactsCore(env, id, "agent:research"); } catch { /* tra sau khi viết */ } }
   await logActivity(env, `user:${user.id}`, "content.interview", next.skipped ? `Bỏ qua phỏng vấn cho "${i.keyword}"` : `Trả lời ${answers.filter(Boolean).length} câu phỏng vấn cho "${i.keyword}"`, i.site_id);
   return json({ ok: true });
 }
@@ -437,6 +496,7 @@ export async function handoffText(env: Env, id: number): Promise<{ text: string;
     ...(x.products.items.length ? ["## Sản phẩm (chỉ viết về các sản phẩm này, đúng thứ tự)", ...x.products.items.map((p, n) => `${n + 1}. ${p.name}: dùng tốt cho ${p.bestFor || "?"}; ${p.tested ? "ĐÃ dùng thật" : "CHƯA dùng thật (không được viết là đã test)"}${p.specs ? `; thông số: ${p.specs}` : ""}${p.notes ? `; trải nghiệm: ${p.notes}` : ""}${p.pros ? `; ưu: ${p.pros}` : ""}${p.cons ? `; nhược: ${p.cons}` : ""}`), ...(x.products.method ? [`Cách chọn: ${x.products.method}`] : []), ""] : []),
     ...(answered(readInterview(i.interview)).length ? ["## Trải nghiệm thật của chủ site (dùng làm chất liệu chính)", ...answered(readInterview(i.interview)).map((q) => `- Hỏi: ${q.q}\n  Đáp: ${q.a}`), ""] : []),
     ...(pf.voice ? ["## Giọng văn của site", `- Xưng hô: ${pf.voice.person}`, `- Mức trang trọng: ${pf.voice.formality}`, `- Câu: ${pf.voice.sentence_style}`, `- Đoạn: ${pf.voice.paragraphing}`, `- Mở bài: ${pf.voice.opening_style}`, ...(pf.voice.avoid.length ? [`- Không bao giờ: ${pf.voice.avoid.join("; ")}`] : []), ...pf.voice.excerpts.map((e) => `> ${e}`), ""] : []),
+    ...(webFactsOf(x.brief).length ? ["## Dữ liệu tra từ Google (dùng phải ghi nguồn và gắn link trong câu, không viết như trải nghiệm của chủ site)", ...webFactsOf(x.brief).map((w) => `- ${w.text} — [${w.source_title}](${w.source_url})`), ""] : []),
     ...(pf.facts.length ? ["## Dữ kiện có nguồn (chỉ dùng số liệu trong danh sách này hoặc trong trải nghiệm ở trên)", ...pf.facts.map((f2) => `- ${f2.text}${f2.source ? ` (${f2.source})` : ""}`), ""] : []),
     "## Luật",
     "- Không bịa số liệu, giá, thống kê. Không ghi giá hay sao đánh giá.",
@@ -470,7 +530,7 @@ export async function importCore(env: Env, id: number, content: string, revise: 
   const body = text.replace(/^\s*meta[- ]description\s*:.*$/im, "").trim();
   const isHtml = /<(h2|p|ul|table)\b/i.test(body);
   const conv = isHtml ? { title: (body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]?.replace(/<[^>]+>/g, "").trim() || "", html: body.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, "") } : markdownToHtml(body);
-  let raw = cleanHtml(conv.html);
+  let raw = cleanHtml(conv.html, "all");
   const x = await ctxOf(env, { ...i, author: "owner" });
   const b = x.brief as { title?: string; slug?: string; meta_description?: string };
   let review: Review | null = null;
@@ -484,6 +544,8 @@ export async function importCore(env: Env, id: number, content: string, revise: 
   return gate;
 }
 export const apiImport = async (env: Env, req: Request, user: User, id: number) => { const b = await readJson<{ content?: string; revise?: boolean }>(req); return run(user, () => importCore(env, id, String(b.content || ""), b.revise !== false, `user:${user.id}`)); };
+
+export const apiWebFacts = (env: Env, user: User, id: number) => run(user, () => webFactsCore(env, id, `user:${user.id}`));
 
 // Site Astro: xuất bài thành file Markdown (frontmatter + HTML) để đưa vào repo; luôn draft: true
 export async function apiExportMarkdown(env: Env, user: User, id: number): Promise<Response> {

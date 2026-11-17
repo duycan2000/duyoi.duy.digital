@@ -116,6 +116,8 @@ export function fakeSite(opts = {}) {
     let content;
     if (/read ONE document supplied by the website owner/.test(sys)) {
       content = { doc_type: "company_profile", title: "Firmenprofil", summary_vi: "Hồ sơ công ty CAD tại Đức.", audience: "TGA-Planer", tone: "sachlich", services: ["CAD-Dienstleistung TGA", "BIM-Modellierung"], products: [{ name: "Revit-Vorlagenpaket", specs: "Revit 2025", notes: "" }], facts: [{ text: "Seit 2009 über 1200 Projekte abgeschlossen", page: 2 }, { text: "Team aus 18 Zeichnern", page: 3 }], banned: ["Billiganbieter"], ideas: [{ title: "CAD Layer Vorlagen anlegen", keyword: "cad layer vorlagen", format: "how_to", why_vi: "Tài liệu mô tả quy trình." }] };
+    } else if (/extract facts for ONE article from the texts of pages/.test(sys)) {
+      content = { facts: [{ text: "Die HOAI gliedert die Planung in die Leistungsphasen 1 bis 9.", source_url: user.sources[0].url, source_title: "TGA-Ratgeber" }, { text: "Erfundene Quelle", source_url: "https://fake.example/x", source_title: "x" }] };
     } else if (/analyse the writing style/.test(sys)) {
       content = { person: "Sie, wir", formality: "sachlich, freundlich", sentence_style: "kurze Sätze, aktive Verben", paragraphing: "2-3 Sätze", opening_style: "direkte Antwort", vocabulary: ["Planungsbüro", "Abstimmung"], avoid: ["Superlative"], summary_vi: "Giọng thẳng, ngắn gọn.", excerpts: [user.samples[0].split(" ").slice(0, 20).join(" ")] };
     } else if (/strict senior editor/.test(sys)) {
@@ -144,7 +146,8 @@ export function fakeSite(opts = {}) {
     } else if (/write ONE article draft/.test(sys)) {
       const bad = /planung/.test(user.keyword);
       const para = (i) => `<p>Bei der Planung der technischen Gebäudeausrüstung ist eine klare Abstimmung zwischen allen Beteiligten wichtig, damit die Zeichnungen später ohne Rückfragen umgesetzt werden können und keine Lücken entstehen (Abschnitt ${String.fromCharCode(65 + i)}).</p>`;
-      const html = `<p>Wer eine TGA-Planung vergibt, möchte vor allem wissen, wie der Ablauf aussieht, welche Unterlagen nötig sind und wie Rückfragen vermieden werden.</p><h2>Worauf es ankommt</h2>${Array.from({ length: 8 }, (_, i) => para(i)).join("")}<h2>Ablauf</h2>${Array.from({ length: 8 }, (_, i) => para(i + 8)).join("")}<h2>Unterlagen und Abstimmung</h2>${Array.from({ length: 8 }, (_, i) => para(i + 16)).join("")}<p>Unterstützung bietet unsere <a href="${user.service_page}">CAD-Dienstleistung TGA</a>.</p>${bad ? "<p>Sie sparen damit 30% der Kosten.</p>" : ""}<script>alert(1)</script>`;
+      const cite = user.web_facts?.length ? `<p>Laut <a href="${user.web_facts[0].source_url}">${user.web_facts[0].source_title}</a> gliedert die HOAI die Planung in die Leistungsphasen 1 bis 9, siehe auch <a href="https://evil.example/z">hier</a>.</p>` : "";
+      const html = `${cite}<p>Wer eine TGA-Planung vergibt, möchte vor allem wissen, wie der Ablauf aussieht, welche Unterlagen nötig sind und wie Rückfragen vermieden werden.</p><h2>Worauf es ankommt</h2>${Array.from({ length: 8 }, (_, i) => para(i)).join("")}<h2>Ablauf</h2>${Array.from({ length: 8 }, (_, i) => para(i + 8)).join("")}<h2>Unterlagen und Abstimmung</h2>${Array.from({ length: 8 }, (_, i) => para(i + 16)).join("")}<p>Unterstützung bietet unsere <a href="${user.service_page}">CAD-Dienstleistung TGA</a>.</p>${bad ? "<p>Sie sparen damit 30% der Kosten.</p>" : ""}<script>alert(1)</script>`;
       content = { title: user.outline.title, html, meta_description: "Leitfaden zur TGA-Planung." };
     } else if (user.sections) {
       const bad = /Kosten/.test(user.page_title || "");
@@ -198,6 +201,7 @@ export function fakeSite(opts = {}) {
     if (u.hostname === "api.dataforseo.com") return dataforseo(u, init);
     const g = await google(u, init);
     if (g) return g;
+    if (u.hostname === "example.de" && u.pathname === "/a") return new Response(`<html><body><nav>Menü</nav><article><h1>TGA-Ratgeber</h1>${Array.from({ length: 20 }, (_, k) => `<p>Nach DIN 1356 werden Bauzeichnungen einheitlich dargestellt; die Leistungsphasen der HOAI reichen von 1 bis 9 und gliedern die Planung (Absatz ${k}).</p>`).join("")}</article></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
     if (u.hostname !== host) return new Response("not found", { status: 404 });
     if (u.pathname.startsWith("/wp-json/duyoi/v1")) return wpRoute(u, init);
     const pg = pages[u.pathname];

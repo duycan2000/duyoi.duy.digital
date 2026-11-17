@@ -13,7 +13,7 @@ import { listPrompts, reviewPrompt, spendReport } from "./manager";
 import { apiCheckMedia, apiSetupMedia } from "./cfmedia";
 import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from "./docs";
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
-import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiHandoff, apiImport, apiInterview, apiReview, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
+import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
@@ -112,7 +112,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   const imgMatch = path.match(/^\/api\/content\/ideas\/(\d+)\/images\/([a-z0-9]{2,6})$/);
   if (imgMatch && m === "POST") return apiUploadImage(env, req, user, Number(imgMatch[1]), imgMatch[2]!);
   if (imgMatch && m === "DELETE") return apiDeleteImage(env, user, Number(imgMatch[1]), imgMatch[2]!);
-  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products|review|interview|import|handoff\.md|export\.md))?$/);
+  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products|review|interview|import|webfacts|handoff\.md|export\.md))?$/);
   if (idMatch) {
     const iid = Number(idMatch[1]);
     if (!idMatch[2] && m === "PUT") return apiIdeaStatus(env, req, user, iid);
@@ -120,6 +120,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (idMatch[2] === "draft" && m === "POST") return apiDraft(env, user, iid);
     if (idMatch[2] === "wp" && m === "POST") return apiWpDraft(env, user, iid);
     if (idMatch[2] === "review" && m === "POST") return apiReview(env, req, user, iid);
+    if (idMatch[2] === "webfacts" && m === "POST") return apiWebFacts(env, user, iid);
     if (idMatch[2] === "interview" && m === "PUT") return apiInterview(env, req, user, iid);
     if (idMatch[2] === "import" && m === "POST") return apiImport(env, req, user, iid);
     if (idMatch[2] === "handoff.md" && m === "GET") return apiHandoff(env, user, iid);

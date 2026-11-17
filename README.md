@@ -136,6 +136,7 @@ Khi tạo bài (Content Studio hoặc tab **Bài mới**), chọn định dạng
 
 - **Model viết bài riêng** (Cài đặt › Model AI: "Viết bài và sửa bài", mặc định Claude Sonnet). Các việc khác vẫn dùng model rẻ.
 - **Phỏng vấn trải nghiệm:** dàn ý kèm 3–5 câu hỏi cho anh về trải nghiệm thật; agent chỉ viết khi anh trả lời hoặc bấm Bỏ qua (tắt được ở Luật an toàn). Số liệu trong câu trả lời được coi là có nguồn.
+- **Không có trải nghiệm thì tra Google:** bấm "Không có, tra Google giúp tôi" (hoặc agent tự tra trước khi viết nếu chưa có câu trả lời): agent Nghiên cứu đọc tối đa 5 trang top Google (bỏ site mình, site liên quan, blocklist), rút tối đa 15 dữ kiện kèm nguồn. Người viết chỉ dùng chúng kèm link nguồn trong câu, không viết như trải nghiệm của anh; số liệu trong dữ kiện được coi là có nguồn; link ngoài không phải nguồn bị bỏ.
 - **Giọng văn site:** dán 1–5 bài hay nhất trên chính site (hoặc đoạn anh tự viết), agent rút xưng hô, nhịp câu, cách mở bài, điều tránh và vài đoạn mẫu; người viết và sửa bài đi theo giọng này.
 - **Câu sáo AI** (de/en/vi, `src/style.ts`): gửi cho người viết để tránh; Gác cổng chặn khi có từ 3 câu, cảnh báo câu quá đều và đoạn quá dài.
 - **Kiểm cấu trúc bằng code** cho từng định dạng (mở bài trả lời thẳng, đủ H2, FAQ, bảng chọn nhanh, mục riêng + nhược điểm + nút mua cho từng sản phẩm, các bước đánh số, ý chính…). Thiếu phần chính thì chặn và đưa vào vòng sửa của Người viết.

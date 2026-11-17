@@ -373,10 +373,21 @@ function interviewBox(i) {
   const done = iv.answers.some((a) => a && a.trim());
   const open = i.waitingInterview;
   return `<details class="iv-box"${open ? " open" : ""}><summary>Phỏng vấn trải nghiệm ${done ? `<span class="tag ok">Đã trả lời</span>` : iv.skipped ? `<span class="tag">Đã bỏ qua</span>` : `<span class="tag warn">Agent đang hỏi anh</span>`}</summary>
-    <p class="note">Vài dòng trải nghiệm thật của anh (dự án, con số của chính anh, lỗi từng gặp) làm bài khác hẳn văn AI. Số liệu anh ghi ở đây được coi là có nguồn.</p>
+    <p class="note">Vài dòng trải nghiệm thật của anh (dự án, con số của chính anh, lỗi từng gặp) làm bài khác hẳn văn AI. Số liệu anh ghi ở đây được coi là có nguồn. Không có trải nghiệm thì bấm Bỏ qua: agent tra dữ liệu trên Google, ghi nguồn và gắn link trong bài.</p>
     <form data-iv="${i.id}" class="iv">${iv.questions.map((q, n) => `<label>${esc(q)}<textarea name="a${n}" rows="2" maxlength="2000">${esc(iv.answers[n] || "")}</textarea></label>`).join("")}
-      <div class="toolbar"><button type="submit" class="primary">Lưu câu trả lời</button>${!done ? `<button type="button" data-iv-skip="${i.id}">Bỏ qua, viết luôn</button>` : ""}</div>
+      <div class="toolbar"><button type="submit" class="primary">Lưu câu trả lời</button>${!done ? `<button type="button" data-iv-skip="${i.id}">Không có, tra Google giúp tôi</button>` : ""}</div>
     </form></details>`;
+}
+
+function webFactsBox(i, canEdit) {
+  if (!i.brief || !["briefed", "drafted"].includes(i.status)) return "";
+  const f = i.brief.web_facts || [];
+  const tried = !!i.brief.web_facts_at;
+  return `<details class="iv-box"><summary>Dữ liệu tra từ Google ${tried ? `<span class="tag ${f.length ? "ok" : ""}">${f.length} dữ kiện có nguồn</span>` : `<span class="tag">chưa tra</span>`}</summary>
+    <p class="note">Dùng khi anh không có trải nghiệm để kể. Agent đọc các trang top Google, chỉ giữ dữ kiện ghi rõ nguồn; trong bài, câu dùng dữ kiện phải gắn link tới nguồn và không được viết như trải nghiệm của anh.</p>
+    ${f.length ? `<ul class="facts">${f.map((x) => `<li>${esc(x.text)} <a href="${esc(x.source_url)}" target="_blank" rel="noopener noreferrer">${esc(x.source_title || x.source_url)}</a></li>`).join("")}</ul>` : ""}
+    ${canEdit && !i.wp_post_id ? `<div class="toolbar"><button type="button" data-webfacts="${i.id}">${tried ? "Tra lại" : "Tra dữ liệu trên Google"}</button></div>` : ""}
+  </details>`;
 }
 
 function authorBox(i) {
@@ -482,6 +493,7 @@ function contentHtml(c, ct, canEdit) {
       ${productsBox(i)}
       ${b ? `<details><summary>Dàn ý</summary><div class="diff">${(b.outline || []).map((o) => `<b>${esc(o.h2 || "")}</b><br>${(o.points || []).map((x) => `· ${esc(x)}`).join("<br>")}`).join("<br>")}${b.expert_input?.length ? `<br><br><b>Chủ site cần bổ sung (kinh nghiệm thật):</b><br>${b.expert_input.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}${b.serp?.paa?.length ? `<br><br><b>People Also Ask:</b><br>${b.serp.paa.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}</div></details>` : ""}
       ${interviewBox(i)}
+      ${webFactsBox(i, canEdit)}
       ${authorBox(i)}
       ${slotsBox(i)}
       ${reviewBox(i)}
@@ -689,6 +701,9 @@ function bindCase(main, c, canEdit) {
       try { await api(`/api/content/ideas/${f.dataset.iv}/interview`, { method: "PUT", body: { answers } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
     });
   }));
+  $$("[data-webfacts]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang tra Google…", async () => {
+    try { await api(`/api/content/ideas/${b.dataset.webfacts}/webfacts`, { method: "POST" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  })));
   $$("[data-iv-skip]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
     try { await api(`/api/content/ideas/${b.dataset.ivSkip}/interview`, { method: "PUT", body: { skip: true } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
   })));
