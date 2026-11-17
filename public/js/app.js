@@ -27,7 +27,7 @@ async function boot() {
       throw e;
     }
   } catch (e) {
-    app.innerHTML = `<div class="auth"><div class="auth-card"><b>Không kết nối được máy chủ</b><p class="lead">${esc(e.message)}</p><button type="button" id="retry">Thử lại</button></div></div>`;
+    app.innerHTML = `<div class="auth"><div class="auth-card"><h2>Không kết nối được máy chủ</h2><p class="lead">${esc(e.message)}</p><button type="button" class="primary" id="retry">Thử lại</button></div>${AUTH_ART()}</div>`;
     $("#retry").addEventListener("click", boot);
   }
 }
@@ -35,17 +35,17 @@ async function boot() {
 window.addEventListener("duyoi:unauthorized", () => { state.user = null; renderLogin("Phiên đăng nhập đã hết. Anh đăng nhập lại nhé."); });
 
 const AUTH_ART = () => `<aside class="auth-art" aria-hidden="true">
-      <div class="art-shapes"><span></span><span></span><span></span></div>
+      <div class="art"><span></span><span></span><span></span><span></span><i>${icon(ICON.trend)}</i></div>
       <b>${esc(state.appName)}</b>
       <p>Đội AI agent làm SEO, AEO và GEO cho các site của anh.</p>
-      <ul><li>Nghiên cứu từ khoá và câu hỏi thật</li><li>Viết bài, chấm điểm, tự sửa</li><li>Theo dõi thứ hạng, backlink, AI</li></ul>
+      <ul><li>Từ khoá và câu hỏi thật</li><li>Viết bài, chấm điểm, tự sửa</li><li>Thứ hạng, backlink, AI</li></ul>
     </aside>`;
 
 // ---------------- Tạo admin đầu tiên ----------------
 
 function renderSetup(status) {
   app.innerHTML = `
-  <div class="auth"><div class="auth-split">${AUTH_ART()}<div class="auth-card">
+  <div class="auth"><div class="auth-card">
     <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
     <h2>Tạo tài khoản admin</h2>
     <p class="lead">Lần đầu chạy app. Tài khoản này có toàn quyền; sau khi tạo xong, màn hình này sẽ không còn nữa.</p>
@@ -70,7 +70,7 @@ function renderSetup(status) {
       <button class="primary" type="submit"${status.setupTokenConfigured ? "" : " disabled"}>Tạo admin và vào app</button>
     </form>
     <p class="note mt">Mã cài đặt chỉ có người deploy biết, để người lạ mở được trang này cũng không tạo được admin.</p>
-  </div></div></div>`;
+  </div>${AUTH_ART()}</div>`;
   const form = $("#setup-form");
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -95,7 +95,7 @@ function renderSetup(status) {
 
 function renderLogin(notice = "") {
   app.innerHTML = `
-  <div class="auth"><div class="auth-split">${AUTH_ART()}<div class="auth-card">
+  <div class="auth"><div class="auth-card">
     <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
     <h2>Đăng nhập</h2>
     <p class="lead">Nền tảng AI agent làm SEO, AEO, GEO cho các site của anh.</p>
@@ -105,7 +105,7 @@ function renderLogin(notice = "") {
       <div class="msg ${notice ? "warn" : ""}" id="login-msg" ${notice ? "" : "hidden"}>${esc(notice)}</div>
       <button class="primary" type="submit">Đăng nhập</button>
     </form>
-  </div></div></div>`;
+  </div>${AUTH_ART()}</div>`;
   const form = $("#login-form");
   form.email.focus();
   form.addEventListener("submit", async (ev) => {
@@ -126,28 +126,62 @@ function renderLogin(notice = "") {
 // ---------------- Khung app ----------------
 
 // Thanh dưới cùng trên điện thoại: các màn dùng nhiều nhất + nút mở toàn bộ menu
-const TABBAR = [["overview", "Tổng quan", "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"], ["sites", "Site", "M3 5h18v14H3zM3 9h18"], ["activity", "Nhật ký", "M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"], ["settings", "Cài đặt", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"]];
-const icon = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+// Icon nét 24px, vẽ riêng cho app
+const ICON = {
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z",
+  list: "M5 4h14v16H5zM8 8h8M8 12h8M8 16h5",
+  gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c.8-4 4-6 8-6s7.2 2 8 6",
+  chart: "M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-3",
+  pen: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  shield: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z",
+  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  spark: "M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z",
+  sliders: "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4",
+  layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
+  queue: "M4 6h16M4 12h10M4 18h6M17 15l3 3-3 3",
+  money: "M3 6h18v12H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 9v.01M18 15v.01",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+  trend: "M3 17l6-6 4 4 8-8M15 7h6v6",
+  logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
+  menu: "M4 6h16M4 12h16M4 18h16",
+  close: "M6 6l12 12M18 6L6 18"
+};
+const GROUP_ICON = { ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
+const ITEM_ICON = { overview: "grid", sites: "globe", activity: "list", settings: "gear", account: "user" };
+const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
+const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+
+// Thanh dưới cùng trên điện thoại: các màn dùng nhiều nhất + nút mở toàn bộ menu
+const TABBAR = [["overview", "Tổng quan"], ["sites", "Site"], ["activity", "Nhật ký"], ["settings", "Cài đặt"]];
+const initials = (name) => (name || "?").trim().split(/\s+/).slice(-1)[0].slice(0, 1).toUpperCase();
 
 function renderShell() {
   app.innerHTML = `
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
-      <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
-      <span class="who">${esc(state.user.name)} · ${esc(state.user.email)}</span>
-      <button type="button" class="logout-top" data-logout>Đăng xuất</button>
+      <span class="pill" id="sys-pill-m"><i></i><span>Đang chạy</span></span>
     </header>
     <div class="scrim" id="scrim" hidden></div>
     <nav class="side" id="side" aria-label="Menu chính">
-      <div class="side-head"><b>Menu</b><button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">✕</button></div>
-      ${MENU.map((g) => `<div class="group g-${g.key}"><p><i class="gdot"></i>${esc(g.group)}</p>${g.items.map((i) => `<a href="#/${i.id}" data-view="${i.id}">${esc(i.label)}${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
-      <div class="side-foot"><small>${esc(state.user.name)} · ${esc(state.user.email)}</small><button type="button" data-logout>Đăng xuất</button></div>
+      <a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
+      <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
+      <div class="side-head"><b>Menu</b><button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">${icon(ICON.close)}</button></div>
+      <div class="side-nav">
+        ${MENU.map((g) => `<div class="group g-${g.key}"><p>${esc(g.group)}</p>${g.items.map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
+      </div>
+      <div class="side-foot">
+        <span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}</span>
+        <span class="who"><b>${esc(state.user.name)}</b><small>${state.user.role === "admin" ? "Admin" : esc(state.user.role)}</small></span>
+        <button type="button" class="icon-btn" data-logout aria-label="Đăng xuất" title="Đăng xuất">${icon(ICON.logout)}</button>
+      </div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
     <nav class="tabbar" aria-label="Lối tắt">
-      ${TABBAR.map(([id, label, d]) => `<a href="#/${id}" data-tab="${id}">${icon(d)}<span>${esc(label)}</span></a>`).join("")}
-      <button type="button" id="menu-btn" aria-controls="side" aria-expanded="false">${icon("M4 6h16M4 12h16M4 18h16")}<span>Menu</span></button>
+      ${TABBAR.map(([id, label]) => `<a href="#/${id}" data-tab="${id}">${icon(itemIcon(id))}<span>${esc(label)}</span></a>`).join("")}
+      <button type="button" id="menu-btn" aria-controls="side" aria-expanded="false">${icon(ICON.menu)}<span>Menu</span></button>
     </nav>
   </div>`;
   $$("[data-logout]").forEach((b) => b.addEventListener("click", async () => {
@@ -159,7 +193,7 @@ function renderShell() {
   $("#menu-btn").addEventListener("click", () => toggleMenu(true));
   $("#side-close").addEventListener("click", () => toggleMenu(false));
   $("#scrim").addEventListener("click", () => toggleMenu(false));
-  $$(".side a").forEach((a) => a.addEventListener("click", () => toggleMenu(false)));
+  $$(".side a.item").forEach((a) => a.addEventListener("click", () => toggleMenu(false)));
   document.onkeydown = (e) => { if (e.key === "Escape" && document.body.classList.contains("menu-open")) toggleMenu(false); };
   window.onhashchange = route;
   route();
@@ -173,7 +207,7 @@ function toggleMenu(open) {
   $("#menu-btn").setAttribute("aria-expanded", String(open));
   document.body.classList.toggle("menu-open", open);
   if (open) {
-    const cur = $(".side a.on");
+    const cur = $(".side a.item.on");
     (cur || $("#side-close")).focus({ preventScroll: true });
     if (cur) cur.scrollIntoView({ block: "center" });
   } else if (side.contains(document.activeElement)) {
@@ -183,17 +217,17 @@ function toggleMenu(open) {
 
 function setPill(paused) {
   state.paused = paused;
-  const pill = $("#sys-pill");
-  if (!pill) return;
-  pill.classList.toggle("paused", paused);
-  pill.querySelector("span").textContent = paused ? "Đang tạm dừng" : "Đang chạy";
+  $$("#sys-pill, #sys-pill-m").forEach((pill) => {
+    pill.classList.toggle("paused", paused);
+    pill.querySelector("span").textContent = paused ? "Đang tạm dừng" : "Đang chạy";
+  });
 }
 
 function route() {
   if (!state.user) return;
   const parts = (location.hash.replace(/^#\/?/, "") || "overview").split("/");
   const view = ITEMS[parts[0]] ? parts[0] : "overview";
-  $$(".side a").forEach((a) => a.classList.toggle("on", a.dataset.view === view));
+  $$(".side a.item").forEach((a) => a.classList.toggle("on", a.dataset.view === view));
   const inBar = TABBAR.some(([id]) => id === view);
   $$(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === view));
   const mb = $("#menu-btn");
@@ -212,6 +246,9 @@ function route() {
 
 // ---------------- Tổng quan ----------------
 
+// value đã là HTML an toàn (số hoặc chuỗi đã esc)
+const kpi = (tone, ic, value, label, cls = "") => `<div class="kpi ${tone}"><span class="kpi-ic">${icon(ICON[ic])}</span><div><b class="${cls}">${value}</b><small>${esc(label)}</small></div></div>`;
+
 async function viewOverview(main) {
   const [d, act] = await Promise.all([api("/api/dashboard"), api("/api/activity?limit=8")]);
   setPill(d.paused);
@@ -224,11 +261,11 @@ async function viewOverview(main) {
       <div class="toolbar">${state.user.role === "admin" ? `<button type="button" id="pause">${d.paused ? "Chạy lại agent" : "Tạm dừng toàn bộ"}</button>` : ""}</div>
     </div>
     <div class="kpis">
-      <div class="kpi t-site"><small>Site đang theo dõi</small><b>${d.sites.total}</b></div>
-      <div class="kpi t-ops"><small>Việc trong hàng đợi</small><b>${(d.jobs.queued || 0) + (d.jobs.running || 0)}</b></div>
-      <div class="kpi t-content"><small>OpenRouter tháng này</small><b>$${spend("openrouter")}<em>/ $${esc(d.caps.openrouter)}</em></b></div>
-      <div class="kpi t-off"><small>DataForSEO tháng này</small><b>$${spend("dataforseo")}<em>/ $${esc(d.caps.dataforseo)}</em></b></div>
-      <div class="kpi t-sys"><small>Cron chạy lần cuối</small><b class="sm">${esc(ago(d.cronLastRun))}</b></div>
+      ${kpi("t-site", "globe", d.sites.total, "Site đang theo dõi")}
+      ${kpi("t-yellow", "queue", (d.jobs.queued || 0) + (d.jobs.running || 0), "Việc trong hàng đợi")}
+      ${kpi("t-content", "money", `$${spend("openrouter")}<em>/ $${esc(d.caps.openrouter)}</em>`, "OpenRouter tháng này")}
+      ${kpi("t-ops", "chart", `$${spend("dataforseo")}<em>/ $${esc(d.caps.dataforseo)}</em>`, "DataForSEO tháng này")}
+      ${kpi("t-ai", "clock", esc(ago(d.cronLastRun)), "Cron chạy lần cuối", "sm")}
     </div>
     <div class="grid2">
       <div class="card"><h3>Bắt đầu (${done}/${d.checklist.length})</h3>
