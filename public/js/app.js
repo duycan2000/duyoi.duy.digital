@@ -21,7 +21,7 @@ async function boot() {
     try {
       const me = await api("/api/auth/me");
       state.user = me.user;
-      renderShell();
+      enter();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return renderLogin();
       throw e;
@@ -110,10 +110,55 @@ function renderLogin(notice = "") {
       try {
         const res = await api("/api/auth/login", { method: "POST", body: { email: d.email, password: d.password } });
         state.user = res.user;
-        renderShell();
+        enter();
       } catch (e) {
         showMsg($("#login-msg"), e.message);
       }
+    });
+  });
+}
+
+// ---------------- Mật khẩu tạm: bắt đổi trước khi vào app ----------------
+
+function enter() {
+  if (state.user.mustChangePassword) return renderForcePassword();
+  renderShell();
+}
+
+function renderForcePassword() {
+  app.innerHTML = `
+  <div class="auth"><div class="auth-card">
+    <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
+    <h2>Đặt mật khẩu của anh</h2>
+    <p class="lead">Chào ${esc(state.user.name)}. Admin đã tạo tài khoản cho anh bằng mật khẩu tạm. Anh đặt mật khẩu riêng để bắt đầu dùng app.</p>
+    <form id="force-form" novalidate>
+      <label>Mật khẩu tạm admin gửi <input name="current" type="password" autocomplete="current-password" required></label>
+      <label>Mật khẩu mới (ít nhất 10 ký tự) <input name="next" type="password" autocomplete="new-password" required minlength="10"></label>
+      <label>Nhập lại mật khẩu mới <input name="next2" type="password" autocomplete="new-password" required minlength="10"></label>
+      <div class="msg" id="force-msg" hidden></div>
+      <button class="primary" type="submit">Lưu và vào app</button>
+    </form>
+    <p class="note mt"><a href="#" id="force-logout">Đăng xuất</a></p>
+  </div>${AUTH_ART()}</div>`;
+  const form = $("#force-form");
+  form.current.focus();
+  $("#force-logout").addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    try { await api("/api/auth/logout", { method: "POST" }); } catch { /* vẫn về màn đăng nhập */ }
+    state.user = null;
+    renderLogin();
+  });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const d = formData(form);
+    if (d.next !== d.next2) return showMsg($("#force-msg"), "Hai lần nhập mật khẩu mới không khớp.");
+    await busy(form.querySelector("button[type=submit]"), "Đang lưu…", async () => {
+      try {
+        await api("/api/auth/password", { method: "POST", body: { current: d.current, next: d.next } });
+        state.user.mustChangePassword = false;
+        location.hash = "#/overview";
+        renderShell();
+      } catch (e) { showMsg($("#force-msg"), e.message); }
     });
   });
 }
@@ -128,6 +173,8 @@ const ICON = {
   list: "M5 4h14v16H5zM8 8h8M8 12h8M8 16h5",
   gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z",
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c.8-4 4-6 8-6s7.2 2 8 6",
+  users: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.7-3.5 3.3-5.5 6.5-5.5s5.8 2 6.5 5.5M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.5 3.5 5.2",
+  plus: "M12 5v14M5 12h14",
   chart: "M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-3",
   pen: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   shield: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z",
@@ -144,12 +191,13 @@ const ICON = {
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { overview: "grid", sites: "globe", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { overview: "grid", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
 // Thanh dưới cùng trên điện thoại: các màn dùng nhiều nhất + nút mở toàn bộ menu
 const TABBAR = [["overview", "Tổng quan"], ["sites", "Site"], ["activity", "Nhật ký"], ["settings", "Cài đặt"]];
+const canSee = (item) => !item.admin || state.user?.role === "admin";
 const initials = (name) => (name || "?").trim().split(/\s+/).slice(-1)[0].slice(0, 1).toUpperCase();
 
 function renderShell() {
@@ -168,7 +216,7 @@ function renderShell() {
       <div class="side-top"><a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
       <button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">${icon(ICON.close)}</button></div>
       <div class="side-nav">
-        ${MENU.map((g) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${g.items.map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
+        ${MENU.map((g) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${g.items.filter(canSee).map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
       </div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
@@ -220,7 +268,7 @@ function setPill(paused) {
 function route() {
   if (!state.user) return;
   const parts = (location.hash.replace(/^#\/?/, "") || "overview").split("/");
-  const view = ITEMS[parts[0]] ? parts[0] : "overview";
+  const view = ITEMS[parts[0]] && canSee(ITEMS[parts[0]]) ? parts[0] : "overview";
   $$(".side a.item").forEach((a) => a.classList.toggle("on", a.dataset.view === view));
   const inBar = TABBAR.some(([id]) => id === view);
   $$(".tabbar a").forEach((a) => a.classList.toggle("on", a.dataset.tab === view));
@@ -229,9 +277,10 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { overview: viewOverview, sites: viewSites, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
+    if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }
     main.innerHTML = `<div class="page"><div class="msg err">${esc(e.message)}</div></div>`;
   });
   main.focus({ preventScroll: true });
@@ -491,6 +540,179 @@ async function viewAccount(main) {
         showMsg($("#pw-msg"), "Đã đổi mật khẩu.", "ok");
       } catch (e) { showMsg($("#pw-msg"), e.message); }
     });
+  });
+}
+
+// ---------------- Thành viên ----------------
+
+const ROLE = { admin: "Admin", editor: "Biên tập", viewer: "Chỉ xem" };
+const ROLE_HELP = {
+  admin: "Toàn quyền: cài đặt, API key, thành viên, tạm dừng hệ thống.",
+  editor: "Thêm và sửa site, làm việc với agent. Không vào Cài đặt và Thành viên.",
+  viewer: "Chỉ xem số liệu và nhật ký, không sửa gì."
+};
+const ROLE_ICON = { admin: "shield", editor: "pen", viewer: "user" };
+const roleOptions = (cur) => Object.entries(ROLE).map(([k, l]) => `<option value="${k}"${k === cur ? " selected" : ""}>${esc(l)}</option>`).join("");
+
+// Mật khẩu tạm ngẫu nhiên, bỏ các ký tự dễ nhầm (0/O, 1/l/I)
+function tempPassword(len = 14) {
+  const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const buf = new Uint32Array(len);
+  crypto.getRandomValues(buf);
+  return [...buf].map((n) => chars[n % chars.length]).join("");
+}
+
+function memberStatus(u) {
+  if (u.disabled) return `<span class="tag">Đã khoá</span>`;
+  if (u.mustChangePassword) return `<span class="tag warn">Chờ đổi mật khẩu</span>`;
+  return `<span class="tag ok">Đang hoạt động</span>`;
+}
+
+async function viewMembers(main, args) {
+  const { users } = await api("/api/users");
+  const mode = args[0] === "new" ? "new" : args[0] ? users.find((u) => String(u.id) === args[0]) : null;
+  main.innerHTML = `
+  <div class="page">
+    <div class="page-head">
+      <div><h2>Thành viên</h2><p>Người được vào app và quyền của từng người. Người mới nhận mật khẩu tạm và phải đổi ở lần đăng nhập đầu.</p></div>
+      <div class="toolbar"><a class="btn primary" href="#/members/new">${icon(ICON.plus)}Thêm thành viên</a></div>
+    </div>
+    ${mode === "new" ? memberNewForm() : mode ? memberEditForm(mode) : ""}
+    <div class="card">
+      <div class="tablewrap"><table>
+        <thead><tr><th>Thành viên</th><th>Quyền</th><th>Trạng thái</th><th>Đăng nhập lần cuối</th></tr></thead>
+        <tbody>${users.map((u) => `<tr class="click" data-id="${u.id}" tabindex="0">
+          <td><div class="member"><span class="avatar sm">${esc(initials(u.name))}</span><span><b>${esc(u.name)}${u.id === state.user.id ? ` <span class="tag ok">anh</span>` : ""}</b><small>${esc(u.email)}</small></span></div></td>
+          <td><span class="role r-${esc(u.role)}">${icon(ICON[ROLE_ICON[u.role]])}${esc(ROLE[u.role] || u.role)}</span></td>
+          <td>${memberStatus(u)}</td>
+          <td>${esc(u.lastLoginAt ? ago(u.lastLoginAt) : "chưa đăng nhập")}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </div>
+    <div class="card"><h3>Quyền làm được gì</h3>
+      <div class="roles">${Object.entries(ROLE).map(([k, l]) => `<div><span class="role r-${k}">${icon(ICON[ROLE_ICON[k]])}${esc(l)}</span><p class="note">${esc(ROLE_HELP[k])}</p></div>`).join("")}</div>
+    </div>
+  </div>`;
+  $$("tr.click", main).forEach((tr) => {
+    const open = () => { location.hash = `#/members/${tr.dataset.id}`; };
+    tr.addEventListener("click", open);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+  });
+  if (mode === "new") bindMemberNew();
+  else if (mode) bindMemberEdit(mode);
+}
+
+function memberNewForm() {
+  return `<form class="card" id="member-new" novalidate><h3>Thêm thành viên</h3>
+    <div class="form-grid">
+      <label>Tên hiển thị <input name="name" required minlength="2" maxlength="80" autocomplete="off"></label>
+      <label>Email đăng nhập <input name="email" type="email" required autocomplete="off"></label>
+      <label>Quyền <select name="role">${roleOptions("editor")}</select><small class="note" id="role-help">${esc(ROLE_HELP.editor)}</small></label>
+      <label>Mật khẩu tạm (ít nhất 10 ký tự)
+        <span class="input-row"><input name="password" required minlength="10" autocomplete="off" value="${esc(tempPassword())}"><button type="button" id="gen-pw">Tạo mới</button></span>
+        <small class="note">Gửi riêng cho người đó (Zalo, gặp trực tiếp). Họ sẽ phải đổi khi đăng nhập lần đầu.</small></label>
+    </div>
+    <div class="msg" id="member-msg" hidden></div>
+    <div class="toolbar"><button class="primary" type="submit">Thêm thành viên</button><a class="btn" href="#/members">Huỷ</a></div>
+  </form>`;
+}
+
+function bindMemberNew() {
+  const form = $("#member-new");
+  form.name.focus();
+  form.role.addEventListener("change", () => { $("#role-help").textContent = ROLE_HELP[form.role.value]; });
+  $("#gen-pw").addEventListener("click", () => { form.password.value = tempPassword(); });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const d = formData(form);
+    await busy(form.querySelector("button[type=submit]"), "Đang thêm…", async () => {
+      try {
+        const res = await api("/api/users", { method: "POST", body: d });
+        form.outerHTML = credentialsCard(res.user, d.password, "Đã thêm thành viên");
+        bindCredentials();
+        reloadMemberTable();
+      } catch (e) { showMsg($("#member-msg"), e.message); }
+    });
+  });
+}
+
+// Hiện thông tin đăng nhập một lần để admin gửi đi; app không lưu mật khẩu gốc.
+function credentialsCard(u, password, title) {
+  const text = `Link: ${location.origin}\nEmail: ${u.email}\nMật khẩu tạm: ${password}`;
+  return `<div class="card cred-card"><h3>${esc(title)}</h3>
+    <p class="note">Mật khẩu tạm chỉ hiện lần này. Anh gửi riêng cho ${esc(u.name)}; lần đầu đăng nhập họ sẽ đặt mật khẩu mới.</p>
+    <pre class="cred" id="cred-text">${esc(text)}</pre>
+    <div class="toolbar"><button type="button" class="primary" id="copy-cred">Sao chép</button><a class="btn" href="#/members">Xong</a></div>
+    <div class="msg" id="cred-msg" hidden></div>
+  </div>`;
+}
+
+function bindCredentials() {
+  $("#copy-cred").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("#cred-text").textContent); showMsg($("#cred-msg"), "Đã sao chép.", "ok"); }
+    catch { showMsg($("#cred-msg"), "Trình duyệt chặn sao chép, anh bôi đen để copy nhé.", "warn"); }
+  });
+}
+
+async function reloadMemberTable() {
+  const main = $("#main");
+  const card = $(".cred-card", main);
+  const keep = card ? card.outerHTML : "";
+  await viewMembers(main, []);
+  if (keep) { $(".page-head", main).insertAdjacentHTML("afterend", keep); bindCredentials(); }
+}
+
+function memberEditForm(u) {
+  const self = u.id === state.user.id;
+  return `<form class="card" id="member-edit" novalidate><h3>${esc(u.name)}<small class="note"> · ${esc(u.email)}</small></h3>
+    ${self ? `<div class="msg warn">Đây là tài khoản của anh: không tự đổi quyền, khoá hay xoá được. Mật khẩu đổi ở màn Tài khoản.</div>` : ""}
+    <div class="form-grid">
+      <label>Tên hiển thị <input name="name" required minlength="2" maxlength="80" value="${esc(u.name)}"></label>
+      <label>Quyền <select name="role" ${self ? "disabled" : ""}>${roleOptions(u.role)}</select><small class="note" id="role-help">${esc(ROLE_HELP[u.role])}</small></label>
+    </div>
+    ${self ? "" : `<label class="check"><input type="checkbox" name="disabled" ${u.disabled ? "checked" : ""}><span>Khoá tài khoản<small>Người này bị đăng xuất ngay và không đăng nhập được cho tới khi mở khoá.</small></span></label>`}
+    <div class="msg" id="member-msg" hidden></div>
+    <div class="toolbar"><button class="primary" type="submit">Lưu thay đổi</button><a class="btn" href="#/members">Đóng</a>
+      ${self ? "" : `<span class="spacer"></span><button type="button" id="reset-pw">Đặt lại mật khẩu</button><button type="button" class="danger" id="del-member">Xoá</button>`}</div>
+  </form>`;
+}
+
+function bindMemberEdit(u) {
+  const form = $("#member-edit");
+  form.role.addEventListener("change", () => { $("#role-help").textContent = ROLE_HELP[form.role.value]; });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const d = formData(form);
+    const body = { name: d.name };
+    if (u.id !== state.user.id) { body.role = d.role; body.disabled = d.disabled; }
+    await busy(form.querySelector("button[type=submit]"), "Đang lưu…", async () => {
+      try {
+        await api(`/api/users/${u.id}`, { method: "PUT", body });
+        if (u.id === state.user.id) state.user.name = d.name;
+        await viewMembers($("#main"), [String(u.id)]);
+        showMsg($("#member-msg"), "Đã lưu.", "ok");
+      } catch (e) { showMsg($("#member-msg"), e.message); }
+    });
+  });
+  if (u.id === state.user.id) return;
+  $("#reset-pw").addEventListener("click", async (ev) => {
+    const password = tempPassword();
+    await busy(ev.currentTarget, "Đang đặt lại…", async () => {
+      try {
+        await api(`/api/users/${u.id}/password`, { method: "POST", body: { password } });
+        form.outerHTML = credentialsCard(u, password, "Đã đặt lại mật khẩu");
+        bindCredentials();
+        reloadMemberTable();
+      } catch (e) { showMsg($("#member-msg"), e.message); }
+    });
+  });
+  // Bấm hai lần để xoá, tránh bấm nhầm
+  const del = $("#del-member");
+  del.addEventListener("click", async () => {
+    if (!del.dataset.armed) { del.dataset.armed = "1"; del.textContent = "Bấm lần nữa để xoá"; return; }
+    try {
+      await api(`/api/users/${u.id}`, { method: "DELETE" });
+      location.hash = "#/members";
+    } catch (e) { showMsg($("#member-msg"), e.message); }
   });
 }
 

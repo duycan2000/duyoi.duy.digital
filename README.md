@@ -69,6 +69,7 @@ Khi đã tạo admin, `SETUP_TOKEN` hết tác dụng. Muốn chắc chắn, đ�
 
 - **Cài đặt:** nhập OpenRouter key và DataForSEO login/password. Key được mã hoá AES-GCM trước khi lưu vào D1 và không bao giờ trả ngược về trình duyệt.
 - **Site:** thêm site đầu tiên.
+- **Thành viên** (chỉ admin): thêm người với quyền Admin, Biên tập hoặc Chỉ xem. App tạo mật khẩu tạm, hiện một lần để anh gửi riêng; người đó phải đặt mật khẩu mới ở lần đăng nhập đầu. Admin khoá, đổi quyền, đặt lại mật khẩu hoặc xoá được; đổi quyền hay khoá thì người đó bị đăng xuất ngay. App luôn giữ ít nhất một admin. Nếu dùng Cloudflare Access, nhớ thêm email của thành viên vào policy.
 - **Cloudflare → Billing → Billable Usage:** tạo budget alert $10 / $25 / $50.
 - **Thêm một lớp bảo vệ (khuyên dùng):** đặt Cloudflare Access (Zero Trust, miễn phí tới 50 người) trước `duyoi.duy.digital`, chỉ cho email của anh vào.
 

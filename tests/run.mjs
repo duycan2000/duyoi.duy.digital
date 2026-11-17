@@ -222,6 +222,51 @@ await test("đổi mật khẩu đăng xuất các phiên khác", async () => {
   assert.equal((await call("GET", "/api/auth/me")).status, 200);
 });
 
+await test("admin thêm thành viên; người mới phải đổi mật khẩu tạm trước", async () => {
+  const add = await call("POST", "/api/users", { name: "Lan", email: "lan@example.com", role: "editor", password: "tam-thoi-12345" });
+  assert.equal(add.status, 201);
+  assert.equal(add.data.user.mustChangePassword, true);
+  assert.equal(add.data.user.password_hash, undefined);
+  assert.equal((await call("POST", "/api/users", { name: "Lan 2", email: "LAN@example.com", role: "viewer", password: "tam-thoi-12345" })).status, 409);
+  assert.equal((await call("POST", "/api/users", { name: "X", email: "x@example.com", role: "boss", password: "tam-thoi-12345" })).status, 400);
+  const lan = client(env);
+  const lg = await lan("POST", "/api/auth/login", { email: "lan@example.com", password: "tam-thoi-12345" }, { ip: "3.3.3.3" });
+  assert.equal(lg.status, 200);
+  assert.equal(lg.data.user.mustChangePassword, true);
+  assert.equal((await lan("GET", "/api/sites")).status, 403);
+  assert.equal((await lan("POST", "/api/auth/password", { current: "tam-thoi-12345", next: "tam-thoi-12345" })).status, 400);
+  assert.equal((await lan("POST", "/api/auth/password", { current: "tam-thoi-12345", next: "lan-mat-khau-moi" })).status, 200);
+  assert.equal((await lan("GET", "/api/sites")).status, 200);
+  assert.equal((await lan("GET", "/api/users")).status, 403);
+  assert.equal((await lan("POST", "/api/users", { name: "Hack", email: "h@example.com", role: "admin", password: "tam-thoi-12345" })).status, 403);
+});
+
+await test("đổi quyền, khoá, đặt lại mật khẩu, xoá thành viên; giữ admin cuối", async () => {
+  const list = await call("GET", "/api/users");
+  const me = list.data.users.find((u) => u.email === "duy@example.com");
+  const lan = list.data.users.find((u) => u.email === "lan@example.com");
+  assert.equal((await call("PUT", `/api/users/${me.id}`, { role: "viewer" })).status, 400);
+  assert.equal((await call("PUT", `/api/users/${me.id}`, { disabled: true })).status, 400);
+  assert.equal((await call("DELETE", `/api/users/${me.id}`)).status, 400);
+  const lanC = client(env);
+  await lanC("POST", "/api/auth/login", { email: "lan@example.com", password: "lan-mat-khau-moi" }, { ip: "3.3.3.3" });
+  const up = await call("PUT", `/api/users/${lan.id}`, { role: "viewer" });
+  assert.equal(up.data.user.role, "viewer");
+  assert.equal((await lanC("GET", "/api/auth/me")).status, 401);
+  await call("PUT", `/api/users/${lan.id}`, { disabled: true });
+  const blocked = await lanC("POST", "/api/auth/login", { email: "lan@example.com", password: "lan-mat-khau-moi" }, { ip: "3.3.3.3" });
+  assert.equal(blocked.status, 403);
+  await call("PUT", `/api/users/${lan.id}`, { disabled: false, role: "admin" });
+  assert.equal((await call("POST", `/api/users/${lan.id}/password`, { password: "dat-lai-123456" })).status, 200);
+  const re = await lanC("POST", "/api/auth/login", { email: "lan@example.com", password: "dat-lai-123456" }, { ip: "3.3.3.3" });
+  assert.equal(re.data.user.mustChangePassword, true);
+  assert.equal((await call("DELETE", `/api/users/${lan.id}`)).status, 200);
+  assert.equal((await call("GET", "/api/users")).data.users.length, 1);
+  const act = await call("GET", "/api/activity?limit=20");
+  assert.ok(act.data.activity.some((a) => a.action === "user.created"));
+  assert.ok(!JSON.stringify(act.data).includes("tam-thoi-12345"));
+});
+
 await test("đăng xuất xoá phiên", async () => {
   const r = await call("POST", "/api/auth/logout");
   assert.equal(r.status, 200);

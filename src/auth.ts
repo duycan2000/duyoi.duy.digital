@@ -14,13 +14,13 @@ const MIN_PASSWORD = 10;
 
 const isSecure = (req: Request): boolean => new URL(req.url).protocol === "https:";
 
-function validateEmail(v: unknown): string {
+export function validateEmail(v: unknown): string {
   const email = str(v, "Email", { max: 200 }).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new HttpError(400, "Email không hợp lệ.", "validation");
   return email;
 }
 
-function validatePassword(v: unknown, field = "Mật khẩu"): string {
+export function validatePassword(v: unknown, field = "Mật khẩu"): string {
   if (typeof v !== "string") throw new HttpError(400, `Thiếu ${field.toLowerCase()}.`, "validation");
   if (v.length < MIN_PASSWORD) throw new HttpError(400, `${field} cần ít nhất ${MIN_PASSWORD} ký tự.`, "validation");
   if (v.length > 200) throw new HttpError(400, `${field} quá dài.`, "validation");
@@ -49,9 +49,10 @@ export async function currentUser(env: Env, req: Request): Promise<User | null> 
   if (!token || token.length > 100) return null;
   const id = await sha256Hex(token);
   const row = await env.DB.prepare(
-    "SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?"
-  ).bind(id, now()).first<User>();
-  return row ?? null;
+    "SELECT u.id, u.email, u.name, u.role, u.must_change_password AS mcp FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ? AND u.disabled = 0"
+  ).bind(id, now()).first<User & { mcp: number }>();
+  if (!row) return null;
+  return { id: row.id, email: row.email, name: row.name, role: row.role, mustChangePassword: Boolean(row.mcp) };
 }
 
 export async function requireUser(env: Env, req: Request): Promise<User> {
@@ -123,8 +124,8 @@ export async function login(env: Env, req: Request): Promise<Response> {
   if ((await recentFails(env, ip, email)) >= MAX_FAILS) {
     throw new HttpError(429, "Sai quá nhiều lần. Thử lại sau 15 phút.", "too_many_attempts");
   }
-  const row = await env.DB.prepare("SELECT id, email, name, role, password_hash FROM users WHERE email = ?")
-    .bind(email).first<User & { password_hash: string }>();
+  const row = await env.DB.prepare("SELECT id, email, name, role, password_hash, disabled, must_change_password FROM users WHERE email = ?")
+    .bind(email).first<User & { password_hash: string; disabled: number; must_change_password: number }>();
   let ok = false;
   if (row) ok = await verifyPassword(password, row.password_hash);
   else await burnPasswordCheck(password);
@@ -132,13 +133,14 @@ export async function login(env: Env, req: Request): Promise<Response> {
     await env.DB.prepare("INSERT INTO login_attempts (ip, email, at) VALUES (?, ?, ?)").bind(ip, email, now()).run();
     throw new HttpError(401, "Email hoặc mật khẩu không đúng.", "bad_credentials");
   }
+  if (row.disabled) throw new HttpError(403, "Tài khoản này đã bị khoá. Anh liên hệ admin.", "disabled");
   await env.DB.batch([
     env.DB.prepare("DELETE FROM login_attempts WHERE email = ? OR at < ?").bind(email, now() - LOCK_WINDOW_MS),
     env.DB.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").bind(now(), row.id)
   ]);
   const session = await createSession(env, req, row.id);
   await logActivity(env, `user:${row.id}`, "auth.login", `Đăng nhập từ ${ip}`);
-  const user: User = { id: row.id, email: row.email, name: row.name, role: row.role };
+  const user: User = { id: row.id, email: row.email, name: row.name, role: row.role, mustChangePassword: Boolean(row.must_change_password) };
   return json({ user }, 200, { "Set-Cookie": sessionCookie(COOKIE, session, SESSION_MS / 1000, isSecure(req)) });
 }
 
@@ -156,10 +158,11 @@ export async function changePassword(env: Env, req: Request, user: User): Promis
   const next = validatePassword(body.next, "Mật khẩu mới");
   const row = await env.DB.prepare("SELECT password_hash FROM users WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
   if (!row || !(await verifyPassword(current, row.password_hash))) throw new HttpError(400, "Mật khẩu hiện tại không đúng.", "bad_credentials");
+  if (current === next) throw new HttpError(400, "Mật khẩu mới phải khác mật khẩu hiện tại.", "validation");
   const token = getCookie(req, COOKIE) || "";
   const keep = await sha256Hex(token);
   await env.DB.batch([
-    env.DB.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(await hashPassword(next), user.id),
+    env.DB.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").bind(await hashPassword(next), user.id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").bind(user.id, keep)
   ]);
   await logActivity(env, `user:${user.id}`, "auth.password_changed", "Đổi mật khẩu, đăng xuất các phiên khác");

@@ -47,6 +47,7 @@ export const MENU = [
   { group: "Hệ thống", key: "sys", items: [
     { id: "schedule", label: "Lịch chạy", phase: 2, plan: ["Mỗi site lệch phút cố định, hàng đợi theo loại việc, hạn mức từng nhà cung cấp"] },
     { id: "prompts", label: "Prompt & token", phase: 5, plan: ["Prompt Optimizer: cache phần tĩnh, rút ngữ cảnh, gom lô; thử A/B trước khi áp dụng"] },
+    { id: "members", label: "Thành viên", live: true, admin: true },
     { id: "activity", label: "Nhật ký", live: true },
     { id: "settings", label: "Cài đặt", live: true },
     { id: "account", label: "Tài khoản", live: true }

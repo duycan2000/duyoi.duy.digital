@@ -6,6 +6,7 @@ import { dashboard, runCron, setPaused } from "./dashboard";
 import { HttpError, assertSameOrigin, errorResponse, json } from "./http";
 import { getSettings, updateSettings } from "./settings";
 import { createSite, getSite, listSites, updateSite } from "./sites";
+import { createUser, deleteUser, listUsers, resetUserPassword, updateUser } from "./users";
 import type { CronEvent, Env, ExecCtx } from "./types";
 
 async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
@@ -30,6 +31,19 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
 
   if (path === "/api/auth/password" && m === "POST") return changePassword(env, req, user);
   if (path === "/api/auth/sessions" && m === "GET") return listSessions(env, req, user);
+
+  // Mật khẩu tạm: phải đổi trước khi dùng phần còn lại của app
+  if (user.mustChangePassword) throw new HttpError(403, "Anh cần đổi mật khẩu tạm trước.", "must_change_password");
+
+  if (path === "/api/users" && m === "GET") return listUsers(env, user);
+  if (path === "/api/users" && m === "POST") return createUser(env, req, user);
+  const userMatch = path.match(/^\/api\/users\/(\d+)(\/password)?$/);
+  if (userMatch) {
+    const id = Number(userMatch[1]);
+    if (userMatch[2] && m === "POST") return resetUserPassword(env, req, user, id);
+    if (!userMatch[2] && m === "PUT") return updateUser(env, req, user, id);
+    if (!userMatch[2] && m === "DELETE") return deleteUser(env, user, id);
+  }
 
   if (path === "/api/dashboard" && m === "GET") return dashboard(env);
   if (path === "/api/system/pause" && m === "POST") return setPaused(env, req, user);

@@ -201,6 +201,24 @@ tr.click:hover td { background: rgba(58, 53, 65, 0.04); }
 .soon-card li { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; }
 .soon-card li::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex: none; }
 
+/* Thành viên */
+.member { display: flex; align-items: center; gap: 12px; }
+.member b { display: block; }
+.avatar.sm { width: 34px; height: 34px; font-size: 14px; }
+.role { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+.role svg { width: 20px; height: 20px; }
+.r-admin svg { color: var(--error); }
+.r-editor svg { color: var(--info); }
+.r-viewer svg { color: var(--success); }
+.roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.roles > div { display: flex; flex-direction: column; gap: 6px; }
+.input-row { display: flex; gap: 8px; }
+.input-row input { flex: 1; font-family: var(--mono); }
+.input-row button { flex: none; }
+.toolbar .spacer { flex: 1; }
+h3 small.note { font-size: 14px; font-weight: 400; }
+pre.cred { margin: 0; padding: 14px 16px; background: var(--bg); border-radius: var(--radius); font-family: var(--mono); font-size: 13.5px; white-space: pre-wrap; word-break: break-all; color: var(--text); }
+
 /* Nhật ký: kiểu "Activity Timeline" */
 .activity { display: flex; flex-direction: column; }
 .activity div { position: relative; display: flex; justify-content: space-between; gap: 14px; padding: 0 0 22px 26px; font-size: 14px; font-weight: 500; }
@@ -267,6 +285,8 @@ tr.click:hover td { background: rgba(58, 53, 65, 0.04); }
   .secret-row { grid-template-columns: 1fr; gap: 8px; }
   th, td { padding-left: 14px; padding-right: 14px; }
   .activity div { flex-direction: column; gap: 2px; }
+  .roles { grid-template-columns: 1fr; gap: 14px; }
+  .toolbar .spacer { display: none; }
 
   .auth { padding: 24px 14px 160px; }
   .auth-card { padding: 30px 22px; }
