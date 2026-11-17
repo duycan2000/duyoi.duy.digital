@@ -147,7 +147,7 @@ const agentGrid = (agents, tasks = []) => `<div class="agent-grid">${agents.map(
 // ---------------- Một ca ----------------
 
 async function viewCase(main, id) {
-  const data = await api(`/api/recovery/${id}`);
+  const [data, content] = await Promise.all([api(`/api/recovery/${id}`), api(`/api/content/${id}`).catch(() => null)]);
   const { case: c, findings, tasks, pages, agents } = data;
   CTX = { caseId: c.id, siteId: c.siteId, wp: data.wpConnected, backups: data.backups || [] };
   const canEdit = K.state.user.role !== "viewer";
@@ -166,11 +166,12 @@ async function viewCase(main, id) {
       <progress max="${Math.max(1, c.pagesTotal)}" value="${c.pagesDone}"></progress>
       <p class="note">${c.pagesDone}/${c.pagesTotal || "?"} trang. Trang này tự cập nhật; anh có thể rời đi, việc quét vẫn chạy nền.</p></div>` : ""}
     <div class="card tabbed">
-      ${K.tabsNav("rec", [["diag", "Chẩn đoán", "spark"], ["tasks", `Việc của agent (${openTasks})`, "list"], ["findings", `Vấn đề (${findings.length})`, "shield"], ["pages", `Trang (${pages.length})`, "globe"], ["rules", "Luật an toàn", "sliders"], ["links", "Liên kết ngoài", "link"]], "diag")}
+      ${K.tabsNav("rec", [["diag", "Chẩn đoán", "spark"], ["tasks", `Việc của agent (${openTasks})`, "list"], ["findings", `Vấn đề (${findings.length})`, "shield"], ["pages", `Trang (${pages.length})`, "globe"], ["content", `Bài mới${content ? ` (${content.ideas.filter((i) => ["approved", "briefed", "drafted"].includes(i.status)).length})` : ""}`, "pen"], ["rules", "Luật an toàn", "sliders"], ["links", "Liên kết ngoài", "link"]], "diag")}
       <div class="tab-body" ${K.panelAttr("rec", "diag", "diag")}>${diagHtml(c, d, findings, agents, tasks)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "tasks", "diag")}>${tasksHtml(tasks, agents, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "findings", "diag")}>${findingsHtml(findings)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "pages", "diag")}>${pagesHtml(pages)}</div>
+      <div class="tab-body" ${K.panelAttr("rec", "content", "diag")}>${content ? contentHtml(c, content, canEdit) : `<p class="note">Chưa có dữ liệu.</p>`}</div>
       <div class="tab-body" ${K.panelAttr("rec", "rules", "diag")}>${rulesHtml(c, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("rec", "links", "diag")}>${linksHtml(c, canEdit)}</div>
     </div>
@@ -301,6 +302,55 @@ function pagesHtml(pages) {
   </tbody></table></div>`;
 }
 
+// Bài HTML do AI viết (đã lọc ở máy chủ) hiện bằng cách esc() rồi dựng lại vài thẻ cố định: không chạy HTML lạ
+const renderArticle = (html) => esc(html)
+  .replace(/&lt;(\/?)(h2|h3|p|ul|ol|li|strong|em|table|thead|tbody|tr|th|td)&gt;/g, "<$1$2>")
+  .replace(/&lt;a href=&quot;([^&]*)&quot;&gt;(.*?)&lt;\/a&gt;/g, '<u>$2</u> <small class="to">→ $1</small>');
+const ISTATUS = { idea: ["Ý tưởng", ""], approved: ["Đã duyệt", "info"], briefed: ["Có dàn ý", "info"], drafted: ["Có bài nháp", "ok"], published: ["Đã đăng", "ok"], rejected: ["Đã bỏ", ""], failed: ["Lỗi", "err"] };
+
+function contentHtml(c, ct, canEdit) {
+  const st = ct.structure;
+  const active = ct.ideas.filter((i) => ["approved", "briefed", "drafted", "published"].includes(i.status));
+  const ideas = ct.ideas.filter((i) => i.status === "idea");
+  const btn = (i, act, label, cls = "") => canEdit ? `<button type="button" class="${cls}" data-idea="${i.id}" data-iact="${act}">${label}</button>` : "";
+  const card = (i) => {
+    const b = i.brief, d = i.draft;
+    return `<div class="task">
+      <div class="task-head"><b>${esc(d?.title || b?.title || i.keyword)}</b><span class="tags">${tag(ISTATUS[i.status] || [i.status, ""])}</span></div>
+      <p class="note">Từ khoá "${esc(i.keyword)}" · ${i.volume ?? "?"} lượt tìm/tháng · KD ${i.kd ?? "?"} · ${esc(i.intent || "")}${i.hub_path ? ` · dẫn về ${esc(i.hub_path)}` : ""}</p>
+      ${b ? `<details><summary>Dàn ý</summary><div class="diff">${(b.outline || []).map((o) => `<b>${esc(o.h2 || "")}</b><br>${(o.points || []).map((x) => `· ${esc(x)}`).join("<br>")}`).join("<br>")}${b.expert_input?.length ? `<br><br><b>Chủ site cần bổ sung (kinh nghiệm thật):</b><br>${b.expert_input.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}${b.serp?.paa?.length ? `<br><br><b>People Also Ask:</b><br>${b.serp.paa.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}</div></details>` : ""}
+      ${i.gate?.problems?.length ? `<ul class="gate">${i.gate.problems.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join("")}</ul>` : ""}
+      ${d ? `<details><summary>Bài nháp (${d.words} từ)</summary><div class="article">${renderArticle(d.html)}</div><p class="note">Meta description: ${esc(d.meta_description)}</p></details>` : ""}
+      ${i.wp_edit_url ? `<div class="msg ok">Đã có bản nháp trên WordPress (chưa đăng). <a href="${esc(i.wp_edit_url)}" target="_blank" rel="noopener">Mở để sửa và đăng</a></div>` : ""}
+      <div class="toolbar">
+        ${i.status === "approved" ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
+        ${i.status === "briefed" ? btn(i, "draft", "Viết bài nháp", "primary") + btn(i, "brief", "Lập lại dàn ý") : ""}
+        ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? btn(i, "wp", "Tạo bản nháp WordPress", "primary") : ""}
+        ${i.status === "drafted" ? btn(i, "draft", "Viết lại") : ""}
+        ${i.wp_post_id && i.status !== "published" ? btn(i, "published", "Đã đăng") : ""}
+        ${["approved", "briefed", "drafted"].includes(i.status) ? btn(i, "rejected", "Bỏ chủ đề", "danger") : ""}
+      </div></div>`;
+  };
+  return `
+    <h3 class="sub">${K.icon(K.ICON.layers)}Cấu trúc bài viết hiện tại</h3>
+    <p class="note">Mỗi trang dịch vụ nên có ít nhất 3 bài hỗ trợ dẫn link về. "Liên quan" là bài cùng chủ đề nhưng chưa có link: việc chèn link nằm ở tab Việc của agent.</p>
+    ${st.hubs.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Trang dịch vụ</th><th>Bài có link về</th><th>Bài liên quan chưa link</th>${st.hubs.some((h) => h.clicks != null) ? "<th>Click 28 ngày</th>" : ""}</tr></thead><tbody>
+      ${st.hubs.map((h) => `<tr><td><b>${esc(h.title)}</b><small>${esc(h.path)}</small></td><td>${h.linking.length < 3 ? `<span class="tag warn">${h.linking.length}</span>` : h.linking.length}${h.linking.length ? `<small>${h.linking.map(esc).join(", ")}</small>` : ""}</td><td>${h.related.length}${h.related.length ? `<small>${h.related.map(esc).join(", ")}</small>` : ""}</td>${st.hubs.some((x) => x.clicks != null) ? `<td>${h.clicks ?? 0}</td>` : ""}</tr>`).join("")}
+    </tbody></table></div>` : `<p class="note">Chưa xác định được trang dịch vụ: khai báo ở Luật an toàn › Trang dịch vụ.</p>`}
+    ${st.unassigned.length ? `<details><summary>${st.unassigned.length} bài không thuộc cụm nào (ứng viên gộp/gỡ)</summary><ul class="urls">${st.unassigned.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
+
+    <div class="task-head"><h3 class="sub">${K.icon(K.ICON.pen)}Bài mới đang làm</h3><span class="tag ${ct.limits.usedThisMonth >= ct.limits.perMonth ? "warn" : "info"}">${ct.limits.usedThisMonth}/${ct.limits.perMonth} bài tháng này</span></div>
+    <div class="msg" id="idea-msg" hidden></div>
+    ${active.length ? active.map(card).join("") : `<p class="note">Chưa có. Duyệt một chủ đề bên dưới để bắt đầu.</p>`}
+
+    <div class="task-head"><h3 class="sub">${K.icon(K.ICON.search)}Ý tưởng từ nghiên cứu từ khoá</h3>${canEdit ? `<button type="button" id="research">${K.icon(K.ICON.search)}Nghiên cứu từ khoá</button>` : ""}</div>
+    <p class="note">Từ DataForSEO, đã bỏ từ khoá điều hướng, từ khoá trong blocklist và dưới ${ct.limits.minVolume} lượt tìm. Chủ đề site đã có trang thì không viết bài mới (tránh ăn thịt từ khoá): cải thiện trang đó thay vào.${ct.auto?.lastResearch ? ` Lần nghiên cứu gần nhất: ${esc(ago(ct.auto.lastResearch))}.` : ""}</p>
+    ${ideas.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Từ khoá</th><th>Lượt tìm</th><th>KD</th><th>Ý định</th><th>Dẫn về</th><th>Điểm</th><th></th></tr></thead><tbody>
+      ${ideas.map((i) => `<tr><td><b>${esc(i.keyword)}</b>${i.covered_by ? `<small>Đã có trang: ${esc(i.covered_by)}</small>` : ""}</td><td>${i.volume ?? "—"}</td><td>${i.kd ?? "—"}</td><td>${esc(i.intent || "—")}</td><td>${esc(i.hub_path || "—")}</td><td>${i.score}</td>
+        <td>${!canEdit ? "" : i.covered_by ? `<span class="note">cải thiện trang có sẵn</span>` : `${btn(i, "approved", "Duyệt", "primary")}${btn(i, "rejected", "Bỏ")}`}</td></tr>`).join("")}
+    </tbody></table></div>` : `<p class="note">Chưa có ý tưởng. Bấm Nghiên cứu từ khoá (cần DataForSEO trong Cài đặt).</p>`}`;
+}
+
 function rulesHtml(c, canEdit) {
   const r = c.rules;
   const dis = canEdit ? "" : " disabled";
@@ -322,6 +372,21 @@ function rulesHtml(c, canEdit) {
       <label>Link nội bộ mới tối đa mỗi trang <select name="maxLinksPerPage"${dis}>${[1, 2, 3].map((n) => `<option${r.maxLinksPerPage === n ? " selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="full">Ghi chú cho agent <textarea name="notes" rows="3"${dis}>${esc(r.notes)}</textarea></label>
     </div>
+    <h3 class="sub">${K.icon(K.ICON.pen)}Bài mới (chống spam)</h3>
+    <div class="form-grid">
+      <label>Từ khoá gốc để nghiên cứu (mỗi dòng một từ; trống = lấy H1 trang dịch vụ) <textarea name="seedKeywords" rows="3"${dis}>${esc(lines(r.seedKeywords))}</textarea></label>
+      <div class="form-grid inner">
+        <label>Tối đa bài mới mỗi tháng <input type="number" name="maxNewArticlesPerMonth" min="0" max="8" value="${r.maxNewArticlesPerMonth}"${dis}></label>
+        <label>Lượng tìm kiếm tối thiểu <input type="number" name="minVolume" min="0" value="${r.minVolume}"${dis}></label>
+      </div>
+    </div>
+    <h3 class="sub">${K.icon(K.ICON.clock)}Chế độ tự động</h3>
+    <label class="check"><input type="checkbox" name="autopilot"${r.autopilot ? " checked" : ""}${dis}><span>Bật tự động cho site này<small>Cứ 15 phút agent làm tiếp một bước: quét lại định kỳ, AI viết câu chèn, nghiên cứu từ khoá, dàn ý, bài nháp, bản nháp WordPress. Mọi bước AI qua Quản lý. Không tự đăng bài.</small></span></label>
+    <div class="form-grid">
+      <label>Quét lại sau (ngày) <input type="number" name="autoRescanDays" min="3" max="60" value="${r.autoRescanDays}"${dis}></label>
+    </div>
+    <label class="check"><input type="checkbox" name="autoApproveIdeas"${r.autoApproveIdeas ? " checked" : ""}${dis}><span>Tự duyệt chủ đề bài mới tốt nhất<small>Chỉ chủ đề site chưa có trang, gắn với một trang dịch vụ, trong giới hạn bài/tháng.</small></span></label>
+    <label class="check"><input type="checkbox" name="autoApplyApproved"${r.autoApplyApproved ? " checked" : ""}${dis}><span>Tự áp dụng việc người đã duyệt<small>Chỉ việc anh đã bấm Duyệt; tối đa 3 trang mỗi ngày; có sao lưu và Hoàn tác. Để tắt nếu muốn tự bấm Áp dụng.</small></span></label>
     <details><summary>Dán luật dạng JSON</summary><textarea name="json" rows="6" placeholder='{"language":"de","blocklist":["…"]}'${dis}></textarea><p class="note">Nếu ô này có nội dung, app dùng JSON thay cho các ô ở trên.</p></details>
     <div class="msg" id="rules-msg" hidden></div>
     ${canEdit ? `<div class="toolbar"><button class="primary" type="submit">Lưu luật và phân tích lại</button></div>` : ""}
@@ -372,6 +437,22 @@ function bindCase(main, c, canEdit) {
     try { await api(`/api/recovery/${c.id}/geo`, { method: "POST", body: { url: b.dataset.geo } }); await reload(); }
     catch (e) { showMsg($("#task-msg"), e.message); $("#task-msg").scrollIntoView({ block: "center" }); }
   })));
+  const ideaMsg = (e) => { showMsg($("#idea-msg"), e.message); $("#idea-msg")?.scrollIntoView({ block: "center" }); };
+  $("#research")?.addEventListener("click", (ev) => busy(ev.currentTarget, "Đang nghiên cứu…", async () => {
+    try { await api(`/api/content/${c.id}/research`, { method: "POST" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  }));
+  $$("[data-iact]", main).forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.idea, act = b.dataset.iact;
+    const label = { brief: "Đang lập dàn ý…", draft: "AI đang viết…", wp: "Đang tạo bản nháp…" }[act] || "…";
+    busy(b, label, async () => {
+      try {
+        if (["approved", "rejected", "published"].includes(act)) await api(`/api/content/ideas/${id}`, { method: "PUT", body: { status: act } });
+        else await api(`/api/content/ideas/${id}/${act}`, { method: "POST" });
+        K.state.tabs.rec = "content";
+        await reload();
+      } catch (e) { ideaMsg(e); }
+    });
+  }));
   const rf = $("#rules-form");
   rf?.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -381,7 +462,7 @@ function bindCase(main, c, canEdit) {
       try { rules = JSON.parse(d.json); } catch { return showMsg($("#rules-msg"), "JSON không hợp lệ."); }
     } else {
       const { json: _j, dropMonth: _m, ...rest } = d;
-      rules = { ...rest, maxLinksPerPage: Number(d.maxLinksPerPage) };
+      rules = { ...rest, maxLinksPerPage: Number(d.maxLinksPerPage), maxNewArticlesPerMonth: Number(d.maxNewArticlesPerMonth), minVolume: Number(d.minVolume), autoRescanDays: Number(d.autoRescanDays) };
     }
     await busy(rf.querySelector("button[type=submit]"), "Đang lưu…", async () => {
       try { await api(`/api/recovery/${c.id}/rules`, { method: "PUT", body: { rules, dropMonth: d.dropMonth } }); await reload(); }

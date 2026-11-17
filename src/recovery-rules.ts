@@ -19,6 +19,13 @@ export interface SiteRules {
   notes: string;
   gscProperty: string;         // sc-domain:ten-mien.de (Domain property) hoặc https://ten-mien.com/ (URL-prefix)
   ga4Property: string;         // ID số của property GA4
+  seedKeywords: string[];      // từ khoá gốc cho nghiên cứu (mặc định lấy H1 các trang dịch vụ)
+  minVolume: number;           // lượng tìm kiếm tối thiểu để giữ ý tưởng
+  maxNewArticlesPerMonth: number; // giới hạn bài mới mỗi tháng (chống spam)
+  autopilot: boolean;          // chế độ tự động cho site này
+  autoRescanDays: number;      // quét lại sau bao nhiêu ngày
+  autoApproveIdeas: boolean;   // tự duyệt chủ đề tốt nhất trong giới hạn tháng
+  autoApplyApproved: boolean;  // tự áp dụng việc đã được người duyệt (tối đa 3 trang/ngày)
 }
 
 export const DEFAULT_RULES: SiteRules = {
@@ -36,7 +43,14 @@ export const DEFAULT_RULES: SiteRules = {
   cachePlugin: "",
   notes: "",
   gscProperty: "",
-  ga4Property: ""
+  ga4Property: "",
+  seedKeywords: [],
+  minVolume: 10,
+  maxNewArticlesPerMonth: 2,
+  autopilot: false,
+  autoRescanDays: 7,
+  autoApproveIdeas: false,
+  autoApplyApproved: false
 };
 
 const list = (v: unknown, max = 300, itemMax = 200): string[] => {
@@ -87,6 +101,14 @@ export function parseRules(input: unknown, base: SiteRules = DEFAULT_RULES): Sit
     if (v && !/^sc-domain:([a-z0-9-]+\.)+[a-z]{2,}$/i.test(v) && !/^https?:\/\/[^\s]+\/$/i.test(v)) throw new HttpError(400, "Property Search Console dạng sc-domain:ten-mien.de hoặc https://ten-mien.com/ (có dấu / ở cuối).", "validation");
     out.gscProperty = v;
   }
+  if (b.seedKeywords !== undefined) out.seedKeywords = list(b.seedKeywords, 20, 80).map((k) => k.toLowerCase());
+  const int = (v: unknown, min: number, max: number, field: string) => { const n = Number(v); if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${field} phải từ ${min} đến ${max}.`, "validation"); return n; };
+  if (b.minVolume !== undefined) out.minVolume = int(b.minVolume, 0, 100000, "Lượng tìm kiếm tối thiểu");
+  if (b.maxNewArticlesPerMonth !== undefined) out.maxNewArticlesPerMonth = int(b.maxNewArticlesPerMonth, 0, 8, "Số bài mới mỗi tháng");
+  if (b.autoRescanDays !== undefined) out.autoRescanDays = int(b.autoRescanDays, 3, 60, "Số ngày quét lại");
+  if (b.autopilot !== undefined) out.autopilot = b.autopilot === true;
+  if (b.autoApproveIdeas !== undefined) out.autoApproveIdeas = b.autoApproveIdeas === true;
+  if (b.autoApplyApproved !== undefined) out.autoApplyApproved = b.autoApplyApproved === true;
   if (b.ga4Property !== undefined) {
     const v = String(b.ga4Property).trim().replace(/^properties\//, "");
     if (v && !/^\d{5,15}$/.test(v)) throw new HttpError(400, "GA4 property là dãy số (Admin › Property details › Property ID).", "validation");

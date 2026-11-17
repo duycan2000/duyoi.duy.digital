@@ -43,6 +43,13 @@ export function fakeSite(opts = {}) {
       if (!p) return jsonRes({ code: "not_found", message: "Không tìm thấy" }, 404);
       return jsonRes({ id: p.id, type: "page", status: "publish", slug: path, link: `https://${host}${path}`, modified_gmt: p.modified, content: p.elementor ? "" : pages[path].body, elementor: p.elementor, elementor_data: p.elementor ? elData(path) : null, meta: p.meta });
     }
+    if (route === "/create") {
+      const slug = body.slug;
+      if (Object.keys(pages).some((p) => p.replace(/\//g, "") === slug) || (wp.created || []).some((c) => c.slug === slug)) return jsonRes({ code: "duplicate", message: `Đã có bài với slug "${slug}"` }, 409);
+      wp.created = [...(wp.created || []), { ...body, status: "draft" }];
+      const id = 900 + wp.created.length;
+      return jsonRes({ ok: true, id, status: "draft", edit_link: `https://${host}/wp-admin/post.php?post=${id}&action=edit` });
+    }
     if (route === "/apply" || route === "/restore") {
       const hit = byId(body.id);
       if (!hit) return jsonRes({ code: "not_found", message: "x" }, 404);
@@ -86,11 +93,33 @@ export function fakeSite(opts = {}) {
     }
     return null;
   }
+  async function dataforseo(u, init) {
+    const task = JSON.parse(init.body)[0];
+    if (u.pathname.includes("keyword_ideas")) {
+      const kw = [["cad zeichner tga", 320, 22, "commercial"], ["tga planung cad", 140, 30, "informational"], ["cad outsourcing kosten", 90, 18, "commercial"], ["12 wichtige cad symbole fur architektur", 900, 20, "informational"], ["3dscan alternative", 50, 10, "commercial"], ["haustechnik zeichnung erstellen lassen", 70, 15, "transactional"], ["autocad download", 5000, 60, "navigational"], ["tga symbole liste", 40, 12, "informational"]];
+      return jsonRes({ status_code: 20000, cost: 0.0115, tasks: [{ status_code: 20000, cost: 0.0115, result: [{ items: kw.map(([k, v, d, i]) => ({ keyword: k, keyword_info: { search_volume: v, cpc: 2.1 }, keyword_properties: { keyword_difficulty: d }, search_intent_info: { main_intent: i } })) }] }] });
+    }
+    if (u.pathname.includes("serp/google/organic")) {
+      return jsonRes({ status_code: 20000, cost: 0.002, tasks: [{ status_code: 20000, cost: 0.002, result: [{ items: [
+        { type: "organic", title: `${task.keyword} – Ratgeber`, url: "https://example.de/a", description: "Ein Überblick." },
+        { type: "people_also_ask", items: [{ title: "Was kostet eine TGA-Zeichnung?" }, { title: "Wer erstellt TGA-Pläne?" }] }
+      ] }] }] });
+    }
+    return jsonRes({ status_code: 40400, status_message: "Not Found" }, 404);
+  }
   async function openrouter(init) {
     const body = JSON.parse(init.body);
     const user = JSON.parse(body.messages[1].content);
+    const sys = body.messages[0].content;
     let content;
-    if (user.sections) {
+    if (/planning ONE genuinely useful article/.test(sys)) {
+      content = { title: `${user.keyword}: Leitfaden für Planer`, slug: user.keyword.replace(/\s+/g, "-"), angle: "Praxisnah", outline: [{ h2: "Worauf es ankommt", points: ["Grundlagen"], h3: [] }, { h2: "Ablauf", points: ["Schritte"], h3: [] }], faq: user.people_also_ask, expert_input: ["Eigenes Projektbeispiel"], meta_description: "Leitfaden für Planer.", internal_link_anchor: "CAD-Dienstleistung TGA" };
+    } else if (/write ONE article draft/.test(sys)) {
+      const bad = /planung/.test(user.keyword);
+      const para = (i) => `<p>Bei der Planung der technischen Gebäudeausrüstung ist eine klare Abstimmung zwischen allen Beteiligten wichtig, damit die Zeichnungen später ohne Rückfragen umgesetzt werden können und keine Lücken entstehen (Abschnitt ${String.fromCharCode(65 + i)}).</p>`;
+      const html = `<h2>Worauf es ankommt</h2>${Array.from({ length: 12 }, (_, i) => para(i)).join("")}<h2>Ablauf</h2>${Array.from({ length: 12 }, (_, i) => para(i + 12)).join("")}<p>Unterstützung bietet unsere <a href="${user.service_page}">CAD-Dienstleistung TGA</a>.</p>${bad ? "<p>Sie sparen damit 30% der Kosten.</p>" : ""}<script>alert(1)</script>`;
+      content = { title: user.outline.title, html, meta_description: "Leitfaden zur TGA-Planung." };
+    } else if (user.sections) {
       const bad = /Kosten/.test(user.page_title || "");
       content = { answers: user.sections.slice(0, 2).map((s) => ({ heading: s.heading, answer: bad ? "Mit uns arbeiten Sie 40% schneller und sparen Zeit bei jedem Projekt." : `Kurz gesagt: Bei ${s.heading} kommt es auf eine saubere und abgestimmte Planung an. Wir prüfen alle Unterlagen gründlich, bevor sie an Sie gehen.` })), faq_title: "Häufige Fragen", faq: [1, 2, 3].map((i) => ({ q: `Wie läuft die Zusammenarbeit ab (Frage ${String.fromCharCode(64 + i)})?`, a: "Sie senden uns Ihre Unterlagen, wir stimmen die Anforderungen ab und liefern geprüfte Zeichnungen." })) };
     } else if (user.target_page?.purpose === "contact") content = { sentence: "Haben Sie ein konkretes Vorhaben? Sprechen Sie mit unserem Team über Ihr Projekt.", anchor: "Sprechen Sie mit unserem Team" };
@@ -100,6 +129,7 @@ export function fakeSite(opts = {}) {
   return async (input, init) => {
     const u = new URL(typeof input === "string" ? input : input.url);
     if (u.hostname === "openrouter.ai") return openrouter(init);
+    if (u.hostname === "api.dataforseo.com") return dataforseo(u, init);
     const g = await google(u, init);
     if (g) return g;
     if (u.hostname !== host) return new Response("not found", { status: 404 });

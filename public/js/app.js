@@ -3,6 +3,7 @@
 import { api, ApiError } from "./api.js";
 import { MENU, ITEMS, PHASES } from "./menu.js";
 import { viewRecovery } from "./recovery.js";
+import { viewHq } from "./hq.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
 const app = $("#app");
@@ -206,7 +207,7 @@ const ICON = {
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { overview: "grid", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { hq: "users", overview: "grid", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -386,7 +387,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }
@@ -676,6 +677,7 @@ async function viewSettings(main, args = []) {
         <label>Ngưỡng lượt free trước khi đổi sang trả phí (%) <input type="number" name="free_guard_percent" min="50" max="100" value="${esc(v.free_guard_percent)}" ${admin ? "" : "disabled"}></label>
         <label>Múi giờ hiển thị <input name="timezone" value="${esc(v.timezone)}" ${admin ? "" : "disabled"}></label>
         <label>Trần OpenRouter mỗi tháng (USD) <input type="number" name="openrouter_monthly_cap_usd" min="0" step="1" value="${esc(v.openrouter_monthly_cap_usd)}" ${admin ? "" : "disabled"}></label>
+        <label>Trần AI mỗi site trong 24 giờ (USD) <input type="number" name="ai_site_daily_cap_usd" min="0" step="0.5" value="${esc(v.ai_site_daily_cap_usd)}" ${admin ? "" : "disabled"}></label>
         <label>Trần DataForSEO mỗi tháng (USD) <input type="number" name="dataforseo_monthly_cap_usd" min="0" step="1" value="${esc(v.dataforseo_monthly_cap_usd)}" ${admin ? "" : "disabled"}></label>
       </div>
       <div class="msg" id="values-msg" hidden></div>

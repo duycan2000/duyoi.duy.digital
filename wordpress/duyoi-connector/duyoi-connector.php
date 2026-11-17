@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Duy Ơi Connector
  * Description: Cho app Duy Ơi đọc và sửa "phẫu thuật" nội dung SEO (post_content, Elementor, Rank Math) qua REST API, có kiểm tra khớp đúng 1 chỗ, xoá cache và khôi phục.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Requires PHP: 7.4
  * Author: Duy Ơi
  * License: GPLv2 or later
@@ -15,7 +15,7 @@ if (!defined('ABSPATH') && !defined('DUYOI_TEST')) {
     exit;
 }
 
-const DUYOI_VERSION = '1.0.0';
+const DUYOI_VERSION = '1.1.0';
 const DUYOI_META_KEYS = ['rank_math_title', 'rank_math_description', 'rank_math_focus_keyword'];
 
 // ---------------------------------------------------------------------------
@@ -281,6 +281,7 @@ add_action('rest_api_init', function () {
                 'elementor' => defined('ELEMENTOR_VERSION'),
                 'rankmath' => class_exists('RankMath'),
                 'flyingpress' => class_exists('\FlyingPress\Purge'),
+                'features' => ['post', 'apply', 'restore', 'create'],
             ];
         },
     ]);
@@ -365,6 +366,41 @@ add_action('rest_api_init', function () {
             $purged = duyoi_purge($id, $el && $new_content !== null);
             clean_post_cache($id);
             return ['ok' => true, 'changes' => $changes, 'meta' => array_keys($meta_ok), 'elementor' => $el, 'purged' => $purged, 'modified_gmt' => get_post($id)->post_modified_gmt];
+        },
+    ]);
+
+    // Tạo bài mới: LUÔN là bản nháp (draft), từ chối nếu slug đã có (kể cả bản nháp/thùng rác)
+    register_rest_route('duyoi/v1', '/create', [
+        'methods' => 'POST',
+        'permission_callback' => function () { return current_user_can('edit_posts'); },
+        'callback' => function (WP_REST_Request $r) {
+            $title = sanitize_text_field((string) $r->get_param('title'));
+            $slug = sanitize_title((string) $r->get_param('slug'));
+            $content = (string) $r->get_param('content');
+            if ($title === '' || $slug === '' || trim($content) === '') {
+                return new WP_Error('invalid', 'Thiếu tiêu đề, slug hoặc nội dung.', ['status' => 400]);
+            }
+            $dupe = get_posts(['name' => $slug, 'post_type' => ['post', 'page'], 'post_status' => ['publish', 'draft', 'pending', 'future', 'private', 'trash'], 'numberposts' => 1, 'fields' => 'ids']);
+            if ($dupe) {
+                return new WP_Error('duplicate', "Đã có bài với slug \"$slug\" (ID {$dupe[0]}). Không tạo bài trùng.", ['status' => 409]);
+            }
+            $id = wp_insert_post(wp_slash([
+                'post_title' => $title,
+                'post_name' => $slug,
+                'post_content' => $content,
+                'post_status' => 'draft',
+                'post_type' => 'post',
+                'post_author' => get_current_user_id(),
+            ]), true);
+            if (is_wp_error($id)) {
+                return $id;
+            }
+            foreach ((array) $r->get_param('meta') as $k => $v) {
+                if (in_array($k, DUYOI_META_KEYS, true)) {
+                    update_post_meta($id, $k, sanitize_text_field((string) $v));
+                }
+            }
+            return ['ok' => true, 'id' => $id, 'status' => 'draft', 'edit_link' => admin_url("post.php?post=$id&action=edit")];
         },
     ]);
 

@@ -23,6 +23,7 @@ export const DEFAULTS = {
   free_guard_percent: 90,
   openrouter_monthly_cap_usd: 30,
   dataforseo_monthly_cap_usd: 20,
+  ai_site_daily_cap_usd: 2,
   model_free: "openrouter/free",
   model_free_private: "groq/openai/gpt-oss-120b",
   model_t0: "deepseek/deepseek-v4-flash",

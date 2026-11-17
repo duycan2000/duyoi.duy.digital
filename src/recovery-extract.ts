@@ -97,6 +97,11 @@ export function extractNumbers(text: string): string[] {
   return [...out];
 }
 
+// Số trong tên chuẩn / phiên bản phần mềm (DIN 1356, ISO 128, LOD 400, Revit 2025) không phải số liệu bịa
+export function standardNumbers(text: string): string[] {
+  return [...text.matchAll(/\b(?:DIN|ISO|VDI|EN|LOD|IFC|BS|ANSI|Revit|AutoCAD|ArchiCAD|Inventor|SolidWorks|Navisworks|Tekla)\s?(?:EN\s?)?(\d+(?:[.,-]\d+)*)/gi)].map((m) => (m[1] || "").toLowerCase());
+}
+
 const hostOf = (h: string) => h.toLowerCase().replace(/^www\./, "");
 
 function splitSentences(text: string): string[] {

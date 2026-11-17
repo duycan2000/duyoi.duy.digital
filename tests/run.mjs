@@ -360,6 +360,10 @@ await test("phục hồi: Search Console/GA4, AI viết lại, áp dụng lên W
   const st = await c3("PUT", "/api/settings", { secrets: { google_service_account: sa, openrouter_api_key: "sk-or-test-123456" } });
   assert.equal(st.status, 200);
   assert.equal(st.data.secrets.google_service_account.hint, "duyoi@proj.iam.gserviceaccount.com");
+  // Cấp Quản lý: prompt chưa duyệt thì AI bị chặn; duyệt xong mới chạy
+  const pr = await c3("GET", "/api/manager/prompts");
+  assert.ok(pr.data.prompts.length >= 5 && pr.data.prompts.every((p) => p.lint.ok && !p.review));
+  for (const p of pr.data.prompts) assert.equal((await c3("PUT", `/api/manager/prompts/${p.id}`, { status: "approved" })).status, 200);
   const wp = { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" };
   const realFetch = globalThis.fetch;
   globalThis.fetch = fakeSite({ wp });
@@ -393,7 +397,7 @@ await test("phục hồi: Search Console/GA4, AI viết lại, áp dụng lên W
     assert.equal(link.payload.ai, true);
     assert.match(link.payload.edits[0].replace, /unsere Experten für <a href="\/cad-dienstleistung-tga\/">CAD-Dienstleistung TGA<\/a>/);
     assert.ok(link.payload.edits[0].replace.startsWith(link.payload.edits[0].find));
-    const usage = env3.DB.raw.prepare("SELECT COUNT(*) AS n, SUM(cost_usd) AS c FROM usage_events WHERE provider = 'openrouter'").get();
+    const usage = env3.DB.raw.prepare("SELECT COUNT(*) AS n, SUM(cost_usd) AS c FROM ai_calls WHERE provider = 'openrouter' AND status = 'ok'").get();
     assert.ok(usage.n >= 1 && usage.c > 0);
     // Chưa duyệt thì không áp dụng được
     assert.equal((await c3("POST", `/api/recovery/tasks/${link.id}/apply`)).status, 409);
@@ -442,6 +446,98 @@ await test("phục hồi: Search Console/GA4, AI viết lại, áp dụng lên W
     assert.ok(act.data.activity.some((a) => a.action === "recovery.applied"));
     assert.ok(act.data.activity.some((a) => a.action === "recovery.rollback"));
     assert.ok(!JSON.stringify(act.data).includes("efgh"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trần chi phí, từ khoá, dàn ý, bài nháp, bản nháp WP, Agent HQ", async () => {
+  const env4 = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const c4 = client(env4);
+  await c4("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await c4("PUT", "/api/settings", { secrets: { openrouter_api_key: "sk-or-test-123456", dataforseo_login: "me@example.com", dataforseo_password: "dfs-pass-123" } });
+  const wp = { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ wp });
+  try {
+    const cr = await c4("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/", "/cad-outsourcing-kosten-sparen/"], blocklist: ["3DScan"], maxNewArticlesPerMonth: 2, autopilot: true } });
+    const caseId = cr.data.id;
+    const siteId = (await c4("GET", `/api/recovery/${caseId}`)).data.case.siteId;
+    // Prompt chưa duyệt: AI bị chặn và được ghi lại
+    const link = (await c4("GET", `/api/recovery/${caseId}`)).data.tasks.find((t) => t.kind === "internal_links");
+    const blocked = await c4("POST", `/api/recovery/tasks/${link.id}/ai`);
+    assert.equal(blocked.status, 403);
+    assert.match(blocked.data.message, /Quản lý chưa duyệt prompt/);
+    const viewer = await c4("PUT", "/api/manager/prompts/link_sentence", { status: "approved" });
+    assert.equal(viewer.status, 200);
+    for (const id of ["cta_sentence", "geo_answers", "content_brief", "article_draft"]) await c4("PUT", `/api/manager/prompts/${id}`, { status: "approved" });
+    // Cấu trúc + nghiên cứu từ khoá
+    let ct = await c4("GET", `/api/content/${caseId}`);
+    assert.ok(ct.data.structure.hubs.some((h) => h.path === "/cad-dienstleistung-tga/"));
+    assert.ok(ct.data.structure.gaps.length >= 1);
+    const rs = await c4("POST", `/api/content/${caseId}/research`);
+    assert.equal(rs.status, 200, JSON.stringify(rs.data));
+    ct = await c4("GET", `/api/content/${caseId}`);
+    const kws = ct.data.ideas.map((i) => i.keyword);
+    assert.ok(!kws.includes("autocad download"), "bỏ từ khoá điều hướng");
+    assert.ok(!kws.includes("3dscan alternative"), "bỏ từ khoá trong blocklist");
+    const covered = ct.data.ideas.find((i) => i.keyword === "12 wichtige cad symbole fur architektur");
+    assert.equal(covered.covered_by, "/12-wichtige-cad-symbole-fur-architektur/");
+    assert.equal((await c4("PUT", `/api/content/ideas/${covered.id}`, { status: "approved" })).status, 409, "không viết trùng trang có sẵn");
+    const good = ct.data.ideas.find((i) => i.keyword === "cad zeichner tga");
+    assert.equal(good.hub_path, "/cad-dienstleistung-tga/");
+    // Duyệt → dàn ý → bài nháp → Gác cổng → bản nháp WordPress
+    assert.equal((await c4("PUT", `/api/content/ideas/${good.id}`, { status: "approved" })).status, 200);
+    const br = await c4("POST", `/api/content/ideas/${good.id}/brief`);
+    assert.equal(br.status, 200, JSON.stringify(br.data));
+    const dr = await c4("POST", `/api/content/ideas/${good.id}/draft`);
+    assert.equal(dr.status, 200, JSON.stringify(dr.data));
+    assert.equal(dr.data.result.ok, true, JSON.stringify(dr.data.result));
+    ct = await c4("GET", `/api/content/${caseId}`);
+    const drafted = ct.data.ideas.find((i) => i.id === good.id);
+    assert.doesNotMatch(drafted.draft.html, /<script/);
+    assert.ok(drafted.draft.words >= 600);
+    assert.equal((await c4("POST", `/api/content/ideas/${good.id}/wp`)).status, 400, "chưa kết nối WP");
+    await c4("PUT", `/api/sites/${siteId}/wp`, { wpUser: wp.user, appPassword: wp.pass });
+    const wd = await c4("POST", `/api/content/ideas/${good.id}/wp`);
+    assert.equal(wd.status, 200, JSON.stringify(wd.data));
+    assert.equal(wp.created.length, 1);
+    assert.equal(wp.created[0].status, "draft");
+    assert.equal((await c4("POST", `/api/content/ideas/${good.id}/wp`)).status, 409, "không tạo trùng");
+    // Số liệu bịa trong bài: Gác cổng chặn
+    const second = ct.data.ideas.find((i) => i.keyword === "tga planung cad");
+    assert.equal(second.covered_by, null);
+    assert.equal((await c4("PUT", `/api/content/ideas/${second.id}`, { status: "approved" })).status, 200);
+    const sb = await c4("POST", `/api/content/ideas/${second.id}/brief`); assert.equal(sb.status, 200, JSON.stringify(sb.data));
+    const bad = await c4("POST", `/api/content/ideas/${second.id}/draft`); assert.equal(bad.status, 200, JSON.stringify(bad.data));
+    assert.equal(bad.data.result.ok, false);
+    assert.ok(bad.data.result.problems.some((p) => p.rule === "numbers"));
+    assert.equal((await c4("POST", `/api/content/ideas/${second.id}/wp`)).status, 409);
+    // Giới hạn bài/tháng (chống spam)
+    const third = ct.data.ideas.find((i) => i.keyword === "haustechnik zeichnung erstellen lassen");
+    const lim = await c4("PUT", `/api/content/ideas/${third.id}`, { status: "approved" });
+    assert.equal(lim.status, 409);
+    assert.match(lim.data.message, /chống spam/);
+    // Trần chi phí: hạ trần AI theo site → Quản lý chặn
+    await c4("PUT", "/api/settings", { values: { ai_site_daily_cap_usd: 0 } });
+    const capped = await c4("POST", `/api/recovery/tasks/${link.id}/ai`);
+    assert.equal(capped.status, 429);
+    await c4("PUT", "/api/settings", { values: { ai_site_daily_cap_usd: 2 } });
+    const sp = await c4("GET", "/api/manager/spend");
+    assert.ok(sp.data.spent.openrouter > 0 && sp.data.spent.dataforseo > 0);
+    assert.ok(sp.data.blockedMonth >= 2);
+    // Tự động: cron chạy tiếp việc
+    const waits = [];
+    await worker.scheduled({ cron: "*/15 * * * *", scheduledTime: Date.now() }, env4, { waitUntil: (p) => waits.push(p) });
+    await Promise.all(waits);
+    const acts = await c4("GET", "/api/activity?limit=80");
+    assert.ok(acts.data.activity.some((a) => a.actor === "agent:linker" && a.action === "recovery.ai"), "autopilot phải cho AI viết lại câu chèn");
+    // Agent HQ
+    const hq = await c4("GET", "/api/hq");
+    assert.equal(hq.status, 200);
+    assert.equal(hq.data.manager.promptsPending, 0);
+    assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 4);
+    assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
     globalThis.fetch = realFetch;
   }

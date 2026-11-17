@@ -1,7 +1,7 @@
 // Gác cổng: kiểm tra mọi đề xuất sửa trước khi được phép ghi lên site.
 // Vi phạm luật cứng = chặn (blocked). Cảnh báo = vẫn cho duyệt nhưng hiện rõ cho người duyệt.
 
-import { blockHitsIn, extractNumbers, langRatios, MARKER_RE } from "./recovery-extract";
+import { blockHitsIn, extractNumbers, langRatios, MARKER_RE, standardNumbers } from "./recovery-extract";
 import type { SiteRules } from "./recovery-rules";
 
 export interface Edit {
@@ -63,7 +63,7 @@ export function checkEdits(edits: Edit[], ctx: GateContext): GateResult {
       if (rules.language === "en" && r.de > r.en && r.de > 0.08) p("language", "block", `Sửa #${n} có vẻ là tiếng Đức, site này viết tiếng Anh.`);
     }
     // 5. Số liệu không có nguồn
-    const allowed = new Set([...ctx.pageNumbers, ...rules.verifiedNumbers.flatMap(extractNumbers)].map((x) => x.toLowerCase()));
+    const allowed = new Set([...ctx.pageNumbers, ...rules.verifiedNumbers.flatMap(extractNumbers), ...standardNumbers(add)].map((x) => x.toLowerCase()));
     const unsourced = extractNumbers(add).filter((x) => !allowed.has(x));
     if (unsourced.length) p("numbers", "block", `Sửa #${n} có số liệu chưa có nguồn: ${unsourced.join(", ")}. Dùng chữ định tính hoặc ghi nguồn đã kiểm chứng.`);
     // 6. Giới hạn độ dài meta

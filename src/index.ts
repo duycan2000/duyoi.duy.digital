@@ -9,6 +9,10 @@ import { createSite, getSite, listSites, updateSite } from "./sites";
 import { createUser, deleteUser, listUsers, resetUserPassword, updateUser } from "./users";
 import { aiRewriteTask, applyTask, archiveCase, createCase, decideTask, disavow, geoDraft, getCase, listCases, processRecoveryQueue, rescanCase, rollbackTask, updateRules } from "./recovery";
 import { wpSave, wpStatus, wpTest } from "./wordpress";
+import { listPrompts, reviewPrompt, spendReport } from "./manager";
+import { apiBrief, apiDraft, apiIdeaStatus, apiResearch, apiWpDraft, contentView } from "./content";
+import { hqView } from "./hq";
+import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
 
 async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promise<Response> {
@@ -70,6 +74,26 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (m === "PUT") return updateSite(env, req, user, id);
   }
 
+  // Agent HQ và cấp Quản lý
+  if (path === "/api/hq" && m === "GET") return hqView(env);
+  if (path === "/api/manager/prompts" && m === "GET") return listPrompts(env);
+  const prMatch = path.match(/^\/api\/manager\/prompts\/([a-z_]+)$/);
+  if (prMatch && m === "PUT") return reviewPrompt(env, req, user, prMatch[1]!);
+  if (path === "/api/manager/spend" && m === "GET") return spendReport(env);
+
+  // Đội Nội dung
+  const ctMatch = path.match(/^\/api\/content\/(\d+)(\/research)?$/);
+  if (ctMatch && !ctMatch[2] && m === "GET") return contentView(env, Number(ctMatch[1]));
+  if (ctMatch && ctMatch[2] && m === "POST") return apiResearch(env, user, Number(ctMatch[1]));
+  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp))?$/);
+  if (idMatch) {
+    const iid = Number(idMatch[1]);
+    if (!idMatch[2] && m === "PUT") return apiIdeaStatus(env, req, user, iid);
+    if (idMatch[2] === "brief" && m === "POST") return apiBrief(env, user, iid);
+    if (idMatch[2] === "draft" && m === "POST") return apiDraft(env, user, iid);
+    if (idMatch[2] === "wp" && m === "POST") return apiWpDraft(env, user, iid);
+  }
+
   // Phục hồi thứ hạng
   if (path === "/api/recovery" && m === "GET") return listCases(env);
   if (path === "/api/recovery" && m === "POST") return createCase(env, req, user, ctx);
@@ -112,6 +136,6 @@ export default {
 
   async scheduled(_event: CronEvent, env: Env, ctx: ExecCtx): Promise<void> {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
-    ctx.waitUntil(processRecoveryQueue(env).catch((e) => console.error("recovery cron failed", e)));
+    ctx.waitUntil(processRecoveryQueue(env).then(() => runAutopilot(env)).catch((e) => console.error("recovery/autopilot cron failed", e)));
   }
 };

@@ -98,6 +98,24 @@ Cài đặt › API key › **Google service account (JSON)**. Bật *Google Sea
 
 Dùng OpenRouter key và model tầng T1 trong Cài đặt, có trần chi phí tháng. Nút **Viết lại bằng AI** cho câu chèn link/CTA, **Soạn GEO bằng AI** cho đoạn trả lời trực tiếp đầu mục H2 và FAQ. Mọi nội dung AI viết qua Gác cổng: số liệu không có trên trang hoặc trong danh sách đã kiểm chứng sẽ bị chặn.
 
+### Agent HQ và cấp Quản lý
+
+Menu **Agent HQ** hiện đội agent theo khu (Điều hành, Tự động, Phục hồi, Nội dung mới) với trạng thái thật từ D1. Mọi lần gọi AI đi qua **Quản lý** (`src/manager.ts`):
+
+- prompt phải được admin duyệt đúng phiên bản (mã băm của nội dung, tầng model, giới hạn token) ở tab **Quản lý prompt**; sửa prompt trong code là ra phiên bản mới, phải duyệt lại. Chưa duyệt thì agent bị chặn;
+- kiểm trần chi phí tháng cho OpenRouter và DataForSEO, và trần AI mỗi site trong 24 giờ (Cài đặt › Model AI & chi phí);
+- ghi mọi lần gọi vào `ai_calls` (độ dài prompt, token, chi phí thật, bị chặn hay lỗi), xem ở tab **Chi tiêu**. Không lưu nội dung prompt.
+
+**Sau lần deploy đầu tiên, admin cần vào Agent HQ › Quản lý prompt duyệt 5 prompt thì AI mới chạy.**
+
+### Bài mới (chống spam)
+
+Tab **Bài mới** trong ca phục hồi: bảng cấu trúc (mỗi trang dịch vụ có bao nhiêu bài dẫn link về), nghiên cứu từ khoá bằng DataForSEO (bỏ từ khoá điều hướng, blocklist, lượng tìm thấp; chủ đề đã có trang thì không viết mới), duyệt chủ đề trong giới hạn bài/tháng, lập dàn ý từ top Google và People Also Ask, viết nháp qua Gác cổng (blocklist, ngôn ngữ, số liệu không nguồn, tối thiểu 600 từ), rồi tạo **bản nháp** WordPress (plugin 1.1.0 trở lên). Không bao giờ tự đăng; chủ site thêm kinh nghiệm, ảnh thật và tác giả thật trước khi đăng.
+
+### Chế độ tự động
+
+Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.
+
 Luật riêng của từng site (blocklist, ngôn ngữ, trang dịch vụ, số liệu đã kiểm chứng…) nhập ở tab **Luật an toàn**, lưu trong D1. Không ghi luật của khách vào code vì repo công khai.
 
 Thử trên máy không cần mạng: `FAKE_SITE=1 node tests/serve.mjs` rồi nhập `caddemo.de` (WordPress, Google và OpenRouter đều là bản giả; user WP `duyoi-bot`, mật khẩu `abcd efgh ijkl mnop`). Test plugin PHP: `php wordpress/tests/test.php`.

@@ -11,7 +11,7 @@ export const PHASES = {
 export const MENU = [
   { group: "Điều hành", key: "ops", items: [
     { id: "overview", label: "Tổng quan", live: true },
-    { id: "hq", label: "Agent HQ 3D", phase: 5, plan: ["Đội 16 agent theo khu (SEO Lab, Chiến lược, Content, Off-page, Ops, Outreach)", "Trạng thái từng agent đọc từ hàng việc thật", "Giao việc bằng cách kéo site vào agent"] },
+    { id: "hq", label: "Agent HQ", live: true },
     { id: "rankings", label: "Rankings", phase: 2, plan: ["Vị trí desktop và mobile hằng ngày qua DataForSEO SERP (chế độ Standard, rẻ)", "SERP feature: PAA, AI Overview, featured snippet, local pack", "Biểu đồ hiển thị toàn site, tab Đối thủ và Cannibalization, xuất CSV"] },
     { id: "analytics", label: "Analytics & báo cáo", phase: 5, plan: ["Search Console, GA4, Bing Webmaster qua OAuth", "Báo cáo tháng tự động, gửi về điện thoại"] }
   ]},

@@ -4,7 +4,7 @@ import { HttpError, json, now, readJson, str } from "./http";
 import { logActivity } from "./activity";
 import { analyze, disavowFile, plan, RECOVERY_AGENTS, type ScannedPage, type SiteChecks, type Traffic } from "./recovery-analyze";
 import { ga4ByPage, gscTraffic, hasGoogle, type PageTraffic } from "./google";
-import { checkEdits, type Edit } from "./recovery-gate";
+import { checkEdits, type Edit, type GateResult } from "./recovery-gate";
 import { aiJson, writingRules } from "./ai";
 import { wpApply, wpGetPost, wpRestore, type WpEdit } from "./wordpress";
 import { extractPage, type PageData } from "./recovery-extract";
@@ -194,7 +194,7 @@ async function finish(env: Env, c: CaseRow, rules: SiteRules, domain: string): P
   for (let i = 0; i < ins.length; i += 50) await env.DB.batch(ins.slice(i, i + 50));
   await env.DB.prepare("UPDATE recovery_cases SET status = 'ready', score = ?, diagnosis = ?, error = NULL, updated_at = ?, finished_at = ? WHERE id = ?")
     .bind(a.score, JSON.stringify(a.diagnosis), t, t, c.id).run();
-  await logActivity(env, "agent:recovery", "recovery.ready", `Chẩn đoán xong ${domain}: điểm ${a.score}/100, ${a.findings.length} vấn đề, ${ins.length} việc mới`, c.site_id);
+  await logActivity(env, "agent:doctor", "recovery.ready", `Chẩn đoán xong ${domain}: điểm ${a.score}/100, ${a.findings.length} vấn đề, ${ins.length} việc mới`, c.site_id);
 }
 
 async function getCaseRow(env: Env, id: number): Promise<CaseRow> {
@@ -319,14 +319,18 @@ export async function getCase(env: Env, id: number): Promise<Response> {
 }
 
 // POST /api/recovery/:id/rescan — quét lại từ đầu (giữ việc đã duyệt/đã làm)
-export async function rescanCase(env: Env, user: User, id: number, ctx?: ExecCtx): Promise<Response> {
-  canEdit(user);
-  const c = await getCaseRow(env, id);
-  if (["discovering", "scanning", "analyzing"].includes(c.status)) { await run(env, ctx, id); return json({ ok: true, continued: true }); }
+export async function resetForRescan(env: Env, id: number): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM recovery_pages WHERE case_id = ?").bind(id),
     env.DB.prepare("UPDATE recovery_cases SET status = 'discovering', pages_total = 0, pages_done = 0, error = NULL, updated_at = ? WHERE id = ?").bind(now(), id)
   ]);
+}
+
+export async function rescanCase(env: Env, user: User, id: number, ctx?: ExecCtx): Promise<Response> {
+  canEdit(user);
+  const c = await getCaseRow(env, id);
+  if (["discovering", "scanning", "analyzing"].includes(c.status)) { await run(env, ctx, id); return json({ ok: true, continued: true }); }
+  await resetForRescan(env, id);
   await logActivity(env, `user:${user.id}`, "recovery.rescan", `Quét lại ${c.domain}`, c.site_id);
   await run(env, ctx, id);
   return json({ ok: true });
@@ -432,6 +436,10 @@ async function titleLookup(env: Env, caseId: number): Promise<(path: string) => 
 // POST /api/recovery/tasks/:id/apply
 export async function applyTask(env: Env, user: User, taskId: number): Promise<Response> {
   canEdit(user);
+  return json({ ok: true, applied: await applyCore(env, taskId, user.id, `user:${user.id}`) });
+}
+
+export async function applyCore(env: Env, taskId: number, userId: number | null, actor: string): Promise<Record<string, unknown>> {
   const t = await taskRow(env, taskId);
   if (t.status !== "approved") throw new HttpError(409, "Chỉ áp dụng được việc đã duyệt.", "not_approved");
   const p = t.payload ? (JSON.parse(t.payload) as { edits?: Edit[]; applied?: unknown }) : {};
@@ -455,7 +463,7 @@ export async function applyTask(env: Env, user: User, taskId: number): Promise<R
   // Thử trước (không ghi) để biết chắc mọi sửa đều khớp, rồi mới sao lưu và ghi thật
   await wpApply(env, t.site_id, { id: post.id, expected_modified: post.modified_gmt, edits: content, meta, dry_run: true });
   const b = await env.DB.prepare("INSERT INTO recovery_backups (task_id, site_id, post_id, url, content, elementor_data, meta, modified_gmt, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(taskId, t.site_id, post.id, t.target_url, post.content, post.elementor_data, JSON.stringify(post.meta || {}), post.modified_gmt, user.id, now()).run();
+    .bind(taskId, t.site_id, post.id, t.target_url, post.content, post.elementor_data, JSON.stringify(post.meta || {}), post.modified_gmt, userId, now()).run();
   const backupId = Number(b.meta.last_row_id);
   const res = await wpApply(env, t.site_id, { id: post.id, expected_modified: post.modified_gmt, edits: content, meta });
   const applied = { backupId, at: now(), postId: post.id, changes: res.changes, meta: res.meta, elementor: res.elementor, purged: res.purged || [] };
@@ -463,8 +471,8 @@ export async function applyTask(env: Env, user: User, taskId: number): Promise<R
     env.DB.prepare("UPDATE recovery_backups SET applied = ? WHERE id = ?").bind(JSON.stringify({ edits: content, meta, result: res }), backupId),
     env.DB.prepare("UPDATE recovery_tasks SET status = 'done', payload = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify({ ...p, applied }), JSON.stringify(gate), now(), taskId)
   ]);
-  await logActivity(env, `user:${user.id}`, "recovery.applied", `Áp dụng lên site: ${t.title} (${res.changes} sửa${res.meta.length ? `, meta ${res.meta.join(", ")}` : ""}${res.purged?.length ? `, xoá cache ${res.purged.join(", ")}` : ""})`, t.site_id);
-  return json({ ok: true, applied });
+  await logActivity(env, actor, "recovery.applied", `Áp dụng lên site: ${t.title} (${res.changes} sửa${res.meta.length ? `, meta ${res.meta.join(", ")}` : ""}${res.purged?.length ? `, xoá cache ${res.purged.join(", ")}` : ""})`, t.site_id);
+  return applied;
 }
 
 // POST /api/recovery/tasks/:id/rollback
@@ -491,6 +499,10 @@ export async function rollbackTask(env: Env, user: User, taskId: number): Promis
 // POST /api/recovery/tasks/:id/ai
 export async function aiRewriteTask(env: Env, user: User, taskId: number): Promise<Response> {
   canEdit(user);
+  return json({ ok: true, gate: await aiRewriteCore(env, taskId, `user:${user.id}`) });
+}
+
+export async function aiRewriteCore(env: Env, taskId: number, actor: string): Promise<GateResult> {
   const t = await taskRow(env, taskId);
   if (!["proposed", "blocked"].includes(t.status) || !["internal_links", "cta"].includes(t.kind) || !t.target_url) throw new HttpError(400, "Chỉ viết lại được việc chèn link/CTA đang chờ duyệt.", "validation");
   const rules = readRules(t.rules);
@@ -503,15 +515,15 @@ export async function aiRewriteTask(env: Env, user: User, taskId: number): Promi
     const isLink = e.type === "internal_link";
     const href = (e.replace.match(/href="([^"]+)"/) || [])[1] || e.target || "";
     const r = await aiJson<{ sentence?: string; anchor?: string }>(env, {
-      task: `recovery.${t.kind}`, siteId: t.site_id, tier: "model_t1", maxTokens: 300,
-      system: `You are a careful B2B copy editor adding ONE short sentence after an existing sentence on a live web page.\n${writingRules(rules.language, [...(d?.numbers || []), ...rules.verifiedNumbers], rules.blocklist)}`,
-      user: JSON.stringify({
+      template: isLink ? "link_sentence" : "cta_sentence", task: `recovery.${t.kind}`, siteId: t.site_id,
+      rules: writingRules(rules.language, [...(d?.numbers || []), ...rules.verifiedNumbers], rules.blocklist),
+      input: {
         page_title: d?.title, section_heading: e.section, existing_sentence: e.find,
         goal: isLink ? "Write one natural follow-up sentence that links to the target page. The anchor must describe the target page (use its main keyword or a close natural variant), 2–6 words, not generic." : "Write one short, friendly call-to-action sentence inviting the reader to contact the team. No promises, no numbers.",
         target_page: isLink ? { path: href, title: titleOf(href) } : { path: href, purpose: "contact" },
         avoid_anchors: base.filter((x) => x !== e).map((x) => x.anchor).filter(Boolean),
         output: { sentence: "the full new sentence", anchor: "exact substring of sentence to turn into the link" }
-      })
+      }
     });
     const sentence = String(r.sentence || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
     const anchor = String(r.anchor || "").replace(/<[^>]+>/g, "").trim();
@@ -522,8 +534,8 @@ export async function aiRewriteTask(env: Env, user: User, taskId: number): Promi
   const gate = checkEdits(out, gateContext(rules, d, titleOf));
   await env.DB.prepare("UPDATE recovery_tasks SET payload = ?, gate = ?, status = ?, note = ?, updated_at = ? WHERE id = ?")
     .bind(JSON.stringify({ ...p, edits: out, templateEdits: base, ai: true }), JSON.stringify(gate), gate.ok ? "proposed" : "blocked", "AI viết lại câu chèn, đã qua Gác cổng", now(), taskId).run();
-  await logActivity(env, `user:${user.id}`, "recovery.ai", `AI viết lại: ${t.title}${gate.ok ? "" : " (Gác cổng chặn)"}`, t.site_id);
-  return json({ ok: true, gate });
+  await logActivity(env, actor, "recovery.ai", `AI viết lại: ${t.title}${gate.ok ? "" : " (Gác cổng chặn)"}`, t.site_id);
+  return gate;
 }
 
 // ---------------- GEO: đoạn trả lời trực tiếp + FAQ cho một trang ----------------
@@ -541,14 +553,14 @@ export async function geoDraft(env: Env, req: Request, user: User, caseId: numbe
   const last = [...d.sections].reverse().find((s) => s.lastSentence && s.occurrences === 1);
   if (!secs.length || !last) throw new HttpError(400, "Trang không có mục H2 với đoạn văn đủ rõ để chèn an toàn.", "validation");
   const r = await aiJson<{ answers?: { heading?: string; answer?: string }[]; faq_title?: string; faq?: { q?: string; a?: string }[] }>(env, {
-    task: "recovery.geo", siteId: c.site_id, tier: "model_t1", maxTokens: 1400,
-    system: `You improve pages so AI answer engines can cite them. You only ADD text, never change existing text.\n${writingRules(rules.language, [...d.numbers, ...rules.verifiedNumbers], rules.blocklist)}`,
-    user: JSON.stringify({
+    template: "geo_answers", task: "recovery.geo", siteId: c.site_id,
+    rules: writingRules(rules.language, [...d.numbers, ...rules.verifiedNumbers], rules.blocklist),
+    input: {
       page_title: d.title, h1: d.h1[0],
       task: "For up to 3 of the sections below, write a direct answer (2–4 sentences) to the question the heading implies, based ONLY on the section text given. Then write 3–5 FAQ items a potential B2B customer would ask before hiring (commercial intent), answered only with what the page supports.",
       sections: secs.map((s) => ({ heading: s.heading, text: s.sample })),
       output: { answers: [{ heading: "exact heading from input", answer: "..." }], faq_title: "short FAQ heading", faq: [{ q: "...", a: "..." }] }
-    })
+    }
   });
   const clean = (x: unknown) => String(x || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
   const escHtml = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
