@@ -12,7 +12,8 @@ export const SECRET_KEYS = {
   groq_api_key: "Groq API key",
   cloudflare_api_token: "Cloudflare API token",
   google_api_key: "Google Cloud API key",
-  google_service_account: "Google service account (JSON)"
+  google_service_account: "Google service account (JSON)",
+  github_token: "GitHub token (đăng bài lên repo site Astro)"
 } as const;
 type SecretKey = keyof typeof SECRET_KEYS;
 

@@ -181,6 +181,35 @@ export function fakeSite(opts = {}) {
     if (p === "/zones/zone1/workers/routes" && m === "POST") { const b = JSON.parse(init.body); cfs.routes.push(b); return jsonRes({ success: true, result: { id: String(cfs.routes.length), ...b } }); }
     return jsonRes({ success: false, errors: [{ message: `no route ${m} ${p}` }] }, 404);
   }
+  const gh = opts.gh || { token: "gh-token", repo: "duycan2000/caddemo", prs: [], commits: 0, checks: () => [{ name: "Workers Builds: caddemo", status: "completed", conclusion: "success", details_url: "https://dash.cloudflare.com/x", output: { summary: "Preview: https://abc-caddemo.duycan.workers.dev" } }], branches: { main: {
+    "src/content.config.ts": 'import { defineCollection, z } from "astro:content";\nimport { glob } from "astro/loaders";\nconst blog = defineCollection({ loader: glob({ base: "./src/content/blog", pattern: "**/*.md" }), schema: ({ image }) => z.object({ title: z.string(), description: z.string(), pubDate: z.coerce.date(), heroImage: image().optional(), author: z.string(), category: z.enum(["guides", "reviews"]) }) });\nexport const collections = { blog };',
+    "src/content/blog/hello.md": "---\ntitle: Hallo\ndescription: Test\npubDate: 2024-01-01\nauthor: Duy Can\ncategory: guides\n---\nText\n"
+  } } };
+  async function github(u, init) {
+    if ((init?.headers?.Authorization || "") !== `Bearer ${gh.token}`) return jsonRes({ message: "Bad credentials" }, 401);
+    const m = init?.method || "GET";
+    const R = `/repos/${gh.repo}`;
+    const p = decodeURIComponent(u.pathname);
+    const ref = u.searchParams.get("ref") || "main";
+    if (p === R && m === "GET") return jsonRes({ default_branch: "main", full_name: gh.repo });
+    let r;
+    if ((r = p.match(new RegExp(`^${R}/git/trees/(.+)$`)))) return jsonRes({ tree: Object.keys(gh.branches[r[1]] || {}).map((path) => ({ path, type: "blob" })) });
+    if ((r = p.match(new RegExp(`^${R}/git/ref/heads/(.+)$`)))) return gh.branches[r[1]] ? jsonRes({ object: { sha: `sha-${r[1]}` } }) : jsonRes({ message: "Not Found" }, 404);
+    if (p === `${R}/git/refs` && m === "POST") { const b = JSON.parse(init.body); gh.branches[b.ref.replace("refs/heads/", "")] = { ...gh.branches.main }; return jsonRes({ ref: b.ref }, 201); }
+    if ((r = p.match(new RegExp(`^${R}/contents/(.+)$`)))) {
+      if (m === "GET") { const f = gh.branches[ref]?.[r[1]]; return f !== undefined ? jsonRes({ content: Buffer.from(f.bin || f).toString("base64"), sha: `f-${r[1]}`, encoding: "base64" }) : jsonRes({ message: "Not Found" }, 404); }
+      const b = JSON.parse(init.body);
+      const buf = Buffer.from(b.content, "base64");
+      gh.branches[b.branch][r[1]] = /\.(md|mdx)$/.test(r[1]) ? buf.toString("utf8") : { bin: buf };
+      gh.commits++; gh.head = gh.head || {}; gh.head[b.branch] = `c${gh.commits}`;
+      return jsonRes({ commit: { sha: `c${gh.commits}` } }, 201);
+    }
+    if (p === `${R}/pulls` && m === "POST") { const b = JSON.parse(init.body); gh.prs.push({ ...b, number: gh.prs.length + 1, merged: false, state: "open" }); return jsonRes({ number: gh.prs.length, html_url: `https://github.com/${gh.repo}/pull/${gh.prs.length}` }, 201); }
+    if ((r = p.match(new RegExp(`^${R}/pulls/(\\d+)$`)))) { const pr = gh.prs[Number(r[1]) - 1]; return jsonRes({ state: pr.state, merged: pr.merged, head: { sha: gh.head[pr.head] } }); }
+    if ((r = p.match(new RegExp(`^${R}/commits/([^/]+)/check-runs$`)))) return jsonRes({ check_runs: gh.checks(r[1]) });
+    if ((r = p.match(new RegExp(`^${R}/commits/([^/]+)/status$`)))) return jsonRes({ statuses: [] });
+    return jsonRes({ message: `no route ${m} ${p}` }, 404);
+  }
   return async (input, init) => {
     const u = new URL(typeof input === "string" ? input : input.url);
     if (u.hostname === host && u.pathname === "/wp-json/wp/v2/media" && init?.method === "POST") {
@@ -191,6 +220,7 @@ export function fakeSite(opts = {}) {
       wp.media.push({ filename, type: init.headers["Content-Type"], alt: u.searchParams.get("alt_text"), bytes });
       return jsonRes({ id: 900 + wp.media.length, source_url: `https://${host}/wp-content/uploads/${filename}`, media_details: { width: 800, height: 600 } }, 201);
     }
+    if (u.hostname === "api.github.com") return github(u, init);
     if (u.hostname === "api.cloudflare.com") return cloudflare(u, init);
     if (u.hostname === host && u.pathname.startsWith("/images/") && cfs.routes.some((r) => r.pattern === `${host}/images/*`)) {
       const w = cfs.workers[cfs.routes.find((r) => r.pattern === `${host}/images/*`).script];

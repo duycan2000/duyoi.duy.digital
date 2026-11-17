@@ -142,6 +142,19 @@ Khi tạo bài (Content Studio hoặc tab **Bài mới**), chọn định dạng
 - **Kiểm cấu trúc bằng code** cho từng định dạng (mở bài trả lời thẳng, đủ H2, FAQ, bảng chọn nhanh, mục riêng + nhược điểm + nút mua cho từng sản phẩm, các bước đánh số, ý chính…). Thiếu phần chính thì chặn và đưa vào vòng sửa của Người viết.
 - **Anh tự viết bằng Claude:** mỗi bài chọn "Agent viết" hoặc "Tôi tự viết" (mặc định hỏi từng bài; đổi ở Luật an toàn › Ai viết bài mới). "Tôi tự viết": lấy gói yêu cầu (dàn ý, khung định dạng, token, sản phẩm, trải nghiệm, giọng văn, dữ kiện, luật) dán vào Claude, rồi dán bài Markdown/HTML vào app. Biên tập viên chấm theo khung; nếu anh cho phép thì Người viết sửa đúng chỗ chưa đạt. Với bài anh viết, số liệu chưa có nguồn chỉ cảnh báo.
 
+### Đăng bài lên site Astro qua GitHub
+
+Mỗi theme Astro có kiểu bài riêng, nên mỗi site có **hồ sơ đăng bài** (tab Bài mới › Đăng lên GitHub) do app tự đọc từ repo (`src/publish.ts`):
+
+- content config (`src/content.config.ts` hoặc `src/content/config.ts`): thư mục bài, các trường frontmatter, kiểu (string, date, image(), enum, array, boolean), trường nào bắt buộc;
+- bài mới nhất làm mẫu: `.md` hay `.mdx`, cách đặt tên file (`slug.md`, `slug/index.md`, `YYYY-MM-DD-slug.md`), chỗ để ảnh, component nút mua (ví dụ `<AffiliateButton href="{url}" label="{label}" />`).
+
+Anh sửa được: tác giả thật, giá trị cố định cho trường bắt buộc (enum như category), trường nào app tự điền, mẫu nút mua. Theme bắt buộc ảnh đại diện thì bài có thêm chỗ ảnh "Ảnh đại diện".
+
+Khi bài qua Gác cổng: bấm **Xem file sẽ đăng** hoặc **Tạo pull request**. App tạo nhánh `duyoi/…`, chuyển bài sang Markdown/MDX theo hồ sơ (frontmatter đúng schema, `draft: true` nếu theme có, nút mua theo component, ảnh đưa vào repo nếu theme dùng `image()`), rồi mở pull request vào nhánh chính, không đẩy thẳng. Cloudflare Workers Builds build thử; app đọc kết quả (cron 15 phút hoặc nút Kiểm tra lại), hiện link xem trước. Build lỗi do frontmatter thì app tự sửa (tối đa 2 lần); merge xong thì bài chuyển sang Đã đăng.
+
+Cần **GitHub fine-grained token** chỉ cho các repo site, quyền Contents và Pull requests (Read and write), nhập ở Cài đặt › API key.
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.

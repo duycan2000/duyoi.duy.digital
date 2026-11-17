@@ -131,7 +131,8 @@ export const readProducts = (s: string | null): Products => { try { return parse
 export const readImages = (s: string | null): Record<string, UploadedImage> => { try { return JSON.parse(s || "{}") || {}; } catch { return {}; } };
 
 // Ảnh thật agent cần: sản phẩm (bắt buộc với bài affiliate), các bước how-to và ảnh minh hoạ guide (do dàn ý đề xuất)
-export function slotsFor(format: FormatId, products: Products, photoRequests: { key: string; what: string }[], images: Record<string, UploadedImage>): Slot[] {
+// needHero: theme của site (Astro) bắt buộc ảnh đại diện trong frontmatter
+export function slotsFor(format: FormatId, products: Products, photoRequests: { key: string; what: string }[], images: Record<string, UploadedImage>, needHero = false): Slot[] {
   const s: Omit<Slot, "image">[] = [];
   if (format === "roundup" || format === "comparison") products.items.forEach((p, i) => s.push({ key: `p${i + 1}`, label: `Ảnh thật của ${p.name} (tự chụp, hoặc ảnh nhà sản xuất có quyền dùng)`, required: true }));
   if (format === "review" && products.items[0]) {
@@ -139,6 +140,7 @@ export function slotsFor(format: FormatId, products: Products, photoRequests: { 
     s.push({ key: "use", label: `Ảnh lúc anh đang dùng ${products.items[0].name}`, required: true });
   }
   if (format === "how_to" || format === "guide") for (const r of photoRequests.slice(0, 8)) if (/^[sg]\d{1,2}$/.test(r.key)) s.push({ key: r.key, label: r.what.slice(0, 160), required: false });
+  if (needHero && !s.some((x) => x.key === "hero")) s.unshift({ key: "hero", label: "Ảnh đại diện của bài (theme của site bắt buộc)", required: true });
   return s.map((x) => ({ ...x, image: images[x.key] || null }));
 }
 

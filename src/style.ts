@@ -110,7 +110,7 @@ export function checkStructure(format: FormatId, raw: string, products: Products
     need(h2.slice(0, 2).some((s) => TAKEAWAY_RE.test(s.h) && /<ul>/i.test(s.body)), "Thiếu mục ý chính (key takeaways) dạng danh sách ở đầu bài.");
     need(has(/checklist|check|kiểm tra|prüf|liste/i), "Nên có danh sách kiểm tra khi chọn/làm.", "warn");
   }
-  const missingImg = slots.filter((s) => s.required && !raw.includes(`[[IMG:${s.key}]]`) && !/^p\d+$/.test(s.key));
+  const missingImg = slots.filter((s) => s.required && !raw.includes(`[[IMG:${s.key}]]`) && !/^p\d+$/.test(s.key) && s.key !== "hero");
   need(!missingImg.length, `Bài chưa có chỗ đặt ảnh: ${missingImg.map((s) => s.key).join(", ")}.`, "warn");
   return out;
 }

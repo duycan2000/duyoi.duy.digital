@@ -697,6 +697,7 @@ const SECRET_HELP = {
   groq_api_key: "console.groq.com › API Keys (model free riêng tư)",
   cloudflare_api_token: "Quyền: Account › Workers R2 Storage Edit + Workers Scripts Edit (kho ảnh site Astro); Zone › Zone Read + Workers Routes Edit + DNS Edit, chỉ các zone của site. Điền Account ID ở tab Model AI & chi phí.",
   google_api_key: "Knowledge Graph Search API (cho tab Entity)",
+  github_token: "github.com › Settings › Developer settings › Fine-grained tokens. Chỉ chọn repo các site; quyền Contents: Read and write, Pull requests: Read and write.",
   google_service_account: "Google Cloud › IAM › Service accounts › Keys › JSON. Bật Search Console API và Google Analytics Data API, rồi thêm email service account vào property GSC (Restricted) và GA4 (Viewer)."
 };
 

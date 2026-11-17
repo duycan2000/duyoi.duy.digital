@@ -13,6 +13,7 @@ import { wpCall } from "./wordpress";
 import { mediaReady, mediaSite, storeImage } from "./media";
 import { profileFor, profileNumbers, readProfile, type Profile } from "./docs";
 import { clean as decodeText } from "./recovery-extract";
+import { buildPost, createPostPr, readPublishProfile, syncPr, type PostInput, type PrInfo } from "./publish";
 import { checkStructure, checkVoice, clichesFor, markdownToHtml } from "./style";
 import { imageSize, MAX_IMAGE_BYTES, sniffImage, stripJpegMeta } from "./images";
 import { checkFormat, detectFormat, FORMATS, formatOf, formatSpec, parseProducts, productNumbers, readImages, readProducts, renderDraft, slotsFor, type FormatId, type Slot, type UploadedImage } from "./formats";
@@ -31,6 +32,13 @@ async function caseInfo(env: Env, caseId: number): Promise<CaseInfo> {
 
 // Blocklist của site + điều cấm rút từ tài liệu (chỉ cụm ngắn)
 const blockOf = (rules: SiteRules, p: Profile): string[] => [...rules.blocklist, ...p.banned.filter((x) => x.length <= 40)];
+
+// Theme Astro của site bắt buộc ảnh đại diện (trường image() không optional trong content config)?
+async function heroNeeded(env: Env, siteId: number): Promise<boolean> {
+  const r = await env.DB.prepare("SELECT platform, publish_profile FROM sites WHERE id = ?").bind(siteId).first<{ platform: string; publish_profile: string | null }>();
+  const p = r?.platform === "astro" ? readPublishProfile(r) : null;
+  return !!p?.map.image && !!p.fields.find((f) => f.name === p.map.image)?.required;
+}
 
 async function pagesOf(env: Env, caseId: number): Promise<Pg[]> {
   const { results } = await env.DB.prepare("SELECT path, url, kind, data, traffic FROM recovery_pages WHERE case_id = ? AND status = 'done'").bind(caseId).all<{ path: string; url: string; kind: string | null; data: string | null; traffic: string | null }>();
@@ -216,7 +224,7 @@ export function checkArticle(html: string, rules: SiteRules, hubPath: string | n
   if (words < minWords) problems.push({ rule: "length", level: "block", message: `Bài quá ngắn (${words} từ, cần ${minWords}): dễ thành nội dung mỏng.` });
   problems.push(...(opts.extra || []));
   if (hubPath && !html.includes(`href="${hubPath}"`)) problems.push({ rule: "hub_link", level: "warn", message: `Bài chưa có link tới trang dịch vụ ${hubPath}.` });
-  problems.push({ rule: "expertise", level: "warn", message: "Trước khi đăng: chủ site thêm kinh nghiệm thật, chọn tác giả thật trong WordPress; không dùng ảnh AI giả làm ảnh thật." });
+  problems.push({ rule: "expertise", level: "warn", message: "Trước khi đăng: chủ site thêm kinh nghiệm thật, chọn tác giả thật; không dùng ảnh AI giả làm ảnh thật." });
   return { ok: !problems.some((p) => p.level === "block"), checkedAt: now(), problems };
 }
 
@@ -349,7 +357,7 @@ async function regate(env: Env, i: IdeaRow, c: CaseInfo, draft: Draft): Promise<
   const rules = readRules(c.rules);
   const products = readProducts(i.products);
   const brief = i.brief ? JSON.parse(i.brief) as { photo_requests?: { key: string; what: string }[] } : {};
-  const slots = slotsFor(i.format, products, brief.photo_requests || [], readImages(i.images));
+  const slots = slotsFor(i.format, products, brief.photo_requests || [], readImages(i.images), await heroNeeded(env, i.site_id));
   const html = renderDraft(draft.raw ?? draft.html, { format: i.format, products, slots, rules, preview: false });
   const f = formatOf(i.format);
   const profile = await readProfile(env, c.site_id);
@@ -548,6 +556,61 @@ export const apiImport = async (env: Env, req: Request, user: User, id: number) 
 
 export const apiWebFacts = (env: Env, user: User, id: number) => run(user, () => webFactsCore(env, id, `user:${user.id}`));
 
+// ---------------- Đăng lên site Astro qua GitHub ----------------
+
+async function postInput(env: Env, i: IdeaRow): Promise<{ input: PostInput; gate: GateResult }> {
+  if (i.status !== "drafted" && i.status !== "published") throw new HttpError(409, "Chưa có bài nháp.", "no_draft");
+  if (!i.draft) throw new HttpError(409, "Chưa có bài nháp.", "no_draft");
+  const c = await caseInfo(env, i.case_id!);
+  const { draft, gate, slots } = await regate(env, i, c, JSON.parse(i.draft) as Draft);
+  const pick = ["hero", "p1", "use", "s1", "g1"].map((k) => slots.find((s) => s.key === k && s.image)).find(Boolean) || slots.find((s) => s.image);
+  return { gate, input: { title: draft.title, description: draft.meta_description, slug: draft.slug, html: draft.html, keyword: i.keyword, hero: pick?.image ? { url: pick.image.url, alt: pick.image.alt } : null } };
+}
+const readPr = (s: string | null): PrInfo | null => { try { return s ? JSON.parse(s) as PrInfo : null; } catch { return null; } };
+
+// POST /api/content/ideas/:id/github/preview — xem file sẽ đăng (không ghi gì)
+export async function apiGithubPreview(env: Env, user: User, id: number): Promise<Response> {
+  canEdit(user);
+  const i = await idea(env, id);
+  const s = await env.DB.prepare("SELECT publish_profile FROM sites WHERE id = ?").bind(i.site_id).first<{ publish_profile: string | null }>();
+  const p = readPublishProfile(s || { publish_profile: null });
+  if (!p) throw new HttpError(409, "Site chưa có hồ sơ đăng bài: bấm Đọc repo.", "no_profile");
+  const { input } = await postInput(env, i);
+  return json(buildPost(p, input));
+}
+
+// POST /api/content/ideas/:id/github — tạo pull request (bài luôn ở dạng nháp nếu theme có trường draft)
+export async function githubPrCore(env: Env, id: number, actor: string): Promise<PrInfo> {
+  const i = await idea(env, id);
+  if (readPr((i as IdeaRow & { pr: string | null }).pr)?.state === "open") throw new HttpError(409, "Bài này đã có pull request đang mở.", "exists");
+  const { input, gate } = await postInput(env, i);
+  if (!gate.ok) throw new HttpError(409, "Gác cổng chưa cho qua bài này.", "blocked");
+  const { pr, built } = await createPostPr(env, i.site_id, input, id);
+  await env.DB.prepare("UPDATE content_ideas SET pr = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(pr), now(), id).run();
+  await logActivity(env, actor, "publish.pr", `Mở pull request #${pr.number}: ${built.path}`, i.site_id);
+  return pr;
+}
+export const apiGithubPr = (env: Env, user: User, id: number) => run(user, () => githubPrCore(env, id, `user:${user.id}`));
+
+// POST /api/content/ideas/:id/github/sync — đọc trạng thái PR + build, tự sửa frontmatter nếu build lỗi
+export async function githubSyncCore(env: Env, id: number, actor: string): Promise<PrInfo> {
+  const i = await idea(env, id) as IdeaRow & { pr: string | null };
+  const pr = readPr(i.pr);
+  if (!pr) throw new HttpError(409, "Bài này chưa có pull request.", "no_pr");
+  const next = await syncPr(env, i.site_id, pr);
+  await env.DB.prepare("UPDATE content_ideas SET pr = ?, status = CASE WHEN ? = 'merged' THEN 'published' ELSE status END, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), next.state, now(), id).run();
+  if (next.state === "merged" && pr.state !== "merged") await logActivity(env, actor, "publish.merged", `Pull request #${pr.number} đã merge: "${i.keyword}" lên site`, i.site_id);
+  if (next.fixed?.length) await logActivity(env, "agent:writer", "publish.fix", `Build lỗi, tự sửa frontmatter (${next.fixed.join(", ")}) ở PR #${pr.number}`, i.site_id);
+  return next;
+}
+export const apiGithubSync = (env: Env, user: User, id: number) => run(user, () => githubSyncCore(env, id, `user:${user.id}`));
+
+// Cron: cập nhật các PR đang mở (tối đa 5 mỗi lượt)
+export async function syncOpenPrs(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare("SELECT id FROM content_ideas WHERE pr LIKE '%\"state\":\"open\"%' ORDER BY updated_at LIMIT 5").all<{ id: number }>();
+  for (const r of results) { try { await githubSyncCore(env, r.id, "agent:writer"); } catch { /* lượt sau thử lại */ } }
+}
+
 // Site Astro: xuất bài thành file Markdown (frontmatter + HTML) để đưa vào repo; luôn draft: true
 export async function apiExportMarkdown(env: Env, user: User, id: number): Promise<Response> {
   canEdit(user);
@@ -595,6 +658,7 @@ const parse = (v: unknown) => (v ? JSON.parse(String(v)) : null);
 
 // GET /api/content/:caseId
 export async function contentView(env: Env, caseId: number): Promise<Response> {
+  let needHero = false;
   const c = await caseInfo(env, caseId);
   const rules = readRules(c.rules);
   const pages = await pagesOf(env, caseId);
@@ -603,16 +667,16 @@ export async function contentView(env: Env, caseId: number): Promise<Response> {
   const ms = await mediaSite(env, c.site_id);
   return json({
     structure: structure(pages),
-    siteType: c.site_type, platform: ms.platform, wpConnected: !!wp, media: await mediaReady(env, ms),
+    siteType: c.site_type, platform: ms.platform, publish: await (async () => { const sp = await env.DB.prepare("SELECT repo, publish_profile FROM sites WHERE id = ?").bind(c.site_id).first<{ repo: string | null; publish_profile: string | null }>(); return { repo: sp?.repo || null, profile: readPublishProfile(sp || { publish_profile: null }), github: !!(await env.DB.prepare("SELECT 1 FROM secrets WHERE key = 'github_token'").first()) }; })(), wpConnected: !!wp, media: await mediaReady(env, ms),
     formats: FORMATS.map((f) => ({ id: f.id, label: f.label, hint: f.hint, affiliate: f.affiliate, minProducts: f.minProducts, maxProducts: f.maxProducts })),
-    ideas: results.map((r) => {
+    ideas: (await (async () => { needHero = await heroNeeded(env, c.site_id); return results; })()).map((r) => {
       const format = formatOf(String(r.format)).id;
       const products = readProducts(r.products as string | null);
       const brief = parse(r.brief);
       const draft = parse(r.draft) as Draft | null;
-      const slots = slotsFor(format, products, brief?.photo_requests || [], readImages(r.images as string | null));
+      const slots = slotsFor(format, products, brief?.photo_requests || [], readImages(r.images as string | null), needHero);
       const preview = draft ? renderDraft(draft.raw ?? draft.html, { format, products, slots, rules, preview: true }) : null;
-      return { ...r, format, products, images: undefined, slots, brief, interview: readInterview(r.interview as string | null), waitingInterview: waitingInterview(readInterview(r.interview as string | null), rules.requireInterview), draft: draft ? { ...draft, raw: undefined, html: preview } : null, gate: parse(r.gate) };
+      return { ...r, format, products, images: undefined, pr: readPr(r.pr as string | null), slots, brief, interview: readInterview(r.interview as string | null), waitingInterview: waitingInterview(readInterview(r.interview as string | null), rules.requireInterview), draft: draft ? { ...draft, raw: undefined, html: preview } : null, gate: parse(r.gate) };
     }),
     authorMode: rules.authorMode,
     limits: { perMonth: rules.maxNewArticlesPerMonth, usedThisMonth: await monthCount(env, c.site_id), minVolume: rules.minVolume },
@@ -681,7 +745,7 @@ export async function apiUploadImage(env: Env, req: Request, user: User, id: num
   if (alt.length < 5) throw new HttpError(400, "Nhập mô tả ảnh (alt) cho người không xem được ảnh.", "validation");
   const caption = String(u.searchParams.get("caption") || "").trim().slice(0, 200);
   const brief = i.brief ? JSON.parse(i.brief) as { photo_requests?: { key: string; what: string }[]; slug?: string } : {};
-  const slot = slotsFor(i.format, readProducts(i.products), brief.photo_requests || [], {}).find((s) => s.key === key);
+  const slot = slotsFor(i.format, readProducts(i.products), brief.photo_requests || [], {}, await heroNeeded(env, i.site_id)).find((s) => s.key === key);
   if (!slot) throw new HttpError(404, "Bài này không có chỗ ảnh đó.", "not_found");
   const buf = new Uint8Array(await req.arrayBuffer());
   if (!buf.length) throw new HttpError(400, "File trống.", "validation");

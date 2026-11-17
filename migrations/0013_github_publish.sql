@@ -1,0 +1,3 @@
+-- Đăng bài lên site Astro qua GitHub: hồ sơ đăng bài theo theme của từng site, và pull request của từng bài
+ALTER TABLE sites ADD COLUMN publish_profile TEXT;     -- JSON: thư mục bài, frontmatter, ảnh, component nút mua…
+ALTER TABLE content_ideas ADD COLUMN pr TEXT;          -- JSON: {number, url, branch, path, sha, state, check, fixes, at}

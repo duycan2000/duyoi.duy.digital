@@ -869,6 +869,125 @@ await test("tài liệu PDF → Hồ sơ site, Biên tập viên chấm và sử
   }
 });
 
+await test("đăng bài lên site Astro qua GitHub: đọc theme, frontmatter đúng schema, nút mua theo component, PR nháp, tự sửa lỗi build, merge → đã đăng", async () => {
+  const pub = await import("../.test-build/publish.js");
+  const cfg = `import { defineCollection, z, reference } from "astro:content";
+import { glob } from "astro/loaders";
+// Blog
+const blog = defineCollection({
+  loader: glob({ base: "./src/content/blog", pattern: "**/*.{md,mdx}" }),
+  schema: ({ image }) => z.object({
+    title: z.string().max(80),
+    description: z.string(),
+    pubDate: z.coerce.date(),
+    updatedDate: z.coerce.date().optional(),
+    heroImage: image().optional(),
+    author: z.string(),
+    category: z.enum(["guides", "reviews"]),
+    tags: z.array(z.string()).default([]),
+    draft: z.boolean().default(false),
+  }),
+});
+const pages = defineCollection({ loader: glob({ base: "./src/content/pages", pattern: "*.md" }), schema: z.object({ title: z.string() }) });
+export const collections = { blog, pages };`;
+  const cols = pub.parseContentConfig(cfg);
+  assert.deepEqual(cols.map((c) => [c.name, c.dir]), [["blog", "src/content/blog"], ["pages", "src/content/pages"]]);
+  assert.deepEqual(cols[0].fields.map((f) => `${f.name}:${f.type}:${f.required ? 1 : 0}`), ["title:string:1", "description:string:1", "pubDate:date:1", "updatedDate:date:0", "heroImage:image:0", "author:string:1", "category:enum:1", "tags:array:0", "draft:boolean:0"]);
+  assert.deepEqual(cols[0].fields.find((f) => f.name === "category").enumValues, ["guides", "reviews"]);
+  const md = pub.htmlToMarkdown('<p class="affiliate-disclosure"><em>Werbung: bezahlte Links.</em></p><h2>Planwerk {Pro}</h2><p>Gut für <strong>Einsteiger</strong> laut <a href="https://example.de/a" rel="noopener" target="_blank">Quelle</a>.</p><p class="buy-buttons"><a class="buy-button" href="https://amzn.to/x?tag=a&amp;b=1" rel="sponsored nofollow noopener" target="_blank">Bei Amazon ansehen</a></p><figure class="wp-block-image"><img src="https://caddemo.de/images/2026/11/a.jpg" alt="Planwerk am Platz" width="800" height="600" loading="lazy"><figcaption>Im Büro · Foto: eigene Aufnahme</figcaption></figure><table><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table><ol><li>Eins</li><li>Zwei</li></ol>', { mdx: true, buyTemplate: '<AffiliateButton href="{url}" label="{label}" />' });
+  assert.match(md, /^<p class="affiliate-disclosure"><em>Werbung: bezahlte Links\.<\/em><\/p>/);
+  assert.match(md, /## Planwerk \\\{Pro\\\}/, "MDX: thoát dấu ngoặc nhọn");
+  assert.match(md, /Gut für \*\*Einsteiger\*\* laut \[Quelle\]\(https:\/\/example\.de\/a\)\./);
+  assert.match(md, /<AffiliateButton href="https:\/\/amzn\.to\/x\?tag=a&b=1" label="Bei Amazon ansehen" \/>/);
+  assert.match(md, /!\[Planwerk am Platz\]\(https:\/\/caddemo\.de\/images\/2026\/11\/a\.jpg\)\n\*Im Büro · Foto: eigene Aufnahme\*/);
+  assert.match(md, /\| A \| B \|\n\| --- \| --- \|\n\| 1 \| 2 \|/);
+  assert.match(md, /1\. Eins\n2\. Zwei/);
+
+  const env8 = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const c8 = client(env8);
+  await c8("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await c8("PUT", "/api/settings", { secrets: { openrouter_api_key: "sk-or-test-123456", github_token: "gh-token" } });
+  for (const p of (await c8("GET", "/api/manager/prompts")).data.prompts) await c8("PUT", `/api/manager/prompts/${p.id}`, { status: "approved" });
+  let checkPlan = [];
+  const ghState = { token: "gh-token", repo: "duycan2000/caddemo", prs: [], commits: 0, checks: (sha) => (checkPlan.shift() || (() => []))(sha), branches: { main: {
+    "src/content.config.ts": cfg,
+    "src/content/blog/first-post.mdx": `---\ntitle: "Erster Beitrag"\ndescription: "Test"\npubDate: 2024-05-01\nheroImage: "../../assets/blog/first.jpg"\nauthor: "Duy Can"\ncategory: "guides"\ntags: ["cad"]\n---\nimport AffiliateButton from "../../components/AffiliateButton.astro";\n\nText.\n\n<AffiliateButton href="https://amzn.to/old" label="Zum Angebot" />\n`,
+    "src/content/pages/about.md": "---\ntitle: About\n---\n",
+    "package.json": "{}"
+  } } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ gh: ghState });
+  try {
+    const cr = await c8("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/"], authorMode: "owner", requireInterview: false } });
+    const caseId = cr.data.id;
+    const siteId = (await c8("GET", `/api/recovery/${caseId}`)).data.case.siteId;
+    assert.equal((await c8("POST", `/api/sites/${siteId}/publish/detect`)).status, 400, "chưa có repo");
+    await c8("PUT", `/api/sites/${siteId}`, { platform: "astro", repo: "duycan2000/caddemo" });
+    const det = await c8("POST", `/api/sites/${siteId}/publish/detect`);
+    assert.equal(det.status, 200, JSON.stringify(det.data));
+    const pp = det.data.profile;
+    assert.equal(pp.dir, "src/content/blog");
+    assert.equal(pp.ext, "mdx");
+    assert.equal(pp.naming, "file");
+    assert.deepEqual([pp.map.title, pp.map.description, pp.map.date, pp.map.image, pp.map.author, pp.map.draft], ["title", "description", "pubDate", "heroImage", "author", "draft"]);
+    assert.equal(pp.imageMode, "assets");
+    assert.equal(pp.imageDir, "src/assets/blog");
+    assert.equal(pp.buyTemplate, '<AffiliateButton href="{url}" label="{label}" />');
+    assert.equal(pp.fields.find((f) => f.name === "category").example, "guides");
+    // Bài anh viết, đã qua Gác cổng
+    const idea = await c8("POST", `/api/content/${caseId}/ideas`, { keyword: "tga zeichnungen pruefen", format: "article", hub_path: "/cad-dienstleistung-tga/" });
+    await c8("PUT", `/api/content/ideas/${idea.data.id}`, { status: "approved" });
+    await c8("POST", `/api/content/ideas/${idea.data.id}/brief`);
+    const art = ["# TGA-Zeichnungen prüfen", "", "Wer TGA-Zeichnungen prüfen lässt, möchte wissen, worauf Prüfer achten, welche Unterlagen nötig sind und wie Rückfragen vermieden werden können.", "",
+      ...["Worauf Prüfer achten", "Unterlagen vorbereiten", "Rückfragen vermeiden"].flatMap((h, k) => [`## ${h}`, "", ...Array.from({ length: 10 }, (_, j) => `In diesem Abschnitt zeigen wir, wie Planer Leitungen, Schnitte und Legenden sauber abstimmen, damit die Prüfung ohne lange Schleifen gelingt, Teil ${String.fromCharCode(65 + k)}${String.fromCharCode(65 + j)}.`), ""]),
+      "Mehr dazu bei unserer [CAD-Dienstleistung TGA](/cad-dienstleistung-tga/).", "", "Meta description: Worauf es beim Prüfen von TGA-Zeichnungen ankommt."].join("\n");
+    const im = await c8("POST", `/api/content/ideas/${idea.data.id}/import`, { content: art, revise: false });
+    assert.equal(im.status, 200, JSON.stringify(im.data));
+    assert.equal(im.data.result.ok, true, JSON.stringify(im.data.result.problems));
+    // Thiếu tác giả / giá trị enum: chặn, chỉ rõ trường
+    await c8("PUT", `/api/sites/${siteId}/publish`, { authorName: "" });
+    let pr = await c8("POST", `/api/content/ideas/${idea.data.id}/github`);
+    assert.equal(pr.status, 409);
+    assert.match(pr.data.message, /tác giả/);
+    await c8("PUT", `/api/sites/${siteId}/publish`, { authorName: "Duy Can" });
+    pr = await c8("POST", `/api/content/ideas/${idea.data.id}/github`);
+    assert.equal(pr.status, 409);
+    assert.match(pr.data.message, /category \(phải là: guides, reviews\)/);
+    await c8("PUT", `/api/sites/${siteId}/publish`, { values: { category: "guides" } });
+    const prev = await c8("POST", `/api/content/ideas/${idea.data.id}/github/preview`);
+    assert.equal(prev.data.path, "src/content/blog/tga-zeichnungen-pruefen.mdx");
+    assert.match(prev.data.content, /^---\ntitle: "TGA-Zeichnungen prüfen"\ndescription: "Worauf es beim Prüfen von TGA-Zeichnungen ankommt\."\npubDate: \d{4}-\d{2}-\d{2}\nauthor: "Duy Can"\ncategory: "guides"\ntags: \[\]\ndraft: true\n---\n\nWer TGA-Zeichnungen prüfen lässt[\s\S]*\n## Worauf Prüfer achten/);
+    assert.match(prev.data.content, /\[CAD-Dienstleistung TGA\]\(\/cad-dienstleistung-tga\/\)/);
+    pr = await c8("POST", `/api/content/ideas/${idea.data.id}/github`);
+    assert.equal(pr.status, 200, JSON.stringify(pr.data));
+    const branch = pr.data.result.branch;
+    assert.match(branch, /^duyoi\/tga-zeichnungen-pruefen-\d+-/);
+    assert.equal(ghState.branches[branch]["src/content/blog/tga-zeichnungen-pruefen.mdx"], prev.data.content);
+    assert.equal(ghState.branches.main["src/content/blog/tga-zeichnungen-pruefen.mdx"], undefined, "không đẩy thẳng lên nhánh chính");
+    assert.equal(ghState.prs[0].base, "main");
+    assert.match(ghState.prs[0].body, /draft: true/);
+    assert.equal((await c8("POST", `/api/content/ideas/${idea.data.id}/github`)).status, 409, "không mở PR trùng");
+    // Build lỗi schema → tự sửa frontmatter → build xong có link xem trước → merge → Đã đăng
+    checkPlan = [() => [{ name: "Workers Builds: caddemo", status: "completed", conclusion: "failure", details_url: "https://dash.cloudflare.com/x", output: { title: "Build failed", summary: "InvalidContentEntryDataError: blog → tga-zeichnungen-pruefen data does not match collection schema.\n  pubDate: Expected type \"date\", received \"string\"" } }],
+      () => [{ name: "Workers Builds: caddemo", status: "completed", conclusion: "success", details_url: "https://dash.cloudflare.com/y", output: { title: "Build succeeded", summary: "Preview: https://abc123-caddemo.duycan.workers.dev" } }]];
+    let sy = await c8("POST", `/api/content/ideas/${idea.data.id}/github/sync`);
+    assert.equal(sy.status, 200, JSON.stringify(sy.data));
+    assert.deepEqual(sy.data.result.fixed, ["pubDate"]);
+    assert.equal(sy.data.result.fixes, 1);
+    sy = await c8("POST", `/api/content/ideas/${idea.data.id}/github/sync`);
+    assert.equal(sy.data.result.check.state, "success");
+    assert.equal(sy.data.result.check.preview, "https://abc123-caddemo.duycan.workers.dev");
+    ghState.prs[0].merged = true;
+    sy = await c8("POST", `/api/content/ideas/${idea.data.id}/github/sync`);
+    assert.equal(sy.data.result.state, "merged");
+    const ct = await c8("GET", `/api/content/${caseId}`);
+    assert.equal(ct.data.ideas.find((x) => x.id === idea.data.id).status, "published");
+    assert.equal(ct.data.publish.github, true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 await test("đường dẫn không phải /api trả giao diện (SPA)", async () => {
   const res = await worker.fetch(new Request(BASE + "/sites/12"), env);
   assert.equal(res.status, 200);

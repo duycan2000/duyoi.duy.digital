@@ -11,9 +11,10 @@ import { aiRewriteTask, applyTask, archiveCase, createCase, decideTask, disavow,
 import { wpSave, wpStatus, wpTest } from "./wordpress";
 import { listPrompts, reviewPrompt, spendReport } from "./manager";
 import { apiCheckMedia, apiSetupMedia } from "./cfmedia";
+import { apiDetectProfile, apiGetProfile, apiSaveProfile as apiSavePublish } from "./publish";
 import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from "./docs";
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
-import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
+import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
@@ -107,12 +108,16 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (path === "/api/lead/messages" && m === "POST") return apiLeadSend(env, req, user);
   const leadMatch = path.match(/^\/api\/lead\/(messages|jobs)\/(\d+)\/run$/);
   if (leadMatch && m === "POST") return leadMatch[1] === "messages" ? apiLeadRun(env, req, user, Number(leadMatch[2])) : apiRunJob(env, user, Number(leadMatch[2]));
+  const pubMatch = path.match(/^\/api\/sites\/(\d+)\/publish(\/detect)?$/);
+  if (pubMatch && pubMatch[2] && m === "POST") return apiDetectProfile(env, user, Number(pubMatch[1]));
+  if (pubMatch && !pubMatch[2] && m === "GET") return apiGetProfile(env, Number(pubMatch[1]));
+  if (pubMatch && !pubMatch[2] && m === "PUT") return apiSavePublish(env, req, user, Number(pubMatch[1]));
   const mdMatch = path.match(/^\/api\/sites\/(\d+)\/media(\/check)?$/);
   if (mdMatch && m === "POST") return mdMatch[2] ? apiCheckMedia(env, user, Number(mdMatch[1])) : apiSetupMedia(env, user, Number(mdMatch[1]));
   const imgMatch = path.match(/^\/api\/content\/ideas\/(\d+)\/images\/([a-z0-9]{2,6})$/);
   if (imgMatch && m === "POST") return apiUploadImage(env, req, user, Number(imgMatch[1]), imgMatch[2]!);
   if (imgMatch && m === "DELETE") return apiDeleteImage(env, user, Number(imgMatch[1]), imgMatch[2]!);
-  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products|review|interview|import|webfacts|handoff\.md|export\.md))?$/);
+  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products|review|interview|import|webfacts|github|github\/preview|github\/sync|handoff\.md|export\.md))?$/);
   if (idMatch) {
     const iid = Number(idMatch[1]);
     if (!idMatch[2] && m === "PUT") return apiIdeaStatus(env, req, user, iid);
@@ -120,6 +125,9 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (idMatch[2] === "draft" && m === "POST") return apiDraft(env, user, iid);
     if (idMatch[2] === "wp" && m === "POST") return apiWpDraft(env, user, iid);
     if (idMatch[2] === "review" && m === "POST") return apiReview(env, req, user, iid);
+    if (idMatch[2] === "github" && m === "POST") return apiGithubPr(env, user, iid);
+    if (idMatch[2] === "github/preview" && m === "POST") return apiGithubPreview(env, user, iid);
+    if (idMatch[2] === "github/sync" && m === "POST") return apiGithubSync(env, user, iid);
     if (idMatch[2] === "webfacts" && m === "POST") return apiWebFacts(env, user, iid);
     if (idMatch[2] === "interview" && m === "PUT") return apiInterview(env, req, user, iid);
     if (idMatch[2] === "import" && m === "POST") return apiImport(env, req, user, iid);
@@ -172,6 +180,6 @@ export default {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
     // Một lượt cron tối đa ~10 phút việc nặng: hàng việc của Trưởng nhóm trước, chế độ tự động dùng phần thời gian còn lại
     const started = Date.now();
-    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
+    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
   }
 };

@@ -391,7 +391,7 @@ function webFactsBox(i, canEdit) {
 }
 
 function authorBox(i) {
-  if (i.status !== "briefed" && !(i.status === "drafted" && i.draft?.author === "owner" && !i.wp_post_id)) return "";
+  if (i.status !== "briefed" && !(i.status === "drafted" && i.draft?.author === "owner" && !i.wp_post_id && i.pr?.state !== "open" && i.pr?.state !== "merged")) return "";
   if (i.waitingInterview) return "";
   const who = writerOf(i);
   if (!who) return `<div class="author-pick"><b>Ai viết bài này?</b>
@@ -408,6 +408,61 @@ function authorBox(i) {
       <label class="check"><input type="checkbox" name="revise" checked><span>Cho phép sửa nếu chưa đạt<small>Biên tập viên chấm; dưới mức hoặc thiếu phần của khung thì Người viết sửa đúng chỗ đó (tối đa 2 vòng). Bỏ chọn nếu anh chỉ muốn chấm.</small></span></label>
       <div class="toolbar"><button type="submit" class="primary">Đưa bài vào và chấm</button></div>
     </form>
+  </div>`;
+}
+
+const ROLE = { title: "Tiêu đề", description: "Mô tả (meta)", date: "Ngày đăng (hôm nay)", updated: "Ngày cập nhật", image: "Ảnh đại diện", imageAlt: "Alt ảnh đại diện", tags: "Thẻ", author: "Tác giả", draft: "Nháp (true)" };
+
+function publishHtml(ct, canEdit) {
+  if (ct.platform !== "astro") return "";
+  const pb = ct.publish;
+  const p = pb.profile;
+  const roleOf = (name) => Object.keys(ROLE).find((k) => p?.map[k] === name) || "";
+  // Còn trường bắt buộc chưa có cách điền → mở sẵn để anh điền
+  const incomplete = p ? p.fields.filter((f) => f.required && !p.values[f.name] && !(roleOf(f.name) && (roleOf(f.name) !== "author" || p.authorName)) && f.type !== "array") : [];
+  return `<details class="docs-box"${!p || incomplete.length ? " open" : ""}><summary>${K.icon(K.ICON.layers)}Đăng lên GitHub (site Astro) <span class="tag ${p ? "ok" : "warn"}">${p ? `${esc(p.dir)} · .${esc(p.ext)}` : "chưa có hồ sơ"}</span></summary>
+    <p class="note">Mỗi theme có kiểu bài riêng. App đọc repo của site (content config + bài mẫu) để biết thư mục bài, frontmatter, md hay mdx, chỗ để ảnh, component nút mua; bài đăng bằng pull request ở dạng nháp, Cloudflare build thử đúng theme rồi anh mới merge.</p>
+    ${!pb.github ? `<div class="msg warn">Chưa có GitHub token. <a href="#/settings/keys/github_token">Nhập ở Cài đặt</a>.</div>` : ""}
+    ${!pb.repo ? `<div class="msg warn">Site chưa có repo GitHub. <a href="#/sites/${ct.media.siteId}">Điền ở Site › Repo GitHub</a>.</div>` : ""}
+    <div class="msg" id="pub-msg" hidden></div>
+    ${pb.repo && pb.github && canEdit ? `<div class="toolbar"><button type="button" id="pub-detect">${p ? "Đọc lại repo" : "Đọc repo"} ${esc(pb.repo)}</button>${p ? `<small class="note">Bài mẫu: ${esc(p.sample || "không có")}</small>` : ""}</div>` : ""}
+    ${incomplete.length ? `<div class="msg warn">Theme bắt buộc: ${incomplete.map((f) => esc(f.name)).join(", ")}. Điền tác giả hoặc giá trị cố định bên dưới.</div>` : ""}
+    ${p ? `${p.warnings.length ? `<ul class="gate">${p.warnings.map((w) => `<li class="warn">${esc(w)}</li>`).join("")}</ul>` : ""}
+    <form id="pub-form">
+      <div class="form-grid">
+        <label>Thư mục bài <input name="dir" value="${esc(p.dir)}"></label>
+        <label>Kiểu file <select name="ext"><option value="md"${p.ext === "md" ? " selected" : ""}>.md</option><option value="mdx"${p.ext === "mdx" ? " selected" : ""}>.mdx</option></select></label>
+        <label>Tên file <select name="naming">${[["file", "slug.md"], ["folder-index", "slug/index.md"], ["date-prefix", "YYYY-MM-DD-slug.md"]].map(([v, l]) => `<option value="${v}"${p.naming === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label>Tác giả thật (theme cần trường tác giả) <input name="authorName" value="${esc(p.authorName)}" placeholder="Tên người viết thật"></label>
+        <label>Ảnh đại diện <select name="imageMode">${[["assets", "Đưa file vào repo (Astro tối ưu ảnh)"], ["public", "Đưa vào public/"], ["url", "Dùng link ảnh (R2/WordPress)"]].map(([v, l]) => `<option value="${v}"${p.imageMode === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label>Thư mục ảnh trong repo <input name="imageDir" value="${esc(p.imageDir)}"></label>
+      </div>
+      <h3 class="sub">Frontmatter theo theme</h3>
+      <div class="tablewrap boxed"><table><thead><tr><th>Trường</th><th>Kiểu</th><th>App tự điền</th><th>Giá trị cố định</th></tr></thead><tbody>
+        ${p.fields.map((f) => `<tr><td><b>${esc(f.name)}</b>${f.required ? ` <span class="tag warn">bắt buộc</span>` : ""}${f.example ? `<small>mẫu: ${esc(f.example)}</small>` : ""}</td><td>${esc(f.type)}${f.enumValues ? `<small>${esc(f.enumValues.join(", "))}</small>` : ""}</td>
+          <td><select data-role="${esc(f.name)}"><option value="">—</option>${Object.entries(ROLE).map(([k, l]) => `<option value="${k}"${roleOf(f.name) === k ? " selected" : ""}>${l}</option>`).join("")}</select></td>
+          <td>${f.enumValues ? `<select data-val="${esc(f.name)}"><option value="">—</option>${f.enumValues.map((v) => `<option${p.values[f.name] === v ? " selected" : ""}>${esc(v)}</option>`).join("")}</select>` : `<input data-val="${esc(f.name)}" value="${esc(p.values[f.name] || "")}" placeholder="${f.type === "array" ? "a, b" : ""}">`}</td></tr>`).join("")}
+      </tbody></table></div>
+      ${p.ext === "mdx" ? `<div class="form-grid">
+        <label>Mẫu nút mua (component của theme; {url}, {label}) <input name="buyTemplate" value="${esc(p.buyTemplate)}" placeholder='<AffiliateButton href="{url}" label="{label}" />'></label>
+        <label>Dòng import component <input name="buyImport" value="${esc(p.buyImport)}"></label>
+      </div>` : `<p class="note">File .md: nút mua là link HTML có rel="sponsored nofollow".</p>`}
+      ${canEdit ? `<div class="toolbar"><button type="submit" class="primary">Lưu hồ sơ đăng bài</button></div>` : ""}
+    </form>` : ""}
+  </details>`;
+}
+
+function prBox(i, ct, canEdit) {
+  if (ct.platform !== "astro" || !["drafted", "published"].includes(i.status)) return "";
+  const pr = i.pr;
+  if (!pr) return !ct.publish.profile || !i.gate?.ok || !canEdit ? "" : `<div class="toolbar"><button type="button" class="primary" data-gh-pr="${i.id}">Tạo pull request lên GitHub</button><button type="button" data-gh-prev="${i.id}">Xem file sẽ đăng</button></div><pre class="prompt" id="ghprev-${i.id}" hidden></pre>`;
+  const b = pr.check;
+  const st = pr.state === "merged" ? ["Đã merge, bài lên site", "ok"] : pr.state === "closed" ? ["PR đã đóng", ""] : !b || b.state === "none" ? ["Chờ build", ""] : b.state === "pending" ? ["Đang build", "info"] : b.state === "success" ? ["Build xong", "ok"] : ["Build lỗi", "err"];
+  return `<div class="owner-box"><div class="task-head"><b>Pull request #${pr.number}</b>${tag(st)}</div>
+    <small class="note"><a href="${esc(pr.url)}" target="_blank" rel="noopener">${esc(pr.url)}</a> · ${esc(pr.path)}${pr.fixes ? ` · đã tự sửa frontmatter ${pr.fixes} lần` : ""}</small>
+    ${b?.preview ? `<div class="msg ok">Xem trước trên theme thật: <a href="${esc(b.preview)}" target="_blank" rel="noopener">${esc(b.preview)}</a></div>` : ""}
+    ${b?.state === "failure" ? `<pre class="prompt">${esc(b.error || "Build lỗi: mở chi tiết build trên Cloudflare.")}</pre>${pr.note ? `<small class="note">${esc(pr.note)}</small>` : ""}` : ""}
+    ${pr.state === "open" && canEdit ? `<div class="toolbar"><button type="button" data-gh-sync="${i.id}">Kiểm tra lại (tự sửa nếu build lỗi)</button></div>` : ""}
   </div>`;
 }
 
@@ -499,12 +554,13 @@ function contentHtml(c, ct, canEdit) {
       ${reviewBox(i)}
       ${i.gate?.problems?.length ? `<ul class="gate">${i.gate.problems.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join("")}</ul>` : ""}
       ${d ? `<details><summary>Bài nháp (${d.words} từ) <span class="tag ${d.author === "owner" ? "fmt" : "info"}">${d.author === "owner" ? "Anh viết" : "Agent viết"}</span></summary><div class="article">${renderArticle(d.html)}</div><p class="note">Meta description: ${esc(d.meta_description)}</p></details>` : ""}
+      ${prBox(i, ct, canEdit)}
       ${i.wp_edit_url ? `<div class="msg ok">Đã có bản nháp trên WordPress (chưa đăng). <a href="${esc(i.wp_edit_url)}" target="_blank" rel="noopener">Mở để sửa, chọn tác giả thật và đăng</a></div>` : ""}
       <div class="toolbar">
         ${i.status === "approved" && i.products.items.length >= (F[i.format]?.minProducts || 0) ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
         ${i.status === "briefed" && writerOf(i) === "agent" && !i.waitingInterview ? btn(i, "draft", "Agent viết bài nháp", "primary") : ""}
         ${i.status === "briefed" ? btn(i, "brief", "Lập lại dàn ý") : ""}
-        ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? (ct.platform === "astro" ? `<button type="button" class="primary" data-export="${i.id}">Tải file Markdown cho Astro</button>` : btn(i, "wp", "Tạo bản nháp WordPress", "primary")) : ""}
+        ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? (ct.platform === "astro" ? `<button type="button" data-export="${i.id}">Tải file Markdown</button>` : btn(i, "wp", "Tạo bản nháp WordPress", "primary")) : ""}
         ${i.status === "drafted" && !i.wp_post_id && i.draft?.review?.issues?.length ? btn(i, "revise", "Sửa theo nhận xét") : ""}
         ${i.status === "drafted" && !i.wp_post_id ? btn(i, "review", "Chấm lại") : ""}
         ${i.status === "drafted" && !i.wp_post_id && i.draft?.author !== "owner" ? btn(i, "draft", "Viết lại") : ""}
@@ -514,6 +570,7 @@ function contentHtml(c, ct, canEdit) {
   };
   return `
     ${docsHtml(ct, canEdit)}
+    ${publishHtml(ct, canEdit)}
     <h3 class="sub">${K.icon(K.ICON.layers)}Cấu trúc bài viết hiện tại</h3>
     <p class="note">Mỗi trang dịch vụ nên có ít nhất 3 bài hỗ trợ dẫn link về. "Liên quan" là bài cùng chủ đề nhưng chưa có link: việc chèn link nằm ở tab Việc của agent.</p>
     ${st.hubs.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Trang dịch vụ</th><th>Bài có link về</th><th>Bài liên quan chưa link</th>${st.hubs.some((h) => h.clicks != null) ? "<th>Click 28 ngày</th>" : ""}</tr></thead><tbody>
@@ -687,6 +744,31 @@ function bindCase(main, c, canEdit) {
       try { await api(`/api/sites/${content.media.siteId}/profile`, { method: "PUT", body }); K.state.tabs.rec = "content"; await reload(); } catch (e) { docMsg(e); }
     });
   });
+  const pubMsg = (e) => { showMsg($("#pub-msg"), e.message); $("#pub-msg")?.scrollIntoView({ block: "center" }); };
+  $("#pub-detect")?.addEventListener("click", (ev) => busy(ev.currentTarget, "Đang đọc repo…", async () => {
+    try { await api(`/api/sites/${content.media.siteId}/publish/detect`, { method: "POST" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { pubMsg(e); }
+  }));
+  $("#pub-form")?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    const v = (n) => $(`[name="${n}"]`, f)?.value;
+    const map = {};
+    $$("[data-role]", f).forEach((s) => { if (s.value) map[s.value] = s.dataset.role; });
+    const values = {};
+    $$("[data-val]", f).forEach((x) => { values[x.dataset.val] = x.value; });
+    busy(ev.submitter, "Đang lưu…", async () => {
+      try { await api(`/api/sites/${content.media.siteId}/publish`, { method: "PUT", body: { dir: v("dir"), ext: v("ext"), naming: v("naming"), authorName: v("authorName"), imageMode: v("imageMode"), imageDir: v("imageDir"), buyTemplate: v("buyTemplate"), buyImport: v("buyImport"), map, values } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { pubMsg(e); }
+    });
+  });
+  $$("[data-gh-prev]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { const r = await api(`/api/content/ideas/${b.dataset.ghPrev}/github/preview`, { method: "POST" }); const box = $(`#ghprev-${b.dataset.ghPrev}`); box.textContent = `${r.path}${r.image ? `\n+ ảnh ${r.image.path}` : ""}${r.missing.length ? `\nTHIẾU: ${r.missing.join(", ")}` : ""}\n\n${r.content}`; box.hidden = false; } catch (e) { ideaMsg(e); }
+  })));
+  $$("[data-gh-pr]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang tạo pull request…", async () => {
+    try { await api(`/api/content/ideas/${b.dataset.ghPr}/github`, { method: "POST" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  })));
+  $$("[data-gh-sync]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang kiểm tra…", async () => {
+    try { await api(`/api/content/ideas/${b.dataset.ghSync}/github/sync`, { method: "POST" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  })));
   $("#voice-form")?.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const f = ev.currentTarget;
