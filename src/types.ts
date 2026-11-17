@@ -29,6 +29,13 @@ export interface Env {
   APP_NAME?: string;
   SETUP_TOKEN?: string;
   ENCRYPTION_KEY?: string;
+  MEDIA?: R2Like;
+}
+
+// Phần R2 app dùng (ảnh thật cho site Astro)
+export interface R2Like {
+  put(key: string, value: ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string; cacheControl?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
+  head(key: string): Promise<unknown | null>;
 }
 
 export interface ExecCtx {

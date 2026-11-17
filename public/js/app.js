@@ -549,6 +549,7 @@ function siteForm(main, site) {
         <label>Thị trường chính (mã quốc gia) <input name="market" maxlength="2" value="${esc(s.market)}" placeholder="US, AU, DE, CA…"></label>
         <label>Ngôn ngữ <input name="language" maxlength="5" value="${esc(s.language)}" placeholder="en, de…"></label>
         <label class="full" data-for="astro">Repo GitHub của site (owner/repo) <input name="repo" value="${esc(s.repo || "")}" placeholder="vd: duycan2000/golfgaragelab.com"></label>
+        <label class="full">Tên miền ảnh trên Cloudflare R2 (site Astro bắt buộc; site WordPress điền thì ảnh cũng lưu R2) <input name="mediaBaseUrl" type="url" value="${esc(s.mediaBaseUrl || "")}" placeholder="https://img.ten-mien.com"></label>
         <label class="full">Ghi chú <textarea name="notes" maxlength="2000" placeholder="Luật riêng, đối thủ chính, điều agent cần biết…">${esc(s.notes || "")}</textarea></label>
         ${site ? `<label>Trạng thái <select name="status">${opt({ active: "Đang chạy", paused: "Tạm dừng", archived: "Lưu trữ (ẩn khỏi danh sách)" }, s.status)}</select></label>` : ""}
       </div>

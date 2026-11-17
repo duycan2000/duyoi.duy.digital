@@ -9,7 +9,8 @@ import { blockHitsIn, extractNumbers, langRatios, MARKER_RE, standardNumbers, wo
 import { toks } from "./recovery-analyze";
 import type { GateProblem, GateResult } from "./recovery-gate";
 import { readRules, type SiteRules } from "./recovery-rules";
-import { wpCall, wpMedia } from "./wordpress";
+import { wpCall } from "./wordpress";
+import { mediaReady, mediaSite, storeImage } from "./media";
 import { imageSize, MAX_IMAGE_BYTES, sniffImage, stripJpegMeta } from "./images";
 import { checkFormat, detectFormat, FORMATS, formatOf, formatSpec, parseProducts, productNumbers, readImages, readProducts, renderDraft, slotsFor, type FormatId, type Slot, type UploadedImage } from "./formats";
 import type { Env, User } from "./types";
@@ -265,6 +266,36 @@ export async function wpDraftCore(env: Env, ideaId: number, actor: string): Prom
   return { id: r.id, edit: r.edit_link };
 }
 
+// Site Astro: xuất bài thành file Markdown (frontmatter + HTML) để đưa vào repo; luôn draft: true
+export async function apiExportMarkdown(env: Env, user: User, id: number): Promise<Response> {
+  canEdit(user);
+  const i = await idea(env, id);
+  if (i.status !== "drafted" || !i.draft) throw new HttpError(409, "Chưa có bài nháp.", "no_draft");
+  const c = await caseInfo(env, i.case_id!);
+  const { draft, gate, slots } = await regate(env, i, c, JSON.parse(i.draft) as Draft);
+  if (!gate.ok) throw new HttpError(409, "Gác cổng chưa cho qua bài này.", "blocked");
+  const hero = slots.find((s) => s.image)?.image;
+  const y = (v: string) => JSON.stringify(v);
+  const md = [
+    "---",
+    `title: ${y(draft.title)}`,
+    `description: ${y(draft.meta_description)}`,
+    `slug: ${y(draft.slug)}`,
+    `keyword: ${y(i.keyword)}`,
+    `format: ${y(i.format)}`,
+    `pubDate: ${y(new Date().toISOString().slice(0, 10))}`,
+    hero ? `heroImage: ${y(hero.url)}\nheroImageAlt: ${y(hero.alt)}` : "",
+    "author: \"\"   # điền tác giả thật trước khi đăng",
+    "draft: true",
+    "---",
+    "",
+    draft.html,
+    ""
+  ].filter((l) => l !== "").join("\n").replace("---\n\n", "---\n");
+  await logActivity(env, `user:${user.id}`, "content.export", `Xuất file Markdown "${draft.title}" cho Astro`, c.site_id);
+  return new Response(md, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${(draft.slug || "bai-moi").replace(/[^a-z0-9-]/g, "")}.md"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+}
+
 // ---------------- Trạng thái tự động theo site ----------------
 
 export async function getAuto(env: Env, siteId: number): Promise<Record<string, unknown>> {
@@ -287,9 +318,10 @@ export async function contentView(env: Env, caseId: number): Promise<Response> {
   const pages = await pagesOf(env, caseId);
   const { results } = await env.DB.prepare("SELECT * FROM content_ideas WHERE site_id = ? ORDER BY CASE status WHEN 'drafted' THEN 0 WHEN 'briefed' THEN 1 WHEN 'approved' THEN 2 WHEN 'idea' THEN 3 ELSE 4 END, (covered_by IS NOT NULL), score DESC LIMIT 200").bind(c.site_id).all<Record<string, unknown>>();
   const wp = await env.DB.prepare("SELECT 1 FROM secrets WHERE key = ?").bind(`wp:${c.site_id}`).first();
+  const ms = await mediaSite(env, c.site_id);
   return json({
     structure: structure(pages),
-    siteType: c.site_type, wpConnected: !!wp,
+    siteType: c.site_type, platform: ms.platform, wpConnected: !!wp, media: await mediaReady(env, ms),
     formats: FORMATS.map((f) => ({ id: f.id, label: f.label, hint: f.hint, affiliate: f.affiliate, minProducts: f.minProducts, maxProducts: f.maxProducts })),
     ideas: results.map((r) => {
       const format = formatOf(String(r.format)).id;
@@ -371,7 +403,7 @@ export async function apiUploadImage(env: Env, req: Request, user: User, id: num
   const filename = `${(brief.slug || i.keyword).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "anh"}-${key}.${kind.ext}`;
   if (rules.blockedFilenames.some((b) => b.endsWith("*") ? filename.startsWith(b.slice(0, -1).toLowerCase()) : filename === b.toLowerCase())) throw new HttpError(400, `Tên file ${filename} bị cấm theo luật site.`, "blocked_filename");
   const size = imageSize(bytes, kind.type);
-  const m = await wpMedia(env, c.site_id, { bytes, type: kind.type, filename, alt, caption });
+  const m = await storeImage(env, await mediaSite(env, c.site_id), { bytes, type: kind.type, filename, alt, caption, width: size?.width ?? null, height: size?.height ?? null });
   const images = readImages(i.images);
   const im: UploadedImage = { id: m.id, url: m.url, alt, caption, source: source as UploadedImage["source"], width: m.width ?? size?.width ?? null, height: m.height ?? size?.height ?? null, at: now(), by: `user:${user.id}` };
   images[key] = im;

@@ -62,6 +62,15 @@ export const assets = {
   }
 };
 
+function fakeR2() {
+  const objects = new Map();
+  return {
+    objects,
+    async put(key, value, options) { objects.set(key, { bytes: new Uint8Array(value), options }); return { key }; },
+    async head(key) { return objects.has(key) ? { key } : null; }
+  };
+}
+
 export function makeEnv(overrides = {}) {
   return {
     DB: makeDb(),
@@ -69,6 +78,7 @@ export function makeEnv(overrides = {}) {
     APP_NAME: "Duy Ơi",
     SETUP_TOKEN: "test-setup-token-123",
     ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    MEDIA: fakeR2(),
     ...overrides
   };
 }

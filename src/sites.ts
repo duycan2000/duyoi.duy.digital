@@ -10,7 +10,7 @@ const STATUSES = ["active", "paused", "archived"] as const;
 
 export interface SiteRow {
   id: number; name: string; domain: string; platform: string; site_type: string; market: string; language: string;
-  repo: string | null; wp_user: string | null; notes: string | null; status: string; created_at: number; updated_at: number;
+  repo: string | null; wp_user: string | null; media_base_url?: string | null; notes: string | null; status: string; created_at: number; updated_at: number;
 }
 
 function oneOf<T extends readonly string[]>(v: unknown, list: T, field: string, fallback?: T[number]): T[number] {
@@ -48,6 +48,11 @@ function parseSite(body: Record<string, unknown>, partial: boolean) {
     out.repo = r || null;
   }
   if (body.wpUser !== undefined) out.wp_user = str(body.wpUser, "User WordPress", { optional: true, max: 60 }) || null;
+  if (body.mediaBaseUrl !== undefined) {
+    const v = str(body.mediaBaseUrl, "Tên miền ảnh", { optional: true, max: 200 }).replace(/\/+$/, "");
+    if (v && !/^https:\/\/([a-z0-9-]+\.)+[a-z]{2,}(\/[\w./-]*)?$/i.test(v)) throw new HttpError(400, "Tên miền ảnh dạng https://img.ten-mien.com (https, không có dấu / ở cuối).", "validation");
+    out.media_base_url = v || null;
+  }
   if (body.notes !== undefined) out.notes = str(body.notes, "Ghi chú", { optional: true, max: 2000 }) || null;
   if (body.status !== undefined) out.status = oneOf(body.status, STATUSES, "Trạng thái");
   return out;
@@ -55,7 +60,7 @@ function parseSite(body: Record<string, unknown>, partial: boolean) {
 
 const toApi = (s: SiteRow) => ({
   id: s.id, name: s.name, domain: s.domain, platform: s.platform, siteType: s.site_type, market: s.market,
-  language: s.language, repo: s.repo, wpUser: s.wp_user, notes: s.notes, status: s.status, createdAt: s.created_at, updatedAt: s.updated_at
+  language: s.language, repo: s.repo, wpUser: s.wp_user, mediaBaseUrl: s.media_base_url ?? null, notes: s.notes, status: s.status, createdAt: s.created_at, updatedAt: s.updated_at
 });
 
 export async function listSites(env: Env, url: URL): Promise<Response> {
@@ -78,8 +83,8 @@ export async function createSite(env: Env, req: Request, user: User): Promise<Re
   const t = now();
   try {
     const res = await env.DB.prepare(
-      "INSERT INTO sites (name, domain, platform, site_type, market, language, repo, wp_user, notes, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)"
-    ).bind(v.name, v.domain, v.platform, v.site_type, v.market, v.language, v.repo ?? null, v.wp_user ?? null, v.notes ?? null, t, t).run();
+      "INSERT INTO sites (name, domain, platform, site_type, market, language, repo, wp_user, media_base_url, notes, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)"
+    ).bind(v.name, v.domain, v.platform, v.site_type, v.market, v.language, v.repo ?? null, v.wp_user ?? null, v.media_base_url ?? null, v.notes ?? null, t, t).run();
     const id = Number(res.meta.last_row_id);
     await logActivity(env, `user:${user.id}`, "site.created", `${v.name} (${v.domain})`, id);
     return getSite(env, id).then((r) => new Response(r.body, { status: 201, headers: r.headers }));

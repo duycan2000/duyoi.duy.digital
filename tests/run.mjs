@@ -22,9 +22,10 @@ function client(env) {
     const res = await worker.fetch(new Request(BASE + path, { method, headers, body: body !== undefined ? (raw ? body : JSON.stringify(body)) : undefined }), env);
     const set = res.headers.get("Set-Cookie");
     if (set) cookie = set.split(";")[0].endsWith("=") ? "" : set.split(";")[0];
+    const text = await res.text();
     let data = null;
-    try { data = await res.json(); } catch { /* không phải JSON */ }
-    return { status: res.status, data, setCookie: set };
+    try { data = JSON.parse(text); } catch { /* không phải JSON */ }
+    return { status: res.status, data, text, headers: res.headers, setCookie: set };
   };
 }
 
@@ -632,6 +633,34 @@ await test("định dạng bài: Best X có sản phẩm affiliate, công khai, 
     assert.match(created.body.content, /<figure class="wp-block-image">/);
     assert.ok(!created.body.content.includes("⟪") && !created.body.content.includes("[["));
     assert.equal((await c5("PUT", `/api/content/ideas/${id}`, { format: "guide" })).status, 409);
+    // Site Astro: ảnh lên Cloudflare R2, bài xuất ra file Markdown
+    await c5("PUT", `/api/sites/${siteId}`, { platform: "astro" });
+    const h2 = await c5("POST", `/api/content/${caseId}/ideas`, { keyword: "wie man cad layer anlegt", format: "how_to" });
+    await c5("PUT", `/api/content/ideas/${h2.data.id}`, { status: "approved" });
+    let ct2 = await c5("GET", `/api/content/${caseId}`);
+    assert.equal(ct2.data.media.mode, "r2");
+    assert.equal(ct2.data.media.ready, false);
+    assert.equal((await c5("PUT", `/api/sites/${siteId}`, { mediaBaseUrl: "http://img.caddemo.de" })).status, 400);
+    assert.equal((await c5("PUT", `/api/sites/${siteId}`, { mediaBaseUrl: "https://img.caddemo.de/" })).status, 200);
+    ct2 = await c5("GET", `/api/content/${caseId}`);
+    assert.equal(ct2.data.media.ready, true);
+    // how-to cần dàn ý có photo_requests: gán tay để thử chỗ ảnh bước
+    env5.DB.raw.prepare("UPDATE content_ideas SET status = 'briefed', brief = ? WHERE id = ?").run(JSON.stringify({ title: "CAD Layer anlegen", slug: "cad-layer-anlegen", outline: [], photo_requests: [{ key: "s1", what: "Ebenen-Dialog geöffnet" }] }), h2.data.id);
+    const r2 = await c5("POST", `/api/content/ideas/${h2.data.id}/images/s1?real=1&source=screenshot&alt=Ebenen-Dialog%20in%20CAD`, png, { "Content-Type": "image/png" });
+    assert.equal(r2.status, 200, JSON.stringify(r2.data));
+    assert.match(r2.data.image.url, /^https:\/\/img\.caddemo\.de\/caddemo\.de\/\d{4}\/\d{2}\/cad-layer-anlegen-s1\.png$/);
+    const obj = [...env5.MEDIA.objects.entries()][0];
+    assert.equal(obj[1].options.httpMetadata.contentType, "image/png");
+    assert.equal(wp.media.length, 3, "site Astro không gửi ảnh lên WordPress");
+    // Xuất Markdown cho Astro từ bài roundup đã qua Gác cổng (bài roundup đã có bản nháp WP nên dùng bài khác không được: kiểm tra 409 khi chưa có nháp)
+    assert.equal((await c5("GET", `/api/content/ideas/${h2.data.id}/export.md`)).status, 409);
+    const ex = await c5("GET", `/api/content/ideas/${id}/export.md`);
+    assert.equal(ex.status, 200, ex.text);
+    assert.match(ex.headers.get("Content-Disposition"), /attachment; filename="[a-z0-9-]+\.md"/);
+    assert.match(ex.text, /^---\ntitle: "beste cad software test: Leitfaden für Planer"\n/);
+    assert.match(ex.text, /\ndraft: true\n---\n<p>/);
+    assert.match(ex.text, /heroImage: "https:\/\/caddemo\.de\/wp-content\/uploads\//);
+    assert.match(ex.text, /rel="sponsored nofollow noopener"/);
     assert.equal((await up("p1", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz")).status, 409);
   } finally {
     globalThis.fetch = realFetch;

@@ -355,12 +355,12 @@ function contentHtml(c, ct, canEdit) {
     const miss = i.slots.filter((s) => s.required && !s.image).length;
     const locked = !!i.wp_post_id || !canEdit;
     return `<details class="img-box"${miss && i.status === "drafted" ? " open" : ""}><summary>Ảnh thật (${i.slots.filter((s) => s.image).length}/${i.slots.length}${miss ? `, thiếu ${miss} bắt buộc` : ""})</summary>
-      ${miss ? `<div class="msg warn">Người viết cần anh tải ${miss} ảnh thật. Ảnh tự chụp khi dùng sản phẩm là tốt nhất; ảnh nhà sản xuất chỉ khi có quyền dùng. Không dùng ảnh AI, không tải ảnh lấy từ Amazon. Ảnh lên thẳng Thư viện Media WordPress, app xoá dữ liệu vị trí GPS trong ảnh JPEG.</div>` : ""}
-      ${!ct.wpConnected ? `<div class="msg">Cần kết nối WordPress (Site › Kết nối WordPress) để tải ảnh.</div>` : ""}
+      ${miss ? `<div class="msg warn">Người viết cần anh tải ${miss} ảnh thật. Ảnh tự chụp khi dùng sản phẩm là tốt nhất; ảnh nhà sản xuất chỉ khi có quyền dùng. Không dùng ảnh AI, không tải ảnh lấy từ Amazon. ${ct.media.mode === "r2" ? "Ảnh lưu ở Cloudflare R2, phục vụ qua tên miền ảnh của site" : "Ảnh lên thẳng Thư viện Media WordPress"}; app xoá dữ liệu vị trí GPS trong ảnh JPEG.</div>` : ""}
+      ${!ct.media.ready ? `<div class="msg">${esc(ct.media.why)}</div>` : ""}
       <div class="slots">${i.slots.map((s) => `<div class="slot${s.image ? " done" : ""}">
         <div class="slot-head"><b>${esc(s.label)}</b>${tag(s.image ? ["Đã có", "ok"] : s.required ? ["Bắt buộc", "warn"] : ["Nên có", ""])}</div>
         ${s.image ? `<figure class="thumb"><img src="${esc(s.image.url)}" alt="${esc(s.image.alt)}"><figcaption>${esc(s.image.alt)}</figcaption></figure>` : ""}
-        ${locked || !ct.wpConnected ? "" : `${s.image ? `<details><summary>Thay hoặc gỡ ảnh</summary>` : ""}<form data-upload="${i.id}" data-slot="${esc(s.key)}" class="upload">
+        ${locked || !ct.media.ready ? "" : `${s.image ? `<details><summary>Thay hoặc gỡ ảnh</summary>` : ""}<form data-upload="${i.id}" data-slot="${esc(s.key)}" class="upload">
           <label>File ảnh (JPEG, PNG, WebP, tối đa 8 MB) <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required></label>
           <label>Mô tả ảnh (alt) <input name="alt" required minlength="5" maxlength="160" value="${esc(s.image?.alt || "")}"></label>
           <label>Chú thích (không bắt buộc) <input name="caption" maxlength="200" value="${esc(s.image?.caption || "")}"></label>
@@ -385,7 +385,7 @@ function contentHtml(c, ct, canEdit) {
       <div class="toolbar">
         ${i.status === "approved" && i.products.items.length >= (F[i.format]?.minProducts || 0) ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
         ${i.status === "briefed" ? btn(i, "draft", "Viết bài nháp", "primary") + btn(i, "brief", "Lập lại dàn ý") : ""}
-        ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? btn(i, "wp", "Tạo bản nháp WordPress", "primary") : ""}
+        ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? (ct.platform === "astro" ? `<button type="button" class="primary" data-export="${i.id}">Tải file Markdown cho Astro</button>` : btn(i, "wp", "Tạo bản nháp WordPress", "primary")) : ""}
         ${i.status === "drafted" && !i.wp_post_id ? btn(i, "draft", "Viết lại") : ""}
         ${i.wp_post_id && i.status !== "published" ? btn(i, "published", "Đã đăng") : ""}
         ${["approved", "briefed", "drafted"].includes(i.status) ? btn(i, "rejected", "Bỏ chủ đề", "danger") : ""}
@@ -569,6 +569,16 @@ function bindCase(main, c, canEdit) {
       } catch (e) { ideaMsg(e); }
     });
   }));
+  $$("[data-export]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang xuất…", async () => {
+    try {
+      const res = await fetch(`/api/content/ideas/${b.dataset.export}/export.md`, { credentials: "same-origin" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || `Lỗi ${res.status}`);
+      const name = (/filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "") || [])[1] || "bai-moi.md";
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a"); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) { ideaMsg(e); }
+  })));
   $$("[data-img-del]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
     try { await api(`/api/content/ideas/${b.dataset.imgDel}/images/${b.dataset.slot}`, { method: "DELETE" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
   })));
