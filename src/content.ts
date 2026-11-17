@@ -11,6 +11,7 @@ import type { GateProblem, GateResult } from "./recovery-gate";
 import { readRules, type SiteRules } from "./recovery-rules";
 import { wpCall } from "./wordpress";
 import { mediaReady, mediaSite, storeImage } from "./media";
+import { profileFor, profileNumbers, readProfile, type Profile } from "./docs";
 import { imageSize, MAX_IMAGE_BYTES, sniffImage, stripJpegMeta } from "./images";
 import { checkFormat, detectFormat, FORMATS, formatOf, formatSpec, parseProducts, productNumbers, readImages, readProducts, renderDraft, slotsFor, type FormatId, type Slot, type UploadedImage } from "./formats";
 import type { Env, User } from "./types";
@@ -25,6 +26,9 @@ async function caseInfo(env: Env, caseId: number): Promise<CaseInfo> {
   if (!c) throw new HttpError(404, "Không tìm thấy ca.", "not_found");
   return c;
 }
+
+// Blocklist của site + điều cấm rút từ tài liệu (chỉ cụm ngắn)
+const blockOf = (rules: SiteRules, p: Profile): string[] => [...rules.blocklist, ...p.banned.filter((x) => x.length <= 40)];
 
 async function pagesOf(env: Env, caseId: number): Promise<Pg[]> {
   const { results } = await env.DB.prepare("SELECT path, url, kind, data, traffic FROM recovery_pages WHERE case_id = ? AND status = 'done'").bind(caseId).all<{ path: string; url: string; kind: string | null; data: string | null; traffic: string | null }>();
@@ -139,10 +143,12 @@ export async function briefCore(env: Env, ideaId: number, actor: string): Promis
   const pages = await pagesOf(env, c.id);
   const hub = pages.find((p) => p.path === i.hub_path);
   const serp = await serpInfo(env, c.site_id, i.keyword, c.market || "US", lang);
+  const profile = await readProfile(env, c.site_id);
   const b = await aiJson<Record<string, unknown>>(env, {
     template: "content_brief", task: "content.brief", siteId: c.site_id, format: formatSpec(f.id),
-    rules: writingRules(lang, [...rules.verifiedNumbers, ...productNumbers(products)], rules.blocklist),
+    rules: writingRules(lang, [...rules.verifiedNumbers, ...productNumbers(products), ...profileNumbers(profile)], blockOf(rules, profile)),
     input: {
+      site_profile: profileFor(profile, i.keyword),
       format: f.id, site_type: c.site_type, keyword: i.keyword, monthly_searches: i.volume, intent: i.intent,
       products: products.items.map((p, n) => ({ n: n + 1, name: p.name, best_for: p.bestFor, tested: p.tested })), method: products.method,
       service_page: hub ? { path: hub.path, title: brandless(hub.d?.h1[0] || hub.d?.title || hub.path) } : null,
@@ -200,7 +206,70 @@ export function checkArticle(html: string, rules: SiteRules, hubPath: string | n
   return { ok: !problems.some((p) => p.level === "block"), checkedAt: now(), problems };
 }
 
-interface Draft { title: string; slug: string; raw: string; html: string; meta_description: string; words: number }
+interface Review { score: number; criteria: { name: string; score: number; note: string }[]; issues: { where: string; problem: string; fix: string }[]; verdict: string; rounds: number[]; at: number }
+interface Draft { title: string; slug: string; raw: string; html: string; meta_description: string; words: number; review?: Review | null; reviewError?: string }
+
+const TOKEN_RE = /\[\[(?:DISCLOSURE|BUY:\d+|IMG:[a-z0-9]+)\]\]/g;
+const tokensOf = (h: string) => new Set(h.match(TOKEN_RE) || []);
+
+interface Ctx { i: IdeaRow; c: CaseInfo; rules: SiteRules; lang: string; profile: Profile; products: ReturnType<typeof readProducts>; brief: Record<string, unknown> & { serp?: { paa?: string[] }; outline?: unknown; title?: unknown } }
+async function ctxOf(env: Env, i: IdeaRow): Promise<Ctx> {
+  const c = await caseInfo(env, i.case_id!);
+  const rules = readRules(c.rules);
+  return { i, c, rules, lang: rules.language || c.language, profile: await readProfile(env, c.site_id), products: readProducts(i.products), brief: i.brief ? JSON.parse(i.brief) : {} };
+}
+const writerInput = (x: Ctx) => ({
+  format: x.i.format, keyword: x.i.keyword,
+  outline: { title: x.brief.title, sections: x.brief.outline },
+  products: x.products.items.map((p, n) => ({ n: n + 1, name: p.name, best_for: p.bestFor, tested: p.tested, owner_notes: p.notes, specs: p.specs, pros: p.pros, cons: p.cons })),
+  site_profile: profileFor(x.profile, x.i.keyword), paa: x.brief.serp?.paa || []
+});
+const rulesFor = (x: Ctx) => writingRules(x.lang, [...x.rules.verifiedNumbers, ...productNumbers(x.products), ...profileNumbers(x.profile)], blockOf(x.rules, x.profile));
+
+// Biên tập viên chấm (model khác người viết)
+async function reviewOnce(env: Env, x: Ctx, raw: string): Promise<Omit<Review, "rounds" | "at">> {
+  const r = await aiJson<{ score?: unknown; criteria?: unknown; issues?: unknown; verdict?: unknown }>(env, {
+    template: "article_review", task: "content.review", siteId: x.c.site_id, format: formatSpec(x.i.format),
+    rules: "Notes, problems, fixes and verdict in Vietnamese. Reply with a single JSON object only.",
+    input: { ...writerInput(x), draft_html: raw }
+  });
+  const num = (v: unknown) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+  return {
+    score: num(r.score),
+    criteria: (Array.isArray(r.criteria) ? r.criteria : []).slice(0, 8).map((c: Record<string, unknown>) => ({ name: String(c?.name || "").slice(0, 40), score: num(c?.score), note: String(c?.note || "").slice(0, 300) })),
+    issues: (Array.isArray(r.issues) ? r.issues : []).slice(0, 8).map((c: Record<string, unknown>) => ({ where: String(c?.where || "").slice(0, 120), problem: String(c?.problem || "").slice(0, 400), fix: String(c?.fix || "").slice(0, 400) })),
+    verdict: String(r.verdict || "").slice(0, 600)
+  };
+}
+
+// Người viết sửa theo nhận xét; bỏ bản sửa nếu làm mất token (ảnh, nút mua, công khai)
+async function reviseOnce(env: Env, x: Ctx, raw: string, issues: Review["issues"]): Promise<string> {
+  const r = await aiJson<{ html?: string }>(env, {
+    template: "article_revise", task: "content.revise", siteId: x.c.site_id, format: formatSpec(x.i.format),
+    rules: rulesFor(x), input: { ...writerInput(x), draft_html: raw, issues }
+  });
+  const out = cleanHtml(String(r.html || ""));
+  const need = tokensOf(raw);
+  const have = tokensOf(out);
+  if (!out || [...need].some((t) => !have.has(t))) return raw;
+  return out;
+}
+
+// Chấm → nếu dưới mức thì sửa → chấm lại (tối đa maxRevisions vòng)
+async function qualityLoop(env: Env, x: Ctx, raw: string, maxRevisions: number, prev?: Review | null): Promise<{ raw: string; review: Review }> {
+  const rounds = [...(prev?.rounds || [])];
+  let cur = raw;
+  let rv = prev && maxRevisions > 0 ? { score: prev.score, criteria: prev.criteria, issues: prev.issues, verdict: prev.verdict } : await reviewOnce(env, x, cur);
+  if (!(prev && maxRevisions > 0)) rounds.push(rv.score);
+  for (let n = 0; n < maxRevisions && rv.score < x.rules.minQualityScore && rv.issues.length; n++) {
+    const next = await reviseOnce(env, x, cur, rv.issues);
+    if (next === cur) break;
+    const r2 = await reviewOnce(env, x, next);
+    rounds.push(r2.score);
+    if (r2.score >= rv.score) { cur = next; rv = r2; } else break;
+  }
+  return { raw: cur, review: { ...rv, rounds, at: now() } };
+}
 
 // Dựng lại bài (chèn công khai, nút mua, ảnh thật) và chạy Gác cổng: dùng sau khi viết, khi đổi sản phẩm hoặc tải ảnh
 async function regate(env: Env, i: IdeaRow, c: CaseInfo, draft: Draft): Promise<{ draft: Draft; gate: GateResult; slots: Slot[] }> {
@@ -210,10 +279,15 @@ async function regate(env: Env, i: IdeaRow, c: CaseInfo, draft: Draft): Promise<
   const slots = slotsFor(i.format, products, brief.photo_requests || [], readImages(i.images));
   const html = renderDraft(draft.raw ?? draft.html, { format: i.format, products, slots, rules, preview: false });
   const f = formatOf(i.format);
+  const profile = await readProfile(env, c.site_id);
   const extra = checkFormat({ format: i.format, title: draft.title, html, products, slots, rules });
+  const rv = draft.review;
+  if (!rv) extra.push({ rule: "quality", level: "warn", message: `Chưa được Biên tập viên chấm${draft.reviewError ? `: ${draft.reviewError}` : ""}.` });
+  else if (rv.score < 60) extra.push({ rule: "quality", level: "block", message: `Biên tập viên chấm ${rv.score}/100 (dưới 60): bấm "Sửa theo nhận xét" hoặc viết lại.` });
+  else if (rv.score < rules.minQualityScore) extra.push({ rule: "quality", level: "warn", message: `Biên tập viên chấm ${rv.score}/100, dưới mức anh đặt (${rules.minQualityScore}).` });
   const media = await mediaReady(env, await mediaSite(env, c.site_id));
   if (!media.verified && slots.some((s) => s.image)) extra.push({ rule: "media", level: "block", message: `Site chưa phục vụ ảnh ở ${media.base}: bấm "Dựng kho ảnh" (hoặc Kiểm tra lại) ở mục Ảnh thật.` });
-  const gate = checkArticle(html, rules, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: productNumbers(products), extra });
+  const gate = checkArticle(html, { ...rules, blocklist: blockOf(rules, profile) }, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: [...productNumbers(products), ...profileNumbers(profile)], extra });
   const out = { ...draft, raw: draft.raw ?? draft.html, html, words: wordCount(html.replace(/<[^>]+>/g, " ")) };
   await env.DB.prepare("UPDATE content_ideas SET draft = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(out), JSON.stringify(gate), now(), i.id).run();
   return { draft: out, gate, slots };
@@ -233,21 +307,27 @@ export async function draftCore(env: Env, ideaId: number, actor: string): Promis
   const slots = slotsFor(i.format, products, brief.photo_requests || [], {});
   const r = await aiJson<{ title?: string; html?: string; meta_description?: string }>(env, {
     template: "article_draft", task: "content.draft", siteId: c.site_id, format: formatSpec(f.id),
-    rules: writingRules(lang, [...rules.verifiedNumbers, ...productNumbers(products)], rules.blocklist),
+    rules: writingRules(lang, [...rules.verifiedNumbers, ...productNumbers(products), ...profileNumbers(await readProfile(env, c.site_id))], blockOf(rules, await readProfile(env, c.site_id))),
     input: {
       format: f.id, keyword: i.keyword,
       outline: { title: brief.title, angle: brief.angle, sections: brief.outline, faq: brief.faq },
       products: products.items.map((p, n) => ({ n: n + 1, name: p.name, merchant: p.merchant, best_for: p.bestFor, tested: p.tested, owner_notes: p.notes, specs: p.specs, pros: p.pros, cons: p.cons })),
-      method: products.method, photo_slots: slots.map((s) => ({ key: s.key, what: s.label })),
+      method: products.method, photo_slots: slots.map((s) => ({ key: s.key, what: s.label })), site_profile: profileFor(await readProfile(env, c.site_id), i.keyword),
       service_page: f.affiliate ? null : i.hub_path, anchor: f.affiliate ? null : brief.internal_link_anchor, paa: brief.serp?.paa || []
     }
   });
-  const raw = cleanHtml(String(r.html || ""));
-  const base: Draft = { title: String(r.title || brief.title || i.keyword).slice(0, 120), slug: String(brief.slug || ""), raw, html: raw, meta_description: String(r.meta_description || brief.meta_description || "").slice(0, 160), words: 0 };
+  let raw = cleanHtml(String(r.html || ""));
+  let review: Review | null = null;
+  let reviewError = "";
+  try {
+    const q = await qualityLoop(env, await ctxOf(env, i), raw, 2);
+    raw = q.raw; review = q.review;
+  } catch (e) { reviewError = (e as Error).message.slice(0, 200); }
+  const base: Draft = { title: String(r.title || brief.title || i.keyword).slice(0, 120), slug: String(brief.slug || ""), raw, html: raw, meta_description: String(r.meta_description || brief.meta_description || "").slice(0, 160), words: 0, review, reviewError };
   await env.DB.prepare("UPDATE content_ideas SET status = 'drafted' WHERE id = ?").bind(ideaId).run();
   const { draft, gate, slots: s2 } = await regate(env, i, c, base);
   const missing = s2.filter((x) => x.required && !x.image).length;
-  await logActivity(env, actor, "content.draft", `Viết bài nháp "${draft.title}" (${draft.words} từ)${missing ? ` — cần anh tải ${missing} ảnh thật` : gate.ok ? "" : " — Gác cổng chặn"}`, c.site_id);
+  await logActivity(env, actor, "content.draft", `Viết bài nháp "${draft.title}" (${draft.words} từ${review ? `, Biên tập viên ${review.rounds.join(" → ")}/100` : ""})${missing ? ` — cần anh tải ${missing} ảnh thật` : gate.ok ? "" : " — Gác cổng chặn"}`, c.site_id);
   return gate;
 }
 
@@ -265,6 +345,20 @@ export async function wpDraftCore(env: Env, ideaId: number, actor: string): Prom
   await logActivity(env, actor, "content.wp_draft", `Tạo bản nháp WordPress "${d.title}" (chưa đăng)`, c.site_id);
   return { id: r.id, edit: r.edit_link };
 }
+
+// Chấm lại (revise=false) hoặc sửa theo nhận xét rồi chấm lại (revise=true, 1 vòng)
+export async function reviewCore(env: Env, ideaId: number, revise: boolean, actor: string): Promise<GateResult> {
+  const i = await idea(env, ideaId);
+  if (i.status !== "drafted" || !i.draft) throw new HttpError(409, "Chưa có bài nháp.", "no_draft");
+  if (i.wp_post_id) throw new HttpError(409, "Bài đã có bản nháp trên WordPress: sửa tiếp ở WordPress.", "exists");
+  const d = JSON.parse(i.draft) as Draft;
+  const x = await ctxOf(env, i);
+  const q = await qualityLoop(env, x, d.raw ?? d.html, revise ? 1 : 0, revise ? d.review : null);
+  const { gate } = await regate(env, i, x.c, { ...d, raw: q.raw, review: q.review, reviewError: "" });
+  await logActivity(env, actor, "content.review", `Biên tập viên ${revise ? "sửa và chấm lại" : "chấm lại"} "${d.title}": ${q.review.rounds.join(" → ")}/100`, x.c.site_id);
+  return gate;
+}
+export const apiReview = async (env: Env, req: Request, user: User, id: number) => { const b = await readJson(req).catch(() => ({})) as { revise?: boolean }; return run(user, () => reviewCore(env, id, b.revise === true, `user:${user.id}`)); };
 
 // Site Astro: xuất bài thành file Markdown (frontmatter + HTML) để đưa vào repo; luôn draft: true
 export async function apiExportMarkdown(env: Env, user: User, id: number): Promise<Response> {
@@ -337,26 +431,34 @@ export async function contentView(env: Env, caseId: number): Promise<Response> {
   });
 }
 
-// POST /api/content/:caseId/ideas { keyword, format, hub_path? } — anh tự thêm chủ đề (vẫn qua kiểm trùng và giới hạn tháng khi duyệt)
-export async function apiCreateIdea(env: Env, req: Request, user: User, caseId: number): Promise<Response> {
-  canEdit(user);
+// Tạo chủ đề (anh tự thêm hoặc Trưởng nhóm giao): vẫn qua kiểm trùng; khi duyệt vẫn qua giới hạn tháng
+export async function createIdeaCore(env: Env, caseId: number, o: { keyword: string; format?: string; hub_path?: string | null }, actor: string): Promise<number> {
   const c = await caseInfo(env, caseId);
-  const body = await readJson(req);
-  const keyword = String(body.keyword || "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 120);
+  const keyword = String(o.keyword || "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 120);
   if (keyword.length < 3) throw new HttpError(400, "Nhập từ khoá chính của bài.", "validation");
-  const format = body.format ? formatOf(String(body.format)).id : detectFormat(keyword);
+  const format = o.format ? formatOf(String(o.format)).id : detectFormat(keyword);
   const rules = readRules(c.rules);
-  if (rules.blocklist.some((b) => b && keyword.includes(b.toLowerCase()))) throw new HttpError(400, "Từ khoá chứa từ trong blocklist của site.", "blocklist");
+  const profile = await readProfile(env, c.site_id);
+  if (blockOf(rules, profile).some((b) => b && keyword.includes(b.toLowerCase()))) throw new HttpError(400, "Từ khoá chứa từ trong blocklist của site.", "blocklist");
   const pages = await pagesOf(env, caseId);
   const kt = toks(keyword);
   const cov = pages.filter((p) => p.d && p.kind !== "system").map((p) => ({ path: p.path, s: jac(kt, toks(`${p.d!.h1[0] || ""} ${p.d!.title} ${p.path.replace(/[-/]/g, " ")}`)) })).sort((a, b) => b.s - a.s)[0];
-  const hub = typeof body.hub_path === "string" && pages.some((p) => p.path === body.hub_path) ? body.hub_path : null;
+  const hub = typeof o.hub_path === "string" && pages.some((p) => p.path === o.hub_path) ? o.hub_path : null;
   const t = now();
   const r = await env.DB.prepare("INSERT INTO content_ideas (site_id, case_id, keyword, cluster, hub_path, covered_by, score, format, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'manual', ?, ?) ON CONFLICT(site_id, keyword) DO NOTHING RETURNING id")
     .bind(c.site_id, caseId, keyword, kt.slice(0, 2).join(" "), hub, cov && cov.s >= 0.6 ? cov.path : null, format, t, t).first<{ id: number }>();
   if (!r) throw new HttpError(409, "Chủ đề này đã có trong danh sách.", "duplicate");
-  await logActivity(env, `user:${user.id}`, "content.idea", `Thêm chủ đề "${keyword}" (${formatOf(format).label})`, c.site_id);
-  return json({ ok: true, id: r.id, coveredBy: cov && cov.s >= 0.6 ? cov.path : null }, 201);
+  await logActivity(env, actor, "content.idea", `Thêm chủ đề "${keyword}" (${formatOf(format).label})`, c.site_id);
+  return r.id;
+}
+
+// POST /api/content/:caseId/ideas { keyword, format, hub_path? }
+export async function apiCreateIdea(env: Env, req: Request, user: User, caseId: number): Promise<Response> {
+  canEdit(user);
+  const body = await readJson(req);
+  const id = await createIdeaCore(env, caseId, { keyword: String(body.keyword || ""), format: body.format ? String(body.format) : undefined, hub_path: typeof body.hub_path === "string" ? body.hub_path : null }, `user:${user.id}`);
+  const row = await env.DB.prepare("SELECT covered_by FROM content_ideas WHERE id = ?").bind(id).first<{ covered_by: string | null }>();
+  return json({ ok: true, id, coveredBy: row?.covered_by ?? null }, 201);
 }
 
 // PUT /api/content/ideas/:id/products { method, items[] }

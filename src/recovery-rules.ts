@@ -21,6 +21,7 @@ export interface SiteRules {
   ga4Property: string;         // ID số của property GA4
   seedKeywords: string[];      // từ khoá gốc cho nghiên cứu (mặc định lấy H1 các trang dịch vụ)
   minVolume: number;           // lượng tìm kiếm tối thiểu để giữ ý tưởng
+  minQualityScore: number;     // điểm Biên tập viên tối thiểu (dưới mức này agent viết lại, tối đa 2 vòng)
   maxNewArticlesPerMonth: number; // giới hạn bài mới mỗi tháng (chống spam)
   autopilot: boolean;          // chế độ tự động cho site này
   autoRescanDays: number;      // quét lại sau bao nhiêu ngày
@@ -48,6 +49,7 @@ export const DEFAULT_RULES: SiteRules = {
   ga4Property: "",
   seedKeywords: [],
   minVolume: 10,
+  minQualityScore: 75,
   maxNewArticlesPerMonth: 2,
   autopilot: false,
   autoRescanDays: 7,
@@ -107,6 +109,7 @@ export function parseRules(input: unknown, base: SiteRules = DEFAULT_RULES): Sit
   }
   if (b.seedKeywords !== undefined) out.seedKeywords = list(b.seedKeywords, 20, 80).map((k) => k.toLowerCase());
   const int = (v: unknown, min: number, max: number, field: string) => { const n = Number(v); if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${field} phải từ ${min} đến ${max}.`, "validation"); return n; };
+  if (b.minQualityScore !== undefined) out.minQualityScore = int(b.minQualityScore, 60, 95, "Điểm chất lượng tối thiểu");
   if (b.minVolume !== undefined) out.minVolume = int(b.minVolume, 0, 100000, "Lượng tìm kiếm tối thiểu");
   if (b.maxNewArticlesPerMonth !== undefined) out.maxNewArticlesPerMonth = int(b.maxNewArticlesPerMonth, 0, 8, "Số bài mới mỗi tháng");
   if (b.autoRescanDays !== undefined) out.autoRescanDays = int(b.autoRescanDays, 3, 60, "Số ngày quét lại");

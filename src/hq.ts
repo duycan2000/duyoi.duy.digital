@@ -11,8 +11,10 @@ import type { Env } from "./types";
 const CONTENT_AGENTS = [
   { id: "research", name: "Nghiên cứu từ khoá", icon: "search", role: "Lấy gợi ý từ khoá (DataForSEO), bỏ từ site đã có trang, chấm điểm theo lượng tìm, độ khó, ý định và trang dịch vụ liên quan." },
   { id: "architect", name: "Kiến trúc nội dung", icon: "layers", role: "Rà cấu trúc: mỗi trang dịch vụ có bao nhiêu bài hỗ trợ dẫn về, bài nào chưa gắn cụm, cụm nào còn thiếu." },
-  { id: "planner", name: "Biên tập viên", icon: "list", role: "Lập dàn ý từ top Google và People Also Ask; nêu chỗ chủ site cần thêm kinh nghiệm thật." },
-  { id: "writer", name: "Người viết", icon: "pen", role: "Viết bài theo khung chuẩn (thông tin, Best X/Top N, review, so sánh, how-to, guide), chèn công khai affiliate, nút mua và ảnh thật anh tải lên, qua Gác cổng, tạo bản nháp WordPress. Không bao giờ tự đăng." }
+  { id: "docs", name: "Đọc tài liệu", icon: "list", role: "Đọc PDF anh tải lên (catalog, bảng giá, hồ sơ, handover), rút Hồ sơ site: dịch vụ, sản phẩm, số liệu có nguồn, giọng văn, điều cấm, gợi ý bài kèm định dạng." },
+  { id: "planner", name: "Lập dàn ý", icon: "list", role: "Lập dàn ý theo định dạng từ top Google, People Also Ask và Hồ sơ site; nêu chỗ chủ site cần thêm kinh nghiệm thật." },
+  { id: "writer", name: "Người viết", icon: "pen", role: "Viết bài theo khung chuẩn (thông tin, Best X/Top N, review, so sánh, how-to, guide), chèn công khai affiliate, nút mua và ảnh thật anh tải lên, qua Gác cổng, tạo bản nháp WordPress. Không bao giờ tự đăng." },
+  { id: "editor", name: "Biên tập viên", icon: "check", role: "Chấm bài nháp 0–100 theo khung định dạng và tiêu chí nội dung hữu ích (dùng model khác người viết), nêu lỗi cụ thể; dưới mức anh đặt thì Người viết sửa, tối đa 2 vòng." }
 ];
 
 export async function hqView(env: Env): Promise<Response> {
@@ -63,7 +65,10 @@ export async function hqView(env: Env): Promise<Response> {
     return { ...a, zone: "content", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt, state: agentState(a.id, { waiting: waiting + mine.length, blockedPrompt }), waiting, detail };
   });
   const autoSites = await Promise.all(cases.results.filter((c) => readRules(c.rules).autopilot).map(async (c) => ({ siteId: c.site_id, caseId: c.id, domain: c.domain, ...(await getAuto(env, c.site_id)) })));
+  const jq = await env.DB.prepare("SELECT status, COUNT(*) AS n FROM agent_jobs GROUP BY status").all<{ status: string; n: number }>();
+  const jobs = Object.fromEntries(jq.results.map((r) => [r.status, r.n])) as Record<string, number>;
   return json({
+    lead: { queued: jobs.queued || 0, running: jobs.running || 0, done: jobs.done || 0, failed: jobs.failed || 0, blockedPrompt: prompts.some((p) => p.agent === "lead" && !p.ok), last: lastOf("lead"), spend: costOf("lead") },
     manager: { promptsTotal: prompts.length, promptsPending: promptPending.length, spend: spend.results, last: recent.results.find((r) => r.actor === "agent:manager") || null },
     zones: { recovery, content },
     autopilot: { sites: autoSites, last: lastOf("autopilot") },

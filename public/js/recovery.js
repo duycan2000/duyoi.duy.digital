@@ -148,8 +148,9 @@ const agentGrid = (agents, tasks = []) => `<div class="agent-grid">${agents.map(
 
 async function viewCase(main, id) {
   const [data, content] = await Promise.all([api(`/api/recovery/${id}`), api(`/api/content/${id}`).catch(() => null)]);
+  if (content) content.docs = await api(`/api/sites/${content.media.siteId}/docs`).catch(() => null);
   const { case: c, findings, tasks, pages, agents } = data;
-  CTX = { caseId: c.id, siteId: c.siteId, wp: data.wpConnected, backups: data.backups || [] };
+  CTX = { caseId: c.id, siteId: c.siteId, wp: data.wpConnected, backups: data.backups || [], content };
   const canEdit = K.state.user.role !== "viewer";
   const running = RUNNING.includes(c.status);
   const openTasks = tasks.filter((t) => t.status === "proposed" || t.status === "blocked").length;
@@ -313,6 +314,59 @@ const renderArticle = (html) => esc(html)
   .replace(/<p><em>⟪(.*?)⟫<\/em><\/p>/g, '<p class="img-need">$1</p>');
 const ISTATUS = { idea: ["Ý tưởng", ""], approved: ["Đã duyệt", "info"], briefed: ["Có dàn ý", "info"], drafted: ["Có bài nháp", "ok"], published: ["Đã đăng", "ok"], rejected: ["Đã bỏ", ""], failed: ["Lỗi", "err"] };
 
+const DOC_KIND = { catalog: "Catalog", price_list: "Bảng giá", company_profile: "Hồ sơ công ty", seo_handover: "Handover SEO", process_guide: "Quy trình", knowledge: "Kiến thức", other: "Khác" };
+const FMT_LABEL = { roundup: "Best X / Top N", review: "Review", comparison: "So sánh", how_to: "How-to", guide: "Guide", article: "Bài thông tin" };
+
+function docsHtml(ct, canEdit) {
+  const d = ct.docs;
+  if (!d) return "";
+  const p = d.profile;
+  const have = (p.facts.length + p.services.length + p.products.length) > 0;
+  const taken = new Set(ct.ideas.map((i) => i.keyword));
+  const ideas = p.ideas.filter((i) => i.keyword && !taken.has(i.keyword));
+  const lines = (a) => esc(a.join("\n"));
+  return `<details class="docs-box"${have && !ideas.length ? "" : " open"}><summary>${K.icon(K.ICON.list)}Tài liệu &amp; Hồ sơ site <span class="tag ${have ? "ok" : "warn"}">${have ? `${d.docs.filter((x) => x.status === "ready").length} tài liệu · ${p.facts.length} dữ kiện` : "chưa có"}</span></summary>
+    <p class="note">Tải PDF của site (catalog, bảng giá, hồ sơ công ty, handover SEO, quy trình, ghi chú kinh nghiệm). Agent Đọc tài liệu rút ra Hồ sơ site; người viết chỉ dùng dữ kiện trong hồ sơ, số liệu trong hồ sơ được coi là có nguồn. File PDF không lưu lại.</p>
+    <div class="msg" id="doc-msg" hidden></div>
+    ${canEdit ? `<form id="doc-up" class="form-grid">
+      <label>File PDF (tối đa 15 MB) <input type="file" name="file" accept="application/pdf" required></label>
+      <label class="check"><input type="checkbox" name="ocr"><span>PDF scan (ảnh chụp trang)<small>Dùng OCR trả phí của OpenRouter để đọc chữ trong ảnh.</small></span></label>
+      <div class="toolbar full"><button type="submit" class="primary">${K.icon(K.ICON.plus)}Tải lên và đọc</button></div>
+    </form>` : ""}
+    ${d.docs.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Tài liệu</th><th>Loại</th><th>Rút được</th><th></th></tr></thead><tbody>${d.docs.map((x) => `<tr>
+      <td><b>${esc(x.title || x.name)}</b><small>${esc(x.name)} · ${Math.round(x.size / 1024)} KB</small>${x.summary ? `<small>${esc(x.summary)}</small>` : ""}${x.error ? `<small class="err">${esc(x.error)}</small>` : ""}</td>
+      <td>${x.status === "ready" ? esc(DOC_KIND[x.kind] || x.kind || "") : x.status === "failed" ? `<span class="tag err">Lỗi</span>` : `<span class="tag info">Đang đọc</span>`}</td>
+      <td>${x.counts ? `${x.counts.facts} dữ kiện · ${x.counts.products} sản phẩm · ${x.counts.ideas} gợi ý bài` : "—"}</td>
+      <td>${canEdit ? `<button type="button" class="danger" data-doc-del="${x.id}">Bỏ</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${ideas.length ? `<h3 class="sub">${K.icon(K.ICON.pen)}Bài viết gợi ý từ tài liệu</h3><div class="tablewrap boxed"><table><thead><tr><th>Bài</th><th>Định dạng</th><th>Vì sao</th><th></th></tr></thead><tbody>${ideas.map((i) => `<tr><td><b>${esc(i.title)}</b><small>${esc(i.keyword)}</small></td><td><span class="tag fmt">${esc(FMT_LABEL[i.format] || i.format)}</span></td><td>${esc(i.why)}<small>${esc(i.source)}</small></td><td>${canEdit ? `<button type="button" data-doc-idea="${esc(i.keyword)}" data-fmt="${esc(i.format)}">Thêm thành chủ đề</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <form id="profile-form" class="profile">
+      <h3 class="sub">${K.icon(K.ICON.users)}Hồ sơ site (anh sửa được)</h3>
+      <div class="form-grid">
+        <label class="full">Tóm tắt <textarea name="summary" rows="2">${esc(p.summary)}</textarea></label>
+        <label>Khách hàng / người đọc <textarea name="audience" rows="2">${esc(p.audience)}</textarea></label>
+        <label>Giọng văn <textarea name="tone" rows="2">${esc(p.tone)}</textarea></label>
+        <label>Dịch vụ (mỗi dòng một dịch vụ) <textarea name="services" rows="4">${lines(p.services)}</textarea></label>
+        <label>Điều cấm (mỗi dòng: từ, thương hiệu, câu hứa không được dùng) <textarea name="banned" rows="4">${lines(p.banned)}</textarea></label>
+        <label class="full">Dữ kiện có nguồn (mỗi dòng: dữ kiện | nguồn) <textarea name="facts" rows="6">${esc(p.facts.map((f) => `${f.text}${f.source ? ` | ${f.source}` : ""}`).join("\n"))}</textarea></label>
+      </div>
+      ${p.products.length ? `<p class="note">Sản phẩm trong tài liệu: ${p.products.map((x) => esc(x.name)).join(", ")}</p>` : ""}
+      ${canEdit ? `<div class="toolbar"><button type="submit" class="primary">Lưu Hồ sơ site</button></div>` : ""}
+    </form>
+  </details>`;
+}
+
+function reviewBox(i) {
+  const r = i.draft?.review;
+  if (!i.draft) return "";
+  if (!r) return i.draft.reviewError ? `<p class="note">Biên tập viên chưa chấm: ${esc(i.draft.reviewError)}</p>` : "";
+  const cls = r.score >= 80 ? "ok" : r.score >= 60 ? "warn" : "err";
+  return `<details class="review-box"><summary>Biên tập viên: <span class="tag ${cls}">${r.score}/100</span>${r.rounds.length > 1 ? ` <small>qua các vòng ${r.rounds.join(" → ")}</small>` : ""}</summary>
+    ${r.verdict ? `<p>${esc(r.verdict)}</p>` : ""}
+    ${r.criteria.length ? `<div class="crit">${r.criteria.map((c) => `<div><b>${esc(c.name)}</b> <span class="tag ${c.score >= 80 ? "ok" : c.score >= 60 ? "warn" : "err"}">${c.score}</span><small>${esc(c.note)}</small></div>`).join("")}</div>` : ""}
+    ${r.issues.length ? `<ol class="issues">${r.issues.map((x) => `<li><b>${esc(x.where)}</b>: ${esc(x.problem)}<small>Sửa: ${esc(x.fix)}</small></li>`).join("")}</ol>` : ""}
+  </details>`;
+}
+
 function contentHtml(c, ct, canEdit) {
   const st = ct.structure;
   const active = ct.ideas.filter((i) => ["approved", "briefed", "drafted", "published"].includes(i.status));
@@ -382,6 +436,7 @@ function contentHtml(c, ct, canEdit) {
       ${productsBox(i)}
       ${b ? `<details><summary>Dàn ý</summary><div class="diff">${(b.outline || []).map((o) => `<b>${esc(o.h2 || "")}</b><br>${(o.points || []).map((x) => `· ${esc(x)}`).join("<br>")}`).join("<br>")}${b.expert_input?.length ? `<br><br><b>Chủ site cần bổ sung (kinh nghiệm thật):</b><br>${b.expert_input.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}${b.serp?.paa?.length ? `<br><br><b>People Also Ask:</b><br>${b.serp.paa.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}</div></details>` : ""}
       ${slotsBox(i)}
+      ${reviewBox(i)}
       ${i.gate?.problems?.length ? `<ul class="gate">${i.gate.problems.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join("")}</ul>` : ""}
       ${d ? `<details><summary>Bài nháp (${d.words} từ)</summary><div class="article">${renderArticle(d.html)}</div><p class="note">Meta description: ${esc(d.meta_description)}</p></details>` : ""}
       ${i.wp_edit_url ? `<div class="msg ok">Đã có bản nháp trên WordPress (chưa đăng). <a href="${esc(i.wp_edit_url)}" target="_blank" rel="noopener">Mở để sửa, chọn tác giả thật và đăng</a></div>` : ""}
@@ -389,12 +444,15 @@ function contentHtml(c, ct, canEdit) {
         ${i.status === "approved" && i.products.items.length >= (F[i.format]?.minProducts || 0) ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
         ${i.status === "briefed" ? btn(i, "draft", "Viết bài nháp", "primary") + btn(i, "brief", "Lập lại dàn ý") : ""}
         ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? (ct.platform === "astro" ? `<button type="button" class="primary" data-export="${i.id}">Tải file Markdown cho Astro</button>` : btn(i, "wp", "Tạo bản nháp WordPress", "primary")) : ""}
+        ${i.status === "drafted" && !i.wp_post_id && i.draft?.review?.issues?.length ? btn(i, "revise", "Sửa theo nhận xét") : ""}
+        ${i.status === "drafted" && !i.wp_post_id ? btn(i, "review", "Chấm lại") : ""}
         ${i.status === "drafted" && !i.wp_post_id ? btn(i, "draft", "Viết lại") : ""}
         ${i.wp_post_id && i.status !== "published" ? btn(i, "published", "Đã đăng") : ""}
         ${["approved", "briefed", "drafted"].includes(i.status) ? btn(i, "rejected", "Bỏ chủ đề", "danger") : ""}
       </div></div>`;
   };
   return `
+    ${docsHtml(ct, canEdit)}
     <h3 class="sub">${K.icon(K.ICON.layers)}Cấu trúc bài viết hiện tại</h3>
     <p class="note">Mỗi trang dịch vụ nên có ít nhất 3 bài hỗ trợ dẫn link về. "Liên quan" là bài cùng chủ đề nhưng chưa có link: việc chèn link nằm ở tab Việc của agent.</p>
     ${st.hubs.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Trang dịch vụ</th><th>Bài có link về</th><th>Bài liên quan chưa link</th>${st.hubs.some((h) => h.clicks != null) ? "<th>Click 28 ngày</th>" : ""}</tr></thead><tbody>
@@ -450,6 +508,7 @@ function rulesHtml(c, canEdit) {
       <div class="form-grid inner">
         <label>Tối đa bài mới mỗi tháng <input type="number" name="maxNewArticlesPerMonth" min="0" max="8" value="${r.maxNewArticlesPerMonth}"${dis}></label>
         <label>Lượng tìm kiếm tối thiểu <input type="number" name="minVolume" min="0" value="${r.minVolume}"${dis}></label>
+        <label>Điểm Biên tập viên tối thiểu (60–95; dưới mức này agent tự sửa, tối đa 2 vòng) <input type="number" name="minQualityScore" min="60" max="95" value="${r.minQualityScore ?? 75}"${dis}></label>
       </div>
       <label>Câu công khai link affiliate (đặt đầu bài; trống = câu mặc định theo ngôn ngữ, có chữ "paid link"/"Werbung") <textarea name="affiliateDisclosure" rows="3" maxlength="500"${dis}>${esc(r.affiliateDisclosure || "")}</textarea></label>
       <label>Chữ trên nút mua ({merchant} = nơi bán; trống = "Check price at {merchant}") <input name="buyButtonText" maxlength="60" value="${esc(r.buyButtonText || "")}"${dis}></label>
@@ -517,16 +576,52 @@ function bindCase(main, c, canEdit) {
   }));
   $$("[data-iact]", main).forEach((b) => b.addEventListener("click", () => {
     const id = b.dataset.idea, act = b.dataset.iact;
-    const label = { brief: "Đang lập dàn ý…", draft: "AI đang viết…", wp: "Đang tạo bản nháp…" }[act] || "…";
+    const label = { brief: "Đang lập dàn ý…", draft: "Đang viết và chấm…", wp: "Đang tạo bản nháp…", review: "Đang chấm…", revise: "Đang sửa và chấm…" }[act] || "…";
     busy(b, label, async () => {
       try {
         if (["approved", "rejected", "published"].includes(act)) await api(`/api/content/ideas/${id}`, { method: "PUT", body: { status: act } });
+        else if (act === "review" || act === "revise") await api(`/api/content/ideas/${id}/review`, { method: "POST", body: { revise: act === "revise" } });
         else await api(`/api/content/ideas/${id}/${act}`, { method: "POST" });
         K.state.tabs.rec = "content";
         await reload();
       } catch (e) { ideaMsg(e); }
     });
   }));
+  const content = CTX.content;
+  const docMsg = (e) => { showMsg($("#doc-msg"), e.message); $("#doc-msg")?.scrollIntoView({ block: "center" }); };
+  $("#doc-up")?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    const file = $('[name="file"]', f).files[0];
+    if (!file) return;
+    busy(ev.submitter, "Đang đọc tài liệu…", async () => {
+      try {
+        if (file.size > 15 * 1024 * 1024) throw new Error("PDF lớn hơn 15 MB: tách nhỏ rồi tải từng phần.");
+        const q = new URLSearchParams({ name: file.name, ocr: $('[name="ocr"]', f).checked ? "1" : "0" });
+        const res = await fetch(`/api/sites/${content.media.siteId}/docs?${q}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/pdf" }, body: file });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || `Lỗi ${res.status}`);
+        K.state.tabs.rec = "content"; await reload();
+      } catch (e) { docMsg(e); }
+    });
+  });
+  $$("[data-doc-del]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { await api(`/api/sites/${content.media.siteId}/docs/${b.dataset.docDel}`, { method: "DELETE" }); K.state.tabs.rec = "content"; await reload(); } catch (e) { docMsg(e); }
+  })));
+  $$("[data-doc-idea]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang thêm…", async () => {
+    try { await api(`/api/content/${c.id}/ideas`, { method: "POST", body: { keyword: b.dataset.docIdea, format: b.dataset.fmt } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { docMsg(e); }
+  })));
+  $("#profile-form")?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    const v = (n) => $(`[name="${n}"]`, f).value;
+    const ls = (n) => v(n).split("\n").map((x) => x.trim()).filter(Boolean);
+    const body = { ...content.docs.profile, summary: v("summary"), audience: v("audience"), tone: v("tone"), services: ls("services"), banned: ls("banned"),
+      facts: ls("facts").map((l) => { const k = l.lastIndexOf(" | "); return k > 0 ? { text: l.slice(0, k), source: l.slice(k + 3) } : { text: l, source: "anh nhập" }; }) };
+    busy(ev.submitter, "Đang lưu…", async () => {
+      try { await api(`/api/sites/${content.media.siteId}/profile`, { method: "PUT", body }); K.state.tabs.rec = "content"; await reload(); } catch (e) { docMsg(e); }
+    });
+  });
   $("#idea-new")?.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const d = formData(ev.currentTarget);
@@ -605,7 +700,7 @@ function bindCase(main, c, canEdit) {
       try { rules = JSON.parse(d.json); } catch { return showMsg($("#rules-msg"), "JSON không hợp lệ."); }
     } else {
       const { json: _j, dropMonth: _m, ...rest } = d;
-      rules = { ...rest, maxLinksPerPage: Number(d.maxLinksPerPage), maxNewArticlesPerMonth: Number(d.maxNewArticlesPerMonth), minVolume: Number(d.minVolume), autoRescanDays: Number(d.autoRescanDays) };
+      rules = { ...rest, maxLinksPerPage: Number(d.maxLinksPerPage), maxNewArticlesPerMonth: Number(d.maxNewArticlesPerMonth), minVolume: Number(d.minVolume), minQualityScore: Number(d.minQualityScore), autoRescanDays: Number(d.autoRescanDays) };
     }
     await busy(rf.querySelector("button[type=submit]"), "Đang lưu…", async () => {
       try { await api(`/api/recovery/${c.id}/rules`, { method: "PUT", body: { rules, dropMonth: d.dropMonth } }); await reload(); }

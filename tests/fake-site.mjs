@@ -109,10 +109,28 @@ export function fakeSite(opts = {}) {
   }
   async function openrouter(init) {
     const body = JSON.parse(init.body);
-    const user = JSON.parse(body.messages[1].content);
+    const m1 = body.messages[1].content;
+    const user = JSON.parse(Array.isArray(m1) ? m1[0].text : m1);
     const sys = body.messages[0].content;
+    seen.push({ template: sys.slice(0, 60), body });
     let content;
-    if (/planning ONE genuinely useful article/.test(sys)) {
+    if (/read ONE document supplied by the website owner/.test(sys)) {
+      content = { doc_type: "company_profile", title: "Firmenprofil", summary_vi: "Hồ sơ công ty CAD tại Đức.", audience: "TGA-Planer", tone: "sachlich", services: ["CAD-Dienstleistung TGA", "BIM-Modellierung"], products: [{ name: "Revit-Vorlagenpaket", specs: "Revit 2025", notes: "" }], facts: [{ text: "Seit 2009 über 1200 Projekte abgeschlossen", page: 2 }, { text: "Team aus 18 Zeichnern", page: 3 }], banned: ["Billiganbieter"], ideas: [{ title: "CAD Layer Vorlagen anlegen", keyword: "cad layer vorlagen", format: "how_to", why_vi: "Tài liệu mô tả quy trình." }] };
+    } else if (/strict senior editor/.test(sys)) {
+      const good = /Verbessert/.test(user.draft_html);
+      content = good ? { score: 86, criteria: [{ name: "intent", score: 88, note: "Ổn" }], issues: [], verdict: "Đạt" } : { score: 62, criteria: [{ name: "usefulness", score: 55, note: "Còn chung chung" }], issues: [{ where: "Kaufberatung", problem: "Chung chung", fix: "Thêm ví dụ cụ thể" }], verdict: "Cần sửa" };
+    } else if (/revise ONE article draft/.test(sys)) {
+      content = { html: `${user.draft_html}<p>Verbessert: Ein konkretes Beispiel aus einem Planungsbüro zeigt, wie die Auswahl im Alltag abläuft.</p>` };
+    } else if (/team lead of an SEO agent team/.test(sys)) {
+      const s0 = user.state.sites[0];
+      const approved = s0.ideas.find((i) => i.status === "approved");
+      content = { reply: `Em thấy ${s0.domain} có ${s0.profile.ideas_from_documents.length} gợi ý từ tài liệu.`, plan: [
+        { action: "create_article", site_id: s0.site_id, keyword: "cad layer vorlagen", format: "how_to", why: "Từ tài liệu" },
+        ...(approved ? [{ action: "write_brief", site_id: s0.site_id, idea_id: approved.idea_id, why: "Đã duyệt" }] : []),
+        { action: "delete_site", site_id: s0.site_id, why: "x" },
+        { action: "write_draft", site_id: s0.site_id, idea_id: 99999, why: "x" }
+      ], needs_from_owner: ["Ảnh thật cho bài how-to"] };
+    } else if (/planning ONE genuinely useful article/.test(sys)) {
       content = { title: `${user.keyword}: Leitfaden für Planer`, slug: user.keyword.replace(/\s+/g, "-"), angle: "Praxisnah", outline: [{ h2: "Worauf es ankommt", points: ["Grundlagen"], h3: [] }, { h2: "Ablauf", points: ["Schritte"], h3: [] }], faq: user.people_also_ask, expert_input: ["Eigenes Projektbeispiel"], meta_description: "Leitfaden für Planer.", internal_link_anchor: "CAD-Dienstleistung TGA" };
     } else if (/write ONE article draft/.test(sys) && user.format !== "article") {
       const para = (n, i) => `<p>Bei der Auswahl für ${n} zählt vor allem, wie gut das Werkzeug zum eigenen Arbeitsablauf passt, wie verständlich die Bedienung ist und wie zuverlässig der Hersteller Aktualisierungen bereitstellt (Teil ${String.fromCharCode(65 + i)}).</p>`;
@@ -132,6 +150,7 @@ export function fakeSite(opts = {}) {
     else content = { sentence: `Für die Umsetzung unterstützen Sie unsere Experten für ${user.target_page.title.split("|")[0].trim()}.`, anchor: user.target_page.title.split("|")[0].trim() };
     return jsonRes({ choices: [{ message: { content: JSON.stringify(content) } }], usage: { prompt_tokens: 500, completion_tokens: 80, cost: 0.0012 } });
   }
+  const seen = opts.seen || [];
   const cfs = opts.cf || { token: "cf-token", buckets: {}, workers: {}, routes: [] };
   async function cloudflare(u, init) {
     if ((init?.headers?.Authorization || "") !== `Bearer ${cfs.token}`) return jsonRes({ success: false, errors: [{ code: 10000, message: "Authentication error" }] }, 403);

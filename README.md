@@ -124,6 +124,13 @@ Khi tạo bài (Content Studio hoặc tab **Bài mới**), chọn định dạng
 - Site Astro không có bản nháp WordPress: bấm **Tải file Markdown cho Astro** (frontmatter `title`, `description`, `slug`, `heroImage`, `draft: true`, thân bài HTML) rồi đưa vào thư mục nội dung của repo.
 - Không chèn schema HowTo/FAQ (Google đã bỏ rich result của hai loại này).
 
+### Tài liệu site, Biên tập viên, Trưởng nhóm
+
+- **Tài liệu & Hồ sơ site** (đầu tab Bài mới): tải PDF (catalog, bảng giá, hồ sơ công ty, handover, quy trình). Agent Đọc tài liệu gửi PDF qua OpenRouter (plugin `file-parser`: `pdf-text` miễn phí, `mistral-ocr` cho PDF scan), rút dịch vụ, sản phẩm, dữ kiện có nguồn (kèm số trang), giọng văn, điều cấm và gợi ý bài kèm định dạng. Hồ sơ gộp từ mọi tài liệu, anh sửa tay được. Người viết chỉ dùng dữ kiện trong hồ sơ; số trong hồ sơ được Gác cổng coi là có nguồn; điều cấm vào blocklist. File PDF không lưu lại.
+- **Biên tập viên** chấm mỗi bài nháp 0–100 (model T2, khác người viết) theo khung định dạng và 6 tiêu chí (ý định, đúng khung, hữu ích, trải nghiệm thật, chính xác, dễ đọc), nêu tối đa 8 lỗi cụ thể. Dưới mức anh đặt (Luật an toàn, mặc định 75) thì Người viết sửa, tối đa 2 vòng; bản sửa làm mất token ảnh/nút mua bị bỏ. Dưới 60 thì Gác cổng chặn. Có nút Chấm lại và Sửa theo nhận xét.
+- **Trưởng nhóm** (Agent HQ › tab đầu): anh chat, Trưởng nhóm (model T3) đọc tình trạng thật của các site rồi trả lời và đề xuất việc cho agent sẵn có (nghiên cứu từ khoá, tạo chủ đề, dàn ý, viết, sửa và chấm, quét lại). Máy chủ kiểm từng việc (đúng site, đúng chủ đề, không trùng, đúng bước); anh chọn và bấm Giao việc. Việc nhẹ chạy ngay, việc nặng chạy ở cron (2 việc mỗi lượt) hoặc nút Chạy ngay. Trưởng nhóm không tự sửa site, không đăng bài, không thấy API key.
+- Sau deploy, admin duyệt 4 prompt mới ở Quản lý prompt: Đọc tài liệu, Biên tập viên chấm, Sửa bài, Trưởng nhóm.
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.

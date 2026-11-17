@@ -537,8 +537,8 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     // Agent HQ
     const hq = await c4("GET", "/api/hq");
     assert.equal(hq.status, 200);
-    assert.equal(hq.data.manager.promptsPending, 0);
-    assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 4);
+    assert.equal(hq.data.manager.promptsPending, 4, "chưa duyệt: đọc tài liệu, chấm bài, sửa bài, Trưởng nhóm");
+    assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 6);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
     globalThis.fetch = realFetch;
@@ -687,6 +687,91 @@ await test("định dạng bài: Best X có sản phẩm affiliate, công khai, 
     assert.match(code, /if \(!obj\) return fetch\(req\);/, "ảnh không có trong bucket thì chuyển về site");
     assert.ok(!/Not found/.test(code));
     assert.equal((await up("p1", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz")).status, 409);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+await test("tài liệu PDF → Hồ sơ site, Biên tập viên chấm và sửa bài, Trưởng nhóm lên phương án và giao việc", async () => {
+  const env6 = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const c6 = client(env6);
+  await c6("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await c6("PUT", "/api/settings", { secrets: { openrouter_api_key: "sk-or-test-123456", dataforseo_login: "me@example.com", dataforseo_password: "dfs-pass-123" } });
+  const realFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = fakeSite({ seen });
+  try {
+    const cr = await c6("POST", "/api/recovery", { url: "caddemo.de", language: "de", rules: { commercialPaths: ["/cad-dienstleistung-tga/"] } });
+    const caseId = cr.data.id;
+    const siteId = (await c6("GET", `/api/recovery/${caseId}`)).data.case.siteId;
+    await c6("PUT", `/api/recovery/${caseId}/rules`, { rules: { commercialPaths: ["/cad-dienstleistung-tga/"], maxNewArticlesPerMonth: 5 } });
+    const pdf = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.from("1 0 obj << >> endobj\n%%EOF")]);
+    // Prompt chưa duyệt: Quản lý chặn
+    assert.equal((await c6("POST", `/api/sites/${siteId}/docs?name=Firmenprofil.pdf`, pdf, { "Content-Type": "application/pdf" })).status, 403);
+    for (const p of (await c6("GET", "/api/manager/prompts")).data.prompts) assert.equal((await c6("PUT", `/api/manager/prompts/${p.id}`, { status: "approved" })).status, 200, p.id);
+    assert.equal((await c6("POST", `/api/sites/${siteId}/docs?name=x.pdf`, Buffer.from("not a pdf"), { "Content-Type": "application/pdf" })).status, 400);
+    const up = await c6("POST", `/api/sites/${siteId}/docs?name=Firmenprofil.pdf`, pdf, { "Content-Type": "application/pdf" });
+    assert.equal(up.status, 200, JSON.stringify(up.data));
+    const req = seen.find((x) => /read ONE document/.test(x.template)).body;
+    assert.equal(req.plugins[0].id, "file-parser");
+    assert.equal(req.plugins[0].pdf.engine, "pdf-text");
+    assert.match(req.messages[1].content[1].file.file_data, /^data:application\/pdf;base64,JVBERi0x/);
+    assert.equal((await c6("POST", `/api/sites/${siteId}/docs?name=Firmenprofil.pdf`, pdf, { "Content-Type": "application/pdf" })).status, 409);
+    let docs = await c6("GET", `/api/sites/${siteId}/docs`);
+    assert.equal(docs.data.docs[0].kind, "company_profile");
+    assert.ok(docs.data.profile.facts.some((f) => f.text.includes("1200") && f.source === "Firmenprofil.pdf, tr. 2"));
+    assert.deepEqual(docs.data.profile.ideas.map((i) => i.format), ["how_to"]);
+    // Anh sửa tay hồ sơ
+    const prof = { ...docs.data.profile, tone: "sachlich, per Sie" };
+    assert.equal((await c6("PUT", `/api/sites/${siteId}/profile`, prof)).status, 200);
+    // Viết bài: hồ sơ đi vào dàn ý/bài viết, số trong hồ sơ là có nguồn; Biên tập viên chấm 62 → sửa → 86
+    const idea = await c6("POST", `/api/content/${caseId}/ideas`, { keyword: "cad dienstleistung tga ablauf", format: "article", hub_path: "/cad-dienstleistung-tga/" });
+    await c6("PUT", `/api/content/ideas/${idea.data.id}`, { status: "approved" });
+    assert.equal((await c6("POST", `/api/content/ideas/${idea.data.id}/brief`)).status, 200);
+    const briefReq = seen.filter((x) => /planning ONE/.test(x.template)).pop().body;
+    const briefIn = JSON.parse(briefReq.messages[1].content);
+    assert.equal(briefIn.site_profile.tone, "sachlich, per Sie");
+    assert.match(briefReq.messages[0].content, /1200/, "số trong hồ sơ được phép dùng");
+    assert.match(briefReq.messages[0].content, /Billiganbieter/, "điều cấm trong tài liệu vào blocklist");
+    const dr = await c6("POST", `/api/content/ideas/${idea.data.id}/draft`);
+    assert.equal(dr.status, 200, JSON.stringify(dr.data));
+    let ct = await c6("GET", `/api/content/${caseId}`);
+    let it = ct.data.ideas.find((x) => x.id === idea.data.id);
+    assert.deepEqual(it.draft.review.rounds, [62, 86]);
+    assert.ok(it.draft.html.includes("Verbessert"));
+    assert.ok(!it.gate.problems.some((p) => p.rule === "quality"), JSON.stringify(it.gate.problems));
+    const rv = await c6("POST", `/api/content/ideas/${idea.data.id}/review`, { revise: false });
+    assert.equal(rv.status, 200);
+    // Trưởng nhóm: trả lời từ tình trạng thật, việc lạ/ID bịa bị đánh dấu không hợp lệ
+    const ap = await c6("POST", `/api/content/${caseId}/ideas`, { keyword: "bim modellierung kosten", format: "guide" });
+    await c6("PUT", `/api/content/ideas/${ap.data.id}`, { status: "approved" });
+    const lm = await c6("POST", "/api/lead/messages", { text: "Tháng này nên viết gì cho caddemo.de?" });
+    assert.equal(lm.status, 200, JSON.stringify(lm.data));
+    assert.match(lm.data.reply, /1 gợi ý từ tài liệu/);
+    const leadIn = JSON.parse(seen.filter((x) => /team lead/.test(x.template)).pop().body.messages[1].content);
+    assert.ok(!JSON.stringify(leadIn).includes("sk-or-test"), "không gửi key cho model");
+    assert.deepEqual(lm.data.plan.map((p) => [p.action, p.ok]), [["create_article", true], ["write_brief", true], ["delete_site", false], ["write_draft", false]]);
+    assert.deepEqual(lm.data.needs, ["Ảnh thật cho bài how-to"]);
+    assert.equal((await c6("POST", `/api/lead/messages/${lm.data.id}/run`, { items: [2] })).status, 400);
+    const run = await c6("POST", `/api/lead/messages/${lm.data.id}/run`, { items: [0, 1, 2] });
+    assert.equal(run.status, 200, JSON.stringify(run.data));
+    assert.equal(run.data.jobs.length, 2);
+    assert.equal((await c6("POST", `/api/lead/messages/${lm.data.id}/run`, { items: [0] })).status, 409);
+    let lv = await c6("GET", "/api/lead");
+    const jobs = Object.fromEntries(lv.data.jobs.map((j) => [j.action, j]));
+    assert.equal(jobs.create_article.status, "done", JSON.stringify(jobs.create_article));
+    assert.equal(jobs.write_brief.status, "queued");
+    ct = await c6("GET", `/api/content/${caseId}`);
+    assert.equal(ct.data.ideas.find((x) => x.keyword === "cad layer vorlagen").status, "approved");
+    const rj = await c6("POST", `/api/lead/jobs/${jobs.write_brief.id}/run`);
+    assert.equal(rj.data.ok, true, JSON.stringify(rj.data));
+    assert.equal((await c6("POST", `/api/lead/jobs/${jobs.write_brief.id}/run`)).data.ok, false);
+    lv = await c6("GET", "/api/lead");
+    assert.equal(lv.data.messages.length, 2);
+    assert.ok(lv.data.messages[1].ran_at);
+    const hq = await c6("GET", "/api/hq");
+    assert.equal(hq.data.lead.done, 2);
+    assert.ok(hq.data.zones.content.some((a) => a.id === "editor") && hq.data.zones.content.some((a) => a.id === "docs"));
   } finally {
     globalThis.fetch = realFetch;
   }

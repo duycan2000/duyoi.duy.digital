@@ -13,7 +13,7 @@ const ACTOR = { doctor: "Bác sĩ SEO", linker: "Nối link nội bộ", funnel:
 export async function viewHq(main, args, kit) {
   K = kit;
   if (args[0]) K.state.tabs.hq = args[0];
-  const [hq, prompts, spend] = await Promise.all([api("/api/hq"), api("/api/manager/prompts"), api("/api/manager/spend")]);
+  const [hq, prompts, spend, lead] = await Promise.all([api("/api/hq"), api("/api/manager/prompts"), api("/api/manager/spend"), api("/api/lead")]);
   const admin = K.state.user.role === "admin";
   main.innerHTML = `
   <div class="page">
@@ -22,11 +22,12 @@ export async function viewHq(main, args, kit) {
     ${hq.asks?.length ? `<div class="msg warn"><b>Agent đang hỏi anh (${hq.asks.length}):</b> ${hq.asks.slice(0, 4).map((a) => `<a href="#/recovery/${a.caseId}/content">${esc(a.domain)} · "${esc(a.keyword)}"</a>: ${esc(a.text)}`).join(" · ")}</div>` : ""}
     ${hq.manager.promptsPending ? `<div class="msg warn">${hq.manager.promptsPending} prompt chưa được duyệt: agent dùng prompt đó sẽ bị chặn. ${admin ? `<a href="#/hq/prompts" data-tab-go="prompts">Duyệt ngay</a>` : "Nhờ admin duyệt."}</div>` : ""}
     <div class="card tabbed">
-      ${K.tabsNav("hq", [["team", "Đội agent", "users"], ["prompts", `Quản lý prompt${hq.manager.promptsPending ? ` (${hq.manager.promptsPending})` : ""}`, "shield"], ["spend", "Chi tiêu", "money"], ["auto", "Tự động", "clock"]], "team")}
-      <div class="tab-body" ${K.panelAttr("hq", "team", "team")}>${teamHtml(hq, spend)}</div>
-      <div class="tab-body" ${K.panelAttr("hq", "prompts", "team")}>${promptsHtml(prompts.prompts, admin)}</div>
-      <div class="tab-body" ${K.panelAttr("hq", "spend", "team")}>${spendHtml(spend)}</div>
-      <div class="tab-body" ${K.panelAttr("hq", "auto", "team")}>${autoHtml(hq)}</div>
+      ${K.tabsNav("hq", [["lead", "Trưởng nhóm", "spark"], ["team", "Đội agent", "users"], ["prompts", `Quản lý prompt${hq.manager.promptsPending ? ` (${hq.manager.promptsPending})` : ""}`, "shield"], ["spend", "Chi tiêu", "money"], ["auto", "Tự động", "clock"]], "lead")}
+      <div class="tab-body" ${K.panelAttr("hq", "lead", "lead")}>${leadHtml(lead, hq, admin)}</div>
+      <div class="tab-body" ${K.panelAttr("hq", "team", "lead")}>${teamHtml(hq, spend)}</div>
+      <div class="tab-body" ${K.panelAttr("hq", "prompts", "lead")}>${promptsHtml(prompts.prompts, admin)}</div>
+      <div class="tab-body" ${K.panelAttr("hq", "spend", "lead")}>${spendHtml(spend)}</div>
+      <div class="tab-body" ${K.panelAttr("hq", "auto", "lead")}>${autoHtml(hq)}</div>
     </div>
   </div>`;
   K.bindTabs(main, "hq");
@@ -36,6 +37,7 @@ export async function viewHq(main, args, kit) {
     try { await api(`/api/manager/prompts/${b.dataset.id}`, { method: "PUT", body: { status: b.dataset.review } }); K.state.tabs.hq = "prompts"; await viewHq(main, [], K); }
     catch (e) { showMsg($("#prompt-msg"), e.message); }
   })));
+  bindLead(main);
   $$(".agent-card[data-href]", main).forEach((c) => c.addEventListener("click", () => { location.hash = c.dataset.href; }));
 }
 
@@ -57,8 +59,9 @@ function teamHtml(hq, spend) {
   const auto = { id: "autopilot", name: "Tự động", icon: "clock", role: "Cứ 15 phút: quét lại định kỳ, cho AI viết câu chèn, nghiên cứu từ khoá, lập dàn ý, viết nháp, tạo bản nháp WordPress. Không tự đăng, không tự duyệt việc sửa site.", state: hq.autopilot.sites.length ? "working" : "idle", detail: hq.autopilot.sites.length ? hq.autopilot.sites.map((x) => `${x.domain}: ${x.lastStep || "chưa chạy"}`).join(" · ") : "Chưa site nào bật. Bật ở Phục hồi › ca của site › Luật an toàn.", last: hq.autopilot.last };
   const zone = (key) => {
     const [, title, desc] = ZONES.find((z) => z[0] === key);
-    const agents = key === "manager" ? [manager] : key === "auto" ? [auto] : hq.zones[key];
-    return `<section class="zone z-${key}"><header><b>${esc(title)}</b><small>${esc(desc)}</small></header><div class="zone-grid">${agents.map((a) => agentCard(a, key === "recovery" ? "#/recovery" : key === "content" ? "#/recovery" : key === "manager" ? "#/hq/prompts" : null)).join("")}</div></section>`;
+    const leadCard = { id: "lead", name: "Trưởng nhóm", icon: "spark", role: "Anh chat trực tiếp: Trưởng nhóm đọc tình trạng thật của các site, trả lời và đề xuất phương án giao cho agent sẵn có. Anh chọn việc rồi bấm Giao việc.", state: hq.lead.blockedPrompt ? "blocked" : hq.lead.running ? "working" : hq.lead.queued ? "waiting" : "idle", detail: `${hq.lead.queued} việc chờ · ${hq.lead.running} đang chạy · ${hq.lead.done} xong${hq.lead.failed ? ` · ${hq.lead.failed} lỗi` : ""}`, spend: hq.lead.spend, last: hq.lead.last };
+    const agents = key === "manager" ? [leadCard, manager] : key === "auto" ? [auto] : hq.zones[key];
+    return `<section class="zone z-${key}"><header><b>${esc(title)}</b><small>${esc(desc)}</small></header><div class="zone-grid">${agents.map((a) => agentCard(a, a.id === "lead" ? "#/hq/lead" : key === "recovery" ? "#/recovery" : key === "content" ? "#/content" : key === "manager" ? "#/hq/prompts" : null)).join("")}</div></section>`;
   };
   return `<div class="hq-floor">${zone("manager")}${zone("auto")}${zone("recovery")}${zone("content")}</div>
     <h3 class="sub">${K.icon(K.ICON.list)}Agent vừa làm</h3>
@@ -110,4 +113,82 @@ function autoHtml(hq) {
     </ol>
     ${hq.autopilot.sites.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Site</th><th>Bước gần nhất</th><th>Lúc</th><th>Lỗi</th></tr></thead><tbody>${hq.autopilot.sites.map((x) => `<tr><td><a href="#/recovery/${x.caseId}">${esc(x.domain)}</a></td><td>${esc(x.lastStep || "chưa chạy")}</td><td>${esc(x.lastRun ? ago(x.lastRun) : "—")}</td><td>${x.lastError ? `<span class="tag err">${esc(x.lastError)}</span>` : "—"}</td></tr>`).join("")}</tbody></table></div>` : `<p class="note">Chưa site nào bật tự động.</p>`}
     <p class="note">Tạm dừng toàn bộ (nút ở Tổng quan) cũng dừng chế độ tự động.</p>`;
+}
+
+const ACTION_LABEL = { research_keywords: "Nghiên cứu từ khoá", create_article: "Tạo chủ đề bài mới", write_brief: "Lập dàn ý", write_draft: "Viết bài nháp (kèm chấm)", review_draft: "Sửa và chấm lại", rescan_site: "Quét lại site" };
+const FMT = { roundup: "Best X / Top N", review: "Review", comparison: "So sánh", how_to: "How-to", guide: "Guide", article: "Bài thông tin" };
+const JSTATUS = { queued: ["Chờ chạy", "warn"], running: ["Đang chạy", "info"], done: ["Xong", "ok"], failed: ["Lỗi", "err"] };
+const SUGGEST = ["Tháng này nên viết bài gì cho từng site?", "Bài nào đang chờ tôi (sản phẩm, ảnh)?", "Site nào nên ưu tiên phục hồi trước?", "Tài liệu tôi tải lên gợi ý được bài nào?"];
+
+function leadHtml(lead, hq, admin) {
+  const domains = Object.fromEntries((hq.autopilot.sites || []).map((s) => [s.siteId, s.domain]));
+  const msg = (m) => {
+    if (m.role === "user") return `<div class="bubble me"><p>${esc(m.content).replace(/\n/g, "<br>")}</p><time>${esc(fmtTime(m.at))}</time></div>`;
+    const items = m.plan?.items || [];
+    const can = !m.ran_at && items.some((x) => x.ok);
+    return `<div class="bubble lead"><p>${esc(m.content).replace(/\n/g, "<br>")}</p>
+      ${items.length ? `<form class="plan" data-plan="${m.id}">${items.map((x, n) => `<label class="plan-item${x.ok ? "" : " bad"}"><input type="checkbox" name="item" value="${n}"${x.ok && !m.ran_at ? " checked" : ""}${!x.ok || m.ran_at ? " disabled" : ""}>
+        <span><b>${esc(ACTION_LABEL[x.action] || x.action)}</b>${x.keyword ? ` · "${esc(x.keyword)}"` : ""}${x.format ? ` · ${esc(FMT[x.format] || x.format)}` : ""} <small>${esc(x.domain || domains[x.site_id] || `site #${x.site_id}`)}</small>
+        ${x.why ? `<small>${esc(x.why)}</small>` : ""}${x.ok ? "" : `<small class="err">Không giao được: ${esc(x.problem || "")}</small>`}</span></label>`).join("")}
+        ${can ? `<div class="toolbar"><button type="submit" class="primary">Giao việc đã chọn</button></div>` : m.ran_at ? `<small class="note">Đã giao ${esc(fmtTime(m.ran_at))}</small>` : ""}
+      </form>` : ""}
+      ${m.plan?.needs?.length ? `<div class="needs"><b>Anh cần đưa:</b><ul>${m.plan.needs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      <time>${esc(fmtTime(m.at))}</time></div>`;
+  };
+  return `<div class="lead-wrap">
+    <div class="chat">
+      ${hq.lead.blockedPrompt ? `<div class="msg warn">Prompt của Trưởng nhóm chưa được duyệt. ${admin ? `<a href="#/hq/prompts">Duyệt ở Quản lý prompt</a>.` : "Nhờ admin duyệt."}</div>` : ""}
+      <div class="chat-log" id="chat-log">${lead.messages.length ? lead.messages.map(msg).join("") : `<div class="bubble lead"><p>Chào anh, em là Trưởng nhóm. Anh hỏi em về tình hình các site hoặc giao mục tiêu (ví dụ: "tháng này 4 bài affiliate chất lượng cho site X"). Em sẽ đề xuất việc cho từng agent, anh chọn rồi bấm Giao việc. Em không tự sửa site hay đăng bài.</p></div>`}</div>
+      <div class="msg" id="lead-msg" hidden></div>
+      <form id="lead-form" class="composer">
+        <div class="chips">${SUGGEST.map((t) => `<button type="button" class="chip" data-suggest="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+        <textarea name="text" rows="3" maxlength="2000" placeholder="Hỏi hoặc giao mục tiêu cho đội agent…" aria-label="Tin nhắn cho Trưởng nhóm"></textarea>
+        <div class="toolbar"><button type="submit" class="primary">Gửi</button></div>
+      </form>
+    </div>
+    <div class="jobs">
+      <h3 class="sub">${K.icon(K.ICON.list)}Hàng việc</h3>
+      <p class="note">Việc nhẹ chạy ngay khi giao; việc nặng (dàn ý, viết, chấm, quét lại) chạy ở lượt cron 15 phút kế tiếp, hoặc anh bấm Chạy ngay.</p>
+      ${lead.jobs.length ? lead.jobs.map((j) => `<div class="job">
+        <div class="task-head"><b>${esc(j.label)}</b>${tag(JSTATUS[j.status] || [j.status, ""])}</div>
+        <small>${esc(j.domain || "")}${j.params.keyword ? ` · "${esc(j.params.keyword)}"` : ""} · ${esc(ago(j.created_at))}</small>
+        ${j.result ? `<small class="ok">${esc(j.result)}</small>` : ""}${j.error ? `<small class="err">${esc(j.error)}</small>` : ""}
+        ${j.status === "queued" ? `<button type="button" data-job-run="${j.id}">Chạy ngay</button>` : ""}
+      </div>`).join("") : `<p class="note">Chưa có việc nào.</p>`}
+    </div>
+  </div>`;
+}
+
+function bindLead(main) {
+  const log = $("#chat-log", main);
+  if (log) log.scrollTop = log.scrollHeight;
+  const form = $("#lead-form", main);
+  if (!form) return;
+  const ta = $("textarea", form);
+  $$("[data-suggest]", form).forEach((b) => b.addEventListener("click", () => { ta.value = b.dataset.suggest; ta.focus(); }));
+  ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) form.requestSubmit(); });
+  const again = async () => { K.state.tabs.hq = "lead"; await viewHq(main, [], K); };
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const text = ta.value.trim();
+    if (!text) return;
+    log.insertAdjacentHTML("beforeend", `<div class="bubble me"><p>${esc(text)}</p></div><div class="bubble lead typing"><p>Trưởng nhóm đang xem tình hình các site…</p></div>`);
+    log.scrollTop = log.scrollHeight;
+    busy(ev.submitter, "Đang hỏi…", async () => {
+      try { await api("/api/lead/messages", { method: "POST", body: { text } }); await again(); }
+      catch (e) { $(".typing", log)?.remove(); showMsg($("#lead-msg", main), e.message); }
+    });
+  });
+  $$("form[data-plan]", main).forEach((f) => f.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const items = $$('input[name="item"]:checked', f).map((x) => Number(x.value));
+    busy(ev.submitter, "Đang giao…", async () => {
+      try { await api(`/api/lead/messages/${f.dataset.plan}/run`, { method: "POST", body: { items } }); await again(); }
+      catch (e) { showMsg($("#lead-msg", main), e.message); }
+    });
+  }));
+  $$("[data-job-run]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang chạy…", async () => {
+    try { const r = await api(`/api/lead/jobs/${b.dataset.jobRun}/run`, { method: "POST" }); if (!r.ok) showMsg($("#lead-msg", main), r.error); await again(); }
+    catch (e) { showMsg($("#lead-msg", main), e.message); }
+  })));
 }

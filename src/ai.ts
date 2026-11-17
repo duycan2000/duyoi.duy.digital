@@ -13,6 +13,8 @@ export interface AiRun {
   rules: string;             // luật viết chung (writingRules) chèn vào {{RULES}}
   format?: string;           // khung định dạng (formatSpec) chèn vào {{FORMAT}}
   input: unknown;            // dữ liệu gửi kèm (JSON)
+  files?: { name: string; dataUrl: string }[];   // PDF gửi kèm (OpenRouter đọc bằng plugin file-parser)
+  pdfEngine?: "pdf-text" | "mistral-ocr";        // pdf-text miễn phí; mistral-ocr cho PDF scan (trả phí)
 }
 
 export async function aiJson<T>(env: Env, run: AiRun): Promise<T> {
@@ -39,9 +41,10 @@ export async function aiJson<T>(env: Env, run: AiRun): Promise<T> {
       body: JSON.stringify({
         model, temperature: 0.4, max_tokens: t.maxTokens,
         response_format: { type: "json_object" }, usage: { include: true },
-        messages: [{ role: "system", content: system }, { role: "user", content: user }]
+        messages: [{ role: "system", content: system }, { role: "user", content: run.files?.length ? [{ type: "text", text: user }, ...run.files.map((f) => ({ type: "file", file: { filename: f.name, file_data: f.dataUrl } }))] : user }],
+        ...(run.files?.length ? { plugins: [{ id: "file-parser", pdf: { engine: run.pdfEngine || "pdf-text" } }] } : {})
       }),
-      signal: AbortSignal.timeout(90000)
+      signal: AbortSignal.timeout(run.files?.length ? 150000 : 120000)
     });
   } catch (e) {
     await logCall(env, ctx, { status: "error", reason: (e as Error).message });
