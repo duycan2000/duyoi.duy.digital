@@ -31,7 +31,8 @@ export const DEFAULTS = {
   model_t2: "anthropic/claude-haiku-5.5",
   model_t3: "anthropic/claude-sonnet-5.5",
   model_image: "openai/gpt-image-2",
-  timezone: "Asia/Ho_Chi_Minh"
+  timezone: "Asia/Ho_Chi_Minh",
+  cloudflare_account_id: "-"
 } as const;
 type SettingKey = keyof typeof DEFAULTS;
 
@@ -49,6 +50,12 @@ function validValue(key: SettingKey, v: unknown): unknown {
     if (!Number.isFinite(n) || n < 0 || n > 100000) throw new HttpError(400, `${key} không hợp lệ.`, "validation");
     if (key === "free_guard_percent" && (n < 50 || n > 100)) throw new HttpError(400, "Ngưỡng chuyển sang trả phí nằm trong 50–100%.", "validation");
     return n;
+  }
+  if (key === "cloudflare_account_id") {
+    const s = String(v ?? "").trim().toLowerCase();
+    if (s === "" || s === "-") return "-";
+    if (!/^[a-f0-9]{32}$/.test(s)) throw new HttpError(400, "Account ID Cloudflare là chuỗi 32 ký tự (Cloudflare › trang tổng quan tài khoản › Account ID).", "validation");
+    return s;
   }
   if (typeof v !== "string" || !v.trim() || v.length > 120 || /\s/.test(v.trim())) throw new HttpError(400, `${key} không hợp lệ.`, "validation");
   return v.trim();

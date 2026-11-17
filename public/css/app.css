@@ -526,3 +526,4 @@ figure.thumb figcaption { color: var(--muted); font-size: 12px; margin-top: 4px;
 .fmt-grid p { margin: 4px 0 0; }
 a.btn { display: inline-block; text-decoration: none; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--primary); color: var(--primary); font-weight: 500; font-size: 13px; text-transform: uppercase; }
 a.btn.primary { background: var(--primary); color: #fff; }
+.gate li.ok { background: rgba(86, 202, 0, 0.1); color: #3f8a00; }

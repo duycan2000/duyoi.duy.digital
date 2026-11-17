@@ -356,7 +356,10 @@ function contentHtml(c, ct, canEdit) {
     const locked = !!i.wp_post_id || !canEdit;
     return `<details class="img-box"${miss && i.status === "drafted" ? " open" : ""}><summary>Ảnh thật (${i.slots.filter((s) => s.image).length}/${i.slots.length}${miss ? `, thiếu ${miss} bắt buộc` : ""})</summary>
       ${miss ? `<div class="msg warn">Người viết cần anh tải ${miss} ảnh thật. Ảnh tự chụp khi dùng sản phẩm là tốt nhất; ảnh nhà sản xuất chỉ khi có quyền dùng. Không dùng ảnh AI, không tải ảnh lấy từ Amazon. ${ct.media.mode === "r2" ? "Ảnh lưu ở Cloudflare R2, phục vụ qua tên miền ảnh của site" : "Ảnh lên thẳng Thư viện Media WordPress"}; app xoá dữ liệu vị trí GPS trong ảnh JPEG.</div>` : ""}
-      ${!ct.media.ready ? `<div class="msg">${esc(ct.media.why)}</div>` : ""}
+      ${!ct.media.ready ? `<div class="msg">${esc(ct.media.why)} <a href="#/settings/keys/cloudflare_api_token">Mở Cài đặt</a></div>` : ""}
+      ${ct.media.mode === "site" && ct.media.ready ? `<div class="msg ${ct.media.verified ? "ok" : "warn"}">${ct.media.verified ? `Ảnh lưu ở bucket R2 riêng của site, hiện tại ${esc(ct.media.base)}` : `Kho ảnh của site chưa chạy: bấm Dựng kho ảnh để app tạo bucket R2 riêng, Worker phục vụ ảnh và route ${esc(ct.media.base)}*, rồi tự kiểm tra.`}
+        <div class="toolbar">${K.state.user.role === "admin" && !ct.media.verified ? `<button type="button" class="primary" data-media-setup="${ct.media.siteId}">Dựng kho ảnh trên Cloudflare</button>` : ""}<button type="button" data-media-check="${ct.media.siteId}">Kiểm tra lại</button></div>
+        <ul class="gate" id="media-steps" hidden></ul></div>` : ""}
       <div class="slots">${i.slots.map((s) => `<div class="slot${s.image ? " done" : ""}">
         <div class="slot-head"><b>${esc(s.label)}</b>${tag(s.image ? ["Đã có", "ok"] : s.required ? ["Bắt buộc", "warn"] : ["Nên có", ""])}</div>
         ${s.image ? `<figure class="thumb"><img src="${esc(s.image.url)}" alt="${esc(s.image.alt)}"><figcaption>${esc(s.image.alt)}</figcaption></figure>` : ""}
@@ -569,6 +572,17 @@ function bindCase(main, c, canEdit) {
       } catch (e) { ideaMsg(e); }
     });
   }));
+  const mediaRun = (b, path, label) => busy(b, label, async () => {
+    const box = $("#media-steps");
+    try {
+      const r = await api(path, { method: "POST" });
+      box.innerHTML = r.steps.map((s) => `<li class="${s.ok ? "ok" : "block"}">${esc(s.message)}</li>`).join("");
+      box.hidden = false;
+      if (r.ok) { K.state.tabs.rec = "content"; setTimeout(reload, 1200); }
+    } catch (e) { box.innerHTML = `<li class="block">${esc(e.message)}</li>`; box.hidden = false; }
+  });
+  $$("[data-media-setup]", main).forEach((b) => b.addEventListener("click", () => mediaRun(b, `/api/sites/${b.dataset.mediaSetup}/media`, "Đang dựng…")));
+  $$("[data-media-check]", main).forEach((b) => b.addEventListener("click", () => mediaRun(b, `/api/sites/${b.dataset.mediaCheck}/media/check`, "Đang kiểm tra…")));
   $$("[data-export]", main).forEach((b) => b.addEventListener("click", () => busy(b, "Đang xuất…", async () => {
     try {
       const res = await fetch(`/api/content/ideas/${b.dataset.export}/export.md`, { credentials: "same-origin" });

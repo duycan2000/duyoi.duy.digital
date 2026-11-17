@@ -10,6 +10,7 @@ import { createUser, deleteUser, listUsers, resetUserPassword, updateUser } from
 import { aiRewriteTask, applyTask, archiveCase, createCase, decideTask, disavow, geoDraft, getCase, listCases, processRecoveryQueue, rescanCase, rollbackTask, updateRules } from "./recovery";
 import { wpSave, wpStatus, wpTest } from "./wordpress";
 import { listPrompts, reviewPrompt, spendReport } from "./manager";
+import { apiCheckMedia, apiSetupMedia } from "./cfmedia";
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { runAutopilot } from "./autopilot";
@@ -86,6 +87,8 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (ctMatch && !ctMatch[2] && m === "GET") return contentView(env, Number(ctMatch[1]));
   if (ctMatch && ctMatch[2] === "/research" && m === "POST") return apiResearch(env, user, Number(ctMatch[1]));
   if (ctMatch && ctMatch[2] === "/ideas" && m === "POST") return apiCreateIdea(env, req, user, Number(ctMatch[1]));
+  const mdMatch = path.match(/^\/api\/sites\/(\d+)\/media(\/check)?$/);
+  if (mdMatch && m === "POST") return mdMatch[2] ? apiCheckMedia(env, user, Number(mdMatch[1])) : apiSetupMedia(env, user, Number(mdMatch[1]));
   const imgMatch = path.match(/^\/api\/content\/ideas\/(\d+)\/images\/([a-z0-9]{2,6})$/);
   if (imgMatch && m === "POST") return apiUploadImage(env, req, user, Number(imgMatch[1]), imgMatch[2]!);
   if (imgMatch && m === "DELETE") return apiDeleteImage(env, user, Number(imgMatch[1]), imgMatch[2]!);

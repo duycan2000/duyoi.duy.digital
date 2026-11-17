@@ -638,11 +638,12 @@ await test("định dạng bài: Best X có sản phẩm affiliate, công khai, 
     const h2 = await c5("POST", `/api/content/${caseId}/ideas`, { keyword: "wie man cad layer anlegt", format: "how_to" });
     await c5("PUT", `/api/content/ideas/${h2.data.id}`, { status: "approved" });
     let ct2 = await c5("GET", `/api/content/${caseId}`);
-    assert.equal(ct2.data.media.mode, "r2");
+    assert.equal(ct2.data.media.mode, "site");
     assert.equal(ct2.data.media.ready, false);
     assert.equal((await c5("PUT", `/api/sites/${siteId}`, { mediaBaseUrl: "http://img.caddemo.de" })).status, 400);
     assert.equal((await c5("PUT", `/api/sites/${siteId}`, { mediaBaseUrl: "https://img.caddemo.de/" })).status, 200);
     ct2 = await c5("GET", `/api/content/${caseId}`);
+    assert.equal(ct2.data.media.mode, "r2");
     assert.equal(ct2.data.media.ready, true);
     // how-to cần dàn ý có photo_requests: gán tay để thử chỗ ảnh bước
     env5.DB.raw.prepare("UPDATE content_ideas SET status = 'briefed', brief = ? WHERE id = ?").run(JSON.stringify({ title: "CAD Layer anlegen", slug: "cad-layer-anlegen", outline: [], photo_requests: [{ key: "s1", what: "Ebenen-Dialog geöffnet" }] }), h2.data.id);
@@ -661,6 +662,26 @@ await test("định dạng bài: Best X có sản phẩm affiliate, công khai, 
     assert.match(ex.text, /\ndraft: true\n---\n<p>/);
     assert.match(ex.text, /heroImage: "https:\/\/caddemo\.de\/wp-content\/uploads\//);
     assert.match(ex.text, /rel="sponsored nofollow noopener"/);
+    // Site Astro trên Cloudflare: bucket riêng, Worker ảnh, route ten-mien/images/*, tự kiểm tra
+    await c5("PUT", `/api/sites/${siteId}`, { mediaBaseUrl: "" });
+    assert.equal((await c5("POST", `/api/sites/${siteId}/media`)).status, 400, "chưa có token/account");
+    assert.equal((await c5("PUT", "/api/settings", { values: { cloudflare_account_id: "abc" } })).status, 400);
+    await c5("PUT", "/api/settings", { values: { cloudflare_account_id: "0123456789abcdef0123456789abcdef" }, secrets: { cloudflare_api_token: "cf-token" } });
+    ct2 = await c5("GET", `/api/content/${caseId}`);
+    assert.deepEqual([ct2.data.media.mode, ct2.data.media.ready, ct2.data.media.verified], ["site", true, false]);
+    // Ảnh tải lên trước khi dựng kho: lưu được nhưng Gác cổng chặn vì site chưa phục vụ /images/
+    const early = await c5("POST", `/api/content/ideas/${h2.data.id}/images/s1?real=1&source=screenshot&alt=Ebenen-Dialog%20in%20CAD`, png, { "Content-Type": "image/png" });
+    assert.equal(early.status, 200, JSON.stringify(early.data));
+    assert.match(early.data.image.url, /^https:\/\/caddemo\.de\/images\/\d{4}\/\d{2}\/cad-layer-anlegen-s1-[a-z0-9]+\.png$/);
+    const setup = await c5("POST", `/api/sites/${siteId}/media`);
+    assert.equal(setup.status, 200, JSON.stringify(setup.data));
+    assert.equal(setup.data.ok, true, JSON.stringify(setup.data.steps));
+    assert.deepEqual(setup.data.steps.map((x) => x.step), ["bucket", "worker", "route", "verify"]);
+    const img = await (await globalThis.fetch(early.data.image.url)).arrayBuffer();
+    assert.equal(Buffer.from(img).subarray(0, 4).toString("hex"), "89504e47", "ảnh đọc được qua ten-mien/images/");
+    ct2 = await c5("GET", `/api/content/${caseId}`);
+    assert.equal(ct2.data.media.verified, true);
+    assert.equal((await c5("POST", `/api/sites/${siteId}/media`)).data.ok, true, "chạy lại không tạo route trùng");
     assert.equal((await up("p1", "real=1&source=own&alt=Planwerk%20Pro%20am%20Arbeitsplatz")).status, 409);
   } finally {
     globalThis.fetch = realFetch;

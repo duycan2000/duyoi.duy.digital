@@ -210,10 +210,10 @@ async function regate(env: Env, i: IdeaRow, c: CaseInfo, draft: Draft): Promise<
   const slots = slotsFor(i.format, products, brief.photo_requests || [], readImages(i.images));
   const html = renderDraft(draft.raw ?? draft.html, { format: i.format, products, slots, rules, preview: false });
   const f = formatOf(i.format);
-  const gate = checkArticle(html, rules, f.affiliate ? null : i.hub_path, {
-    minWords: f.minWords, extraNumbers: productNumbers(products),
-    extra: checkFormat({ format: i.format, title: draft.title, html, products, slots, rules })
-  });
+  const extra = checkFormat({ format: i.format, title: draft.title, html, products, slots, rules });
+  const media = await mediaReady(env, await mediaSite(env, c.site_id));
+  if (!media.verified && slots.some((s) => s.image)) extra.push({ rule: "media", level: "block", message: `Site chưa phục vụ ảnh ở ${media.base}: bấm "Dựng kho ảnh" (hoặc Kiểm tra lại) ở mục Ảnh thật.` });
+  const gate = checkArticle(html, rules, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: productNumbers(products), extra });
   const out = { ...draft, raw: draft.raw ?? draft.html, html, words: wordCount(html.replace(/<[^>]+>/g, " ")) };
   await env.DB.prepare("UPDATE content_ideas SET draft = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(out), JSON.stringify(gate), now(), i.id).run();
   return { draft: out, gate, slots };

@@ -549,7 +549,7 @@ function siteForm(main, site) {
         <label>Thị trường chính (mã quốc gia) <input name="market" maxlength="2" value="${esc(s.market)}" placeholder="US, AU, DE, CA…"></label>
         <label>Ngôn ngữ <input name="language" maxlength="5" value="${esc(s.language)}" placeholder="en, de…"></label>
         <label class="full" data-for="astro">Repo GitHub của site (owner/repo) <input name="repo" value="${esc(s.repo || "")}" placeholder="vd: duycan2000/golfgaragelab.com"></label>
-        <label class="full">Tên miền ảnh trên Cloudflare R2 (site Astro bắt buộc; site WordPress điền thì ảnh cũng lưu R2) <input name="mediaBaseUrl" type="url" value="${esc(s.mediaBaseUrl || "")}" placeholder="https://img.ten-mien.com"></label>
+        <label class="full">Tên miền ảnh dùng chung (không bắt buộc: site Astro mặc định có bucket riêng, ảnh ở ten-mien/images/) <input name="mediaBaseUrl" type="url" value="${esc(s.mediaBaseUrl || "")}" placeholder="https://img.ten-mien.com"></label>
         <label class="full">Ghi chú <textarea name="notes" maxlength="2000" placeholder="Luật riêng, đối thủ chính, điều agent cần biết…">${esc(s.notes || "")}</textarea></label>
         ${site ? `<label>Trạng thái <select name="status">${opt({ active: "Đang chạy", paused: "Tạm dừng", archived: "Lưu trữ (ẩn khỏi danh sách)" }, s.status)}</select></label>` : ""}
       </div>
@@ -643,7 +643,7 @@ const SECRET_HELP = {
   dataforseo_login: "app.dataforseo.com › API Access",
   dataforseo_password: "Mật khẩu API (khác mật khẩu đăng nhập web)",
   groq_api_key: "console.groq.com › API Keys (model free riêng tư)",
-  cloudflare_api_token: "Quyền: DNS Edit, Email Routing Edit, Email Sending, chỉ các zone của site",
+  cloudflare_api_token: "Quyền: Account › Workers R2 Storage Edit + Workers Scripts Edit (kho ảnh site Astro); Zone › Zone Read + Workers Routes Edit + DNS Edit, chỉ các zone của site. Điền Account ID ở tab Model AI & chi phí.",
   google_api_key: "Knowledge Graph Search API (cho tab Entity)",
   google_service_account: "Google Cloud › IAM › Service accounts › Keys › JSON. Bật Search Console API và Google Analytics Data API, rồi thêm email service account vào property GSC (Restricted) và GA4 (Viewer)."
 };
@@ -680,6 +680,7 @@ async function viewSettings(main, args = []) {
         <label>Múi giờ hiển thị <input name="timezone" value="${esc(v.timezone)}" ${admin ? "" : "disabled"}></label>
         <label>Trần OpenRouter mỗi tháng (USD) <input type="number" name="openrouter_monthly_cap_usd" min="0" step="1" value="${esc(v.openrouter_monthly_cap_usd)}" ${admin ? "" : "disabled"}></label>
         <label>Trần AI mỗi site trong 24 giờ (USD) <input type="number" name="ai_site_daily_cap_usd" min="0" step="0.5" value="${esc(v.ai_site_daily_cap_usd)}" ${admin ? "" : "disabled"}></label>
+        <label>Cloudflare Account ID (kho ảnh site Astro) <input name="cloudflare_account_id" value="${esc(v.cloudflare_account_id === "-" ? "" : v.cloudflare_account_id)}" maxlength="32" placeholder="32 ký tự, ở trang tổng quan tài khoản Cloudflare" ${admin ? "" : "disabled"}></label>
         <label>Trần DataForSEO mỗi tháng (USD) <input type="number" name="dataforseo_monthly_cap_usd" min="0" step="1" value="${esc(v.dataforseo_monthly_cap_usd)}" ${admin ? "" : "disabled"}></label>
       </div>
       <div class="msg" id="values-msg" hidden></div>

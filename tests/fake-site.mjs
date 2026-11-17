@@ -132,6 +132,30 @@ export function fakeSite(opts = {}) {
     else content = { sentence: `Für die Umsetzung unterstützen Sie unsere Experten für ${user.target_page.title.split("|")[0].trim()}.`, anchor: user.target_page.title.split("|")[0].trim() };
     return jsonRes({ choices: [{ message: { content: JSON.stringify(content) } }], usage: { prompt_tokens: 500, completion_tokens: 80, cost: 0.0012 } });
   }
+  const cfs = opts.cf || { token: "cf-token", buckets: {}, workers: {}, routes: [] };
+  async function cloudflare(u, init) {
+    if ((init?.headers?.Authorization || "") !== `Bearer ${cfs.token}`) return jsonRes({ success: false, errors: [{ code: 10000, message: "Authentication error" }] }, 403);
+    const p = u.pathname.replace("/client/v4", "");
+    const m = init?.method || "GET";
+    let r;
+    if ((r = p.match(/^\/accounts\/[a-f0-9]{32}\/r2\/buckets\/([a-z0-9-]+)$/)) && m === "GET") return cfs.buckets[r[1]] ? jsonRes({ success: true, result: { name: r[1] } }) : jsonRes({ success: false, errors: [{ code: 10006, message: "bucket not found" }] }, 404);
+    if (/^\/accounts\/[a-f0-9]{32}\/r2\/buckets$/.test(p) && m === "POST") { const name = JSON.parse(init.body).name; cfs.buckets[name] = {}; return jsonRes({ success: true, result: { name } }); }
+    if ((r = p.match(/^\/accounts\/[a-f0-9]{32}\/r2\/buckets\/([a-z0-9-]+)\/objects\/(.+)$/)) && m === "PUT") {
+      if (!cfs.buckets[r[1]]) return jsonRes({ success: false, errors: [{ message: "bucket not found" }] }, 404);
+      cfs.buckets[r[1]][decodeURIComponent(r[2])] = { bytes: new Uint8Array(init.body), type: init.headers["Content-Type"] };
+      return jsonRes({ success: true, result: {} });
+    }
+    if ((r = p.match(/^\/accounts\/[a-f0-9]{32}\/workers\/scripts\/([a-z0-9-]+)$/)) && m === "PUT") {
+      const meta = JSON.parse(await init.body.get("metadata").text());
+      const code = await init.body.get("worker.js").text();
+      cfs.workers[r[1]] = { bucket: meta.bindings.find((x) => x.type === "r2_bucket").bucket_name, code };
+      return jsonRes({ success: true, result: { id: r[1] } });
+    }
+    if (p === "/zones" && m === "GET") return jsonRes({ success: true, result: u.searchParams.get("name") === host ? [{ id: "zone1", name: host }] : [] });
+    if (p === "/zones/zone1/workers/routes" && m === "GET") return jsonRes({ success: true, result: cfs.routes });
+    if (p === "/zones/zone1/workers/routes" && m === "POST") { const b = JSON.parse(init.body); cfs.routes.push(b); return jsonRes({ success: true, result: { id: String(cfs.routes.length), ...b } }); }
+    return jsonRes({ success: false, errors: [{ message: `no route ${m} ${p}` }] }, 404);
+  }
   return async (input, init) => {
     const u = new URL(typeof input === "string" ? input : input.url);
     if (u.hostname === host && u.pathname === "/wp-json/wp/v2/media" && init?.method === "POST") {
@@ -141,6 +165,12 @@ export function fakeSite(opts = {}) {
       wp.media = wp.media || [];
       wp.media.push({ filename, type: init.headers["Content-Type"], alt: u.searchParams.get("alt_text"), bytes });
       return jsonRes({ id: 900 + wp.media.length, source_url: `https://${host}/wp-content/uploads/${filename}`, media_details: { width: 800, height: 600 } }, 201);
+    }
+    if (u.hostname === "api.cloudflare.com") return cloudflare(u, init);
+    if (u.hostname === host && u.pathname.startsWith("/images/") && cfs.routes.some((r) => r.pattern === `${host}/images/*`)) {
+      const w = cfs.workers[cfs.routes.find((r) => r.pattern === `${host}/images/*`).script];
+      const o = cfs.buckets[w.bucket]?.[decodeURIComponent(u.pathname.slice(8))];
+      return o ? new Response(o.bytes, { status: 200, headers: { "content-type": o.type } }) : new Response("Not found", { status: 404 });
     }
     if (u.hostname === "openrouter.ai") return openrouter(init);
     if (u.hostname === "api.dataforseo.com") return dataforseo(u, init);
