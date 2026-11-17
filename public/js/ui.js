@@ -44,3 +44,18 @@ export function formData(form) {
   }
   return out;
 }
+
+// Nhãn nổi trên viền ô nhập (kiểu outlined): bọc chữ đầu của <label> vào <span class="lbl">.
+export function floatLabels(root) {
+  for (const label of root.querySelectorAll("label:not(.check):not([data-fl])")) {
+    const field = label.querySelector("input:not([type=checkbox]):not([type=radio]), select, textarea");
+    const first = label.firstChild;
+    if (!field || !first || first.nodeType !== 3 || !first.textContent.trim()) continue;
+    const span = document.createElement("span");
+    span.className = "lbl";
+    span.textContent = first.textContent.trim();
+    label.replaceChild(span, first);
+    label.dataset.fl = "1";
+    label.classList.add("fl");
+  }
+}

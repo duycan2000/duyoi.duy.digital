@@ -2,9 +2,11 @@
 
 import { api, ApiError } from "./api.js";
 import { MENU, ITEMS, PHASES } from "./menu.js";
-import { $, $$, esc, fmtTime, ago, showMsg, busy, formData } from "./ui.js";
+import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
 const app = $("#app");
+// Mọi form được vẽ ra đều có nhãn nổi trên viền ô nhập
+new MutationObserver(() => floatLabels(app)).observe(app, { childList: true, subtree: true });
 const state = { user: null, appName: "Duy Ơi", paused: false };
 
 const PLATFORM = { astro: "Astro", wordpress: "WordPress", woocommerce: "WooCommerce" };
@@ -34,7 +36,15 @@ async function boot() {
 
 window.addEventListener("duyoi:unauthorized", () => { state.user = null; renderLogin("Phiên đăng nhập đã hết. Anh đăng nhập lại nhé."); });
 
-const AUTH_ART = () => `<div class="auth-art" aria-hidden="true"><span class="wave"></span></div>`;
+// Cây trang trí hai góc dưới màn đăng nhập, vẽ bằng SVG đơn giản
+const PLANT = (cls) => `<svg class="plant ${cls}" viewBox="0 0 120 220" aria-hidden="true">
+  <path d="M60 210 C60 150 58 110 62 60" stroke="#264cc8" stroke-opacity=".35" stroke-width="3" fill="none"/>
+  <path d="M61 70 C30 40 34 6 62 2 C88 8 92 42 61 70Z" fill="#264cc8" fill-opacity=".55"/>
+  <path d="M60 120 C24 112 8 80 20 62 C46 62 62 92 60 120Z" fill="#309ff7" fill-opacity=".55"/>
+  <path d="M61 150 C96 140 112 108 100 90 C74 92 58 122 61 150Z" fill="#264cc8" fill-opacity=".4"/>
+  <rect x="44" y="196" width="32" height="22" rx="3" fill="#c9cdd8"/>
+</svg>`;
+const AUTH_ART = () => `<div class="auth-art" aria-hidden="true"><span class="ground"></span>${PLANT("l")}${PLANT("r")}</div>`;
 
 // ---------------- Tạo admin đầu tiên ----------------
 
@@ -92,7 +102,7 @@ function renderLogin(notice = "") {
   app.innerHTML = `
   <div class="auth"><div class="auth-card">
     <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
-    <h2>Chào anh 👋🏻</h2>
+    <h2>Chào mừng tới ${esc(state.appName)}! 👋🏻</h2>
     <p class="lead">Đăng nhập để điều hành đội AI agent làm SEO, AEO, GEO cho các site của anh.</p>
     <form id="login-form" novalidate>
       <label>Email <input name="email" type="email" autocomplete="username" required></label>
@@ -175,6 +185,9 @@ const ICON = {
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c.8-4 4-6 8-6s7.2 2 8 6",
   users: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.7-3.5 3.3-5.5 6.5-5.5s5.8 2 6.5 5.5M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.8c1.9.7 3.1 2.5 3.5 5.2",
   plus: "M12 5v14M5 12h14",
+  search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4",
+  dot: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  circle: "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   chart: "M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-3",
   pen: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   shield: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z",
@@ -197,29 +210,46 @@ const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><pat
 
 // Thanh dưới cùng trên điện thoại: các màn dùng nhiều nhất + nút mở toàn bộ menu
 const TABBAR = [["overview", "Tổng quan"], ["sites", "Site"], ["activity", "Nhật ký"], ["settings", "Cài đặt"]];
+const ROLE_NAME = { admin: "Admin", editor: "Biên tập", viewer: "Chỉ xem" };
 const canSee = (item) => !item.admin || state.user?.role === "admin";
 const initials = (name) => (name || "?").trim().split(/\s+/).slice(-1)[0].slice(0, 1).toUpperCase();
 
 function renderShell() {
   app.innerHTML = `
-  <div class="shell">
+  <div class="shell${miniPref() ? " mini" : ""}" id="shell">
     <header class="topbar">
-      <button type="button" class="icon-btn menu-top" id="menu-top" aria-label="Mở menu">${icon(ICON.menu)}</button>
       <a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
-      <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
+      <div class="search" id="search">
+        <button type="button" class="icon-btn" id="search-btn" aria-label="Tìm màn hình">${icon(ICON.search)}</button>
+        <input id="search-input" type="search" placeholder="Tìm màn hình (Ctrl + K)" autocomplete="off" aria-label="Tìm màn hình" hidden>
+        <div class="pop search-pop" id="search-pop" hidden></div>
+      </div>
       <span class="spacer"></span>
-      <a class="user-chip" href="#/account" title="Tài khoản"><span class="who"><b>${esc(state.user.name)}</b><small>${state.user.role === "admin" ? "Admin" : esc(state.user.role)}</small></span><span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}<i></i></span></a>
-      <button type="button" class="icon-btn" data-logout aria-label="Đăng xuất" title="Đăng xuất">${icon(ICON.logout)}</button>
+      <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
+      <div class="user-wrap">
+        <button type="button" class="user-chip" id="user-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Menu tài khoản"><span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}<i></i></span></button>
+        <div class="pop user-pop" id="user-pop" role="menu" hidden>
+          <div class="user-head"><span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}<i></i></span><span><b>${esc(state.user.name)}</b><small>${esc(ROLE_NAME[state.user.role] || state.user.role)}</small></span></div>
+          <a role="menuitem" href="#/account">${icon(ICON.user)}Tài khoản</a>
+          ${state.user.role === "admin" ? `<a role="menuitem" href="#/settings">${icon(ICON.gear)}Cài đặt</a><a role="menuitem" href="#/members">${icon(ICON.users)}Thành viên</a>` : ""}
+          <a role="menuitem" href="#/activity">${icon(ICON.list)}Nhật ký</a>
+          <hr>
+          <button type="button" role="menuitem" data-logout>${icon(ICON.logout)}Đăng xuất</button>
+        </div>
+      </div>
     </header>
     <div class="scrim" id="scrim" hidden></div>
     <nav class="side" id="side" aria-label="Menu chính">
       <div class="side-top"><a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
+      <button type="button" class="icon-btn" id="side-mini" aria-label="Thu gọn menu" title="Thu gọn menu">${icon(ICON.dot)}</button>
       <button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">${icon(ICON.close)}</button></div>
       <div class="side-nav">
-        ${MENU.map((g) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${g.items.filter(canSee).map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
+        ${MENU.map((g) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${g.items.filter(canSee).map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}" title="${esc(i.label)}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
       </div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
+    <footer class="foot"><span>© ${new Date().getFullYear()}, ${esc(state.appName)} · AI agent làm SEO cho site của anh</span>
+      <nav><a href="#/overview">Tổng quan</a><a href="#/sites">Site</a><a href="#/activity">Nhật ký</a><a href="#/account">Tài khoản</a></nav></footer>
     <nav class="tabbar" aria-label="Lối tắt">
       ${TABBAR.map(([id, label]) => `<a href="#/${id}" data-tab="${id}">${icon(itemIcon(id))}<span>${esc(label)}</span></a>`).join("")}
       <button type="button" id="menu-btn" aria-controls="side" aria-expanded="false">${icon(ICON.menu)}<span>Menu</span></button>
@@ -232,13 +262,90 @@ function renderShell() {
     renderLogin();
   }));
   $("#menu-btn").addEventListener("click", () => toggleMenu(true));
-  $("#menu-top").addEventListener("click", () => toggleMenu(true));
+  $("#side-mini").addEventListener("click", () => {
+    const mini = $("#shell").classList.toggle("mini");
+    try { localStorage.setItem("duyoi_mini", mini ? "1" : ""); } catch { /* không lưu được thì thôi */ }
+  });
+  bindUserMenu();
+  bindSearch();
   $("#side-close").addEventListener("click", () => toggleMenu(false));
   $("#scrim").addEventListener("click", () => toggleMenu(false));
   $$(".side a.item").forEach((a) => a.addEventListener("click", () => toggleMenu(false)));
-  document.onkeydown = (e) => { if (e.key === "Escape" && document.body.classList.contains("menu-open")) toggleMenu(false); };
+  document.onkeydown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openSearch(); return; }
+    if (e.key !== "Escape") return;
+    if (document.body.classList.contains("menu-open")) toggleMenu(false);
+    closePops();
+  };
   window.onhashchange = route;
   route();
+}
+
+function miniPref() {
+  try { return localStorage.getItem("duyoi_mini") === "1"; } catch { return false; }
+}
+
+function closePops() {
+  const up = $("#user-pop");
+  if (up && !up.hidden) { up.hidden = true; $("#user-btn").setAttribute("aria-expanded", "false"); }
+  closeSearch();
+}
+
+function bindUserMenu() {
+  const btn = $("#user-btn");
+  const pop = $("#user-pop");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = pop.hidden;
+    closePops();
+    pop.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  });
+  pop.addEventListener("click", (e) => { if (e.target.closest("a")) closePops(); });
+  document.onclick = (e) => { if (!e.target.closest(".user-wrap, .search")) closePops(); };
+}
+
+// Tìm nhanh một màn trong menu (không gọi API)
+function openSearch() {
+  const input = $("#search-input");
+  if (!input) return;
+  $("#search").classList.add("open");
+  input.hidden = false;
+  input.focus();
+  renderSearch("");
+}
+
+function closeSearch() {
+  const input = $("#search-input");
+  if (!input || input.hidden) return;
+  input.value = "";
+  input.hidden = true;
+  $("#search-pop").hidden = true;
+  $("#search").classList.remove("open");
+}
+
+function renderSearch(q) {
+  const norm = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+  const nq = norm(q.trim());
+  const hits = Object.entries(ITEMS).filter(([, i]) => canSee(i) && (!nq || norm(i.label).includes(nq))).slice(0, 8);
+  const pop = $("#search-pop");
+  pop.innerHTML = hits.length
+    ? hits.map(([id, i], n) => `<a href="#/${id}" class="${n === 0 ? "first" : ""}">${icon(itemIcon(id))}<span>${esc(i.label)}</span>${i.live ? "" : `<em>Sắp có</em>`}</a>`).join("")
+    : `<p class="note">Không có màn nào khớp.</p>`;
+  pop.hidden = false;
+}
+
+function bindSearch() {
+  const input = $("#search-input");
+  $("#search-btn").addEventListener("click", (e) => { e.stopPropagation(); input.hidden ? openSearch() : closeSearch(); });
+  input.addEventListener("input", () => renderSearch(input.value));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const first = $("#search-pop a");
+      if (first) { location.hash = first.getAttribute("href"); closeSearch(); }
+    }
+  });
+  $("#search-pop").addEventListener("click", (e) => { if (e.target.closest("a")) closeSearch(); });
 }
 
 function toggleMenu(open) {
@@ -285,6 +392,27 @@ function route() {
   });
   main.focus({ preventScroll: true });
   window.scrollTo(0, 0);
+}
+
+// ---------------- Thẻ có tab (kiểu Account Settings của mẫu) ----------------
+
+state.tabs = {};
+const tabsNav = (id, tabs, active) => `<nav class="tabs" role="tablist" data-tabs="${id}">${tabs.map(([k, l, ic]) =>
+  `<button type="button" role="tab" data-tab-key="${k}" aria-selected="${k === active}" class="${k === active ? "on" : ""}">${icon(ICON[ic])}<span>${esc(l)}</span></button>`).join("")}</nav>`;
+const tabOf = (id, def) => state.tabs[id] || def;
+const panelAttr = (id, key, def) => `data-panel="${key}"${tabOf(id, def) === key ? "" : " hidden"}`;
+
+function bindTabs(root, id) {
+  const nav = $(`[data-tabs="${id}"]`, root);
+  if (!nav) return;
+  nav.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tab-key]");
+    if (!b) return;
+    const k = b.dataset.tabKey;
+    state.tabs[id] = k;
+    $$("[data-tab-key]", nav).forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-selected", String(x === b)); });
+    $$("[data-panel]", nav.parentElement).forEach((p) => { p.hidden = p.dataset.panel !== k; });
+  });
 }
 
 // ---------------- Tổng quan ----------------
@@ -445,7 +573,9 @@ async function viewSettings(main) {
       ? `<code>ENCRYPTION_KEY</code> đã có nhưng sai định dạng: cần đúng 32 byte mã hoá base64 (44 ký tự, kết thúc bằng <code>=</code>). Tạo lại giá trị và sửa secret.`
       : `Worker chưa có secret <code>ENCRYPTION_KEY</code> nên chưa lưu được API key.`}
       Cách đặt: Cloudflare › Workers &amp; Pages › duyoi › Settings › Variables and Secrets › Add, chọn Type <b>Secret</b>, tên <code>ENCRYPTION_KEY</code>. Lưu xong tải lại trang này.</div>`}
-    <div class="card"><h3>API key</h3>
+    <div class="card tabbed">
+      ${tabsNav("settings", [["keys", "API key", "shield"], ["models", "Model AI & chi phí", "sliders"]], "keys")}
+      <div class="tab-body" ${panelAttr("settings", "keys", "keys")}>
       ${Object.entries(s.secrets).map(([k, info]) => `
         <div class="secret-row">
           <div><b>${esc(info.label)}</b><small>${info.set ? `Đã lưu ${esc(info.hint)} · ${esc(fmtTime(info.updatedAt))}` : "Chưa có"}</small></div>
@@ -453,14 +583,13 @@ async function viewSettings(main) {
           <div class="toolbar">${admin ? `<button type="button" data-save="${k}" ${s.encryptionReady ? "" : "disabled"}>Lưu</button>${info.set ? `<button type="button" class="danger" data-clear="${k}">Xoá</button>` : ""}` : ""}</div>
         </div>`).join("")}
       <div class="msg" id="secret-msg" hidden></div>
-    </div>
-
-    <form class="card" id="values-form" novalidate><h3>Model AI theo tầng (rẻ trước)</h3>
+      </div>
+    <form class="tab-body" id="values-form" novalidate ${panelAttr("settings", "models", "keys")}><h3 class="sub">Model AI theo tầng (rẻ trước)</h3>
       <div class="form-grid">${MODEL_FIELDS.map(([k, l]) => `<label>${esc(l)}<input name="${k}" value="${esc(v[k])}" ${admin ? "" : "disabled"}></label>`).join("")}</div>
       <label class="check"><input type="checkbox" name="free_models_enabled" ${v.free_models_enabled ? "checked" : ""} ${admin ? "" : "disabled"}><span>Dùng model free cho việc nền<small>Dữ liệu riêng (thư, GSC, GA4) không bao giờ gửi tới OpenRouter free.</small></span></label>
-      <h3>Trần chi phí</h3>
+      <h3 class="sub">Trần chi phí</h3>
       <div class="form-grid">
-        <label>Chuyển sang model trả phí khi đã dùng (%) lượt free <input type="number" name="free_guard_percent" min="50" max="100" value="${esc(v.free_guard_percent)}" ${admin ? "" : "disabled"}></label>
+        <label>Ngưỡng lượt free trước khi đổi sang trả phí (%) <input type="number" name="free_guard_percent" min="50" max="100" value="${esc(v.free_guard_percent)}" ${admin ? "" : "disabled"}></label>
         <label>Múi giờ hiển thị <input name="timezone" value="${esc(v.timezone)}" ${admin ? "" : "disabled"}></label>
         <label>Trần OpenRouter mỗi tháng (USD) <input type="number" name="openrouter_monthly_cap_usd" min="0" step="1" value="${esc(v.openrouter_monthly_cap_usd)}" ${admin ? "" : "disabled"}></label>
         <label>Trần DataForSEO mỗi tháng (USD) <input type="number" name="dataforseo_monthly_cap_usd" min="0" step="1" value="${esc(v.dataforseo_monthly_cap_usd)}" ${admin ? "" : "disabled"}></label>
@@ -468,7 +597,9 @@ async function viewSettings(main) {
       <div class="msg" id="values-msg" hidden></div>
       ${admin ? `<div class="toolbar"><button class="primary" type="submit">Lưu cài đặt</button></div>` : ""}
     </form>
+    </div>
   </div>`;
+  bindTabs(main, "settings");
 
   $$("[data-save]", main).forEach((btn) => btn.addEventListener("click", () => {
     const k = btn.dataset.save;
@@ -509,25 +640,42 @@ async function viewSettings(main) {
 
 async function viewAccount(main) {
   const { sessions } = await api("/api/auth/sessions");
+  const u = state.user;
   main.innerHTML = `
   <div class="page">
-    <div class="page-head"><div><h2>Tài khoản</h2><p>${esc(state.user.name)} · ${esc(state.user.email)} · ${state.user.role === "admin" ? "Admin" : esc(state.user.role)}</p></div></div>
-    <div class="grid2">
-      <form class="card" id="pw-form" novalidate><h3>Đổi mật khẩu</h3>
-        <label>Mật khẩu hiện tại <input name="current" type="password" autocomplete="current-password" required></label>
-        <label>Mật khẩu mới (ít nhất 10 ký tự) <input name="next" type="password" autocomplete="new-password" required minlength="10"></label>
-        <label>Nhập lại mật khẩu mới <input name="next2" type="password" autocomplete="new-password" required minlength="10"></label>
-        <div class="msg" id="pw-msg" hidden></div>
-        <div class="toolbar"><button class="primary" type="submit">Đổi mật khẩu</button></div>
-        <p class="note">Đổi xong, các thiết bị khác sẽ bị đăng xuất.</p>
-      </form>
-      <div class="card"><h3>Phiên đang đăng nhập</h3>
-        <div class="tablewrap"><table><thead><tr><th>Thiết bị</th><th>Từ</th><th>Hết hạn</th></tr></thead><tbody>
+    <div class="page-head"><div><h2>Tài khoản</h2><p>Thông tin đăng nhập và bảo mật của anh.</p></div></div>
+    <div class="card tabbed">
+      ${tabsNav("account", [["info", "Tài khoản", "user"], ["security", "Bảo mật", "shield"]], "info")}
+      <div class="tab-body" ${panelAttr("account", "info", "info")}>
+        <div class="profile"><span class="avatar xl" aria-hidden="true">${esc(initials(u.name))}</span>
+          <div><b>${esc(u.name)}</b><small>${esc(ROLE_NAME[u.role] || u.role)}</small><p class="note">Tên, email và quyền do admin quản lý ở màn Thành viên.</p></div></div>
+        <div class="form-grid">
+          <label>Tên hiển thị <input value="${esc(u.name)}" readonly></label>
+          <label>Email đăng nhập <input value="${esc(u.email)}" readonly></label>
+          <label>Quyền <input value="${esc(ROLE_NAME[u.role] || u.role)}" readonly></label>
+          <label>Trạng thái <input value="Đang hoạt động" readonly></label>
+        </div>
+      </div>
+      <div class="tab-body" ${panelAttr("account", "security", "info")}>
+        <form class="pw-grid" id="pw-form" novalidate>
+          <div class="pw-fields">
+            <label>Mật khẩu hiện tại <input name="current" type="password" autocomplete="current-password" required></label>
+            <label>Mật khẩu mới (ít nhất 10 ký tự) <input name="next" type="password" autocomplete="new-password" required minlength="10"></label>
+            <label>Nhập lại mật khẩu mới <input name="next2" type="password" autocomplete="new-password" required minlength="10"></label>
+            <div class="msg" id="pw-msg" hidden></div>
+            <div class="toolbar"><button class="primary" type="submit">Đổi mật khẩu</button></div>
+            <p class="note">Đổi xong, các thiết bị khác sẽ bị đăng xuất.</p>
+          </div>
+          <div class="pw-side"><span class="lock-ic">${icon(ICON.shield)}</span><b>Giữ tài khoản an toàn</b><p class="note">Dùng mật khẩu dài, không trùng với site khác. Nếu thấy phiên lạ bên dưới, đổi mật khẩu để đăng xuất tất cả.</p></div>
+        </form>
+        <h3 class="sub">${icon(ICON.list)}Phiên đang đăng nhập</h3>
+        <div class="tablewrap boxed"><table><thead><tr><th>Thiết bị</th><th>Từ</th><th>Hết hạn</th></tr></thead><tbody>
           ${sessions.map((x) => `<tr><td>${esc((x.userAgent || "—").slice(0, 60))}${x.current ? ` <span class="tag ok">thiết bị này</span>` : ""}<small>${esc(x.ip || "")}</small></td><td>${esc(fmtTime(x.createdAt))}</td><td>${esc(fmtTime(x.expiresAt))}</td></tr>`).join("")}
         </tbody></table></div>
       </div>
     </div>
   </div>`;
+  bindTabs(main, "account");
   const form = $("#pw-form");
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
