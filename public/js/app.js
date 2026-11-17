@@ -34,12 +34,7 @@ async function boot() {
 
 window.addEventListener("duyoi:unauthorized", () => { state.user = null; renderLogin("Phiên đăng nhập đã hết. Anh đăng nhập lại nhé."); });
 
-const AUTH_ART = () => `<aside class="auth-art" aria-hidden="true">
-      <div class="art"><span></span><span></span><span></span><span></span><i>${icon(ICON.trend)}</i></div>
-      <b>${esc(state.appName)}</b>
-      <p>Đội AI agent làm SEO, AEO và GEO cho các site của anh.</p>
-      <ul><li>Từ khoá và câu hỏi thật</li><li>Viết bài, chấm điểm, tự sửa</li><li>Thứ hạng, backlink, AI</li></ul>
-    </aside>`;
+const AUTH_ART = () => `<div class="auth-art" aria-hidden="true"><span class="wave"></span></div>`;
 
 // ---------------- Tạo admin đầu tiên ----------------
 
@@ -97,8 +92,8 @@ function renderLogin(notice = "") {
   app.innerHTML = `
   <div class="auth"><div class="auth-card">
     <div class="logo"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></div>
-    <h2>Đăng nhập</h2>
-    <p class="lead">Nền tảng AI agent làm SEO, AEO, GEO cho các site của anh.</p>
+    <h2>Chào anh 👋🏻</h2>
+    <p class="lead">Đăng nhập để điều hành đội AI agent làm SEO, AEO, GEO cho các site của anh.</p>
     <form id="login-form" novalidate>
       <label>Email <input name="email" type="email" autocomplete="username" required></label>
       <label>Mật khẩu <input name="password" type="password" autocomplete="current-password" required></label>
@@ -161,21 +156,19 @@ function renderShell() {
   app.innerHTML = `
   <div class="shell">
     <header class="topbar">
+      <button type="button" class="icon-btn menu-top" id="menu-top" aria-label="Mở menu">${icon(ICON.menu)}</button>
       <a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
-      <span class="pill" id="sys-pill-m"><i></i><span>Đang chạy</span></span>
+      <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
+      <span class="spacer"></span>
+      <a class="user-chip" href="#/account" title="Tài khoản"><span class="who"><b>${esc(state.user.name)}</b><small>${state.user.role === "admin" ? "Admin" : esc(state.user.role)}</small></span><span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}<i></i></span></a>
+      <button type="button" class="icon-btn" data-logout aria-label="Đăng xuất" title="Đăng xuất">${icon(ICON.logout)}</button>
     </header>
     <div class="scrim" id="scrim" hidden></div>
     <nav class="side" id="side" aria-label="Menu chính">
-      <a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
-      <span class="pill" id="sys-pill"><i></i><span>Đang chạy</span></span>
-      <div class="side-head"><b>Menu</b><button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">${icon(ICON.close)}</button></div>
+      <div class="side-top"><a class="brand" href="#/overview"><img src="/favicon.svg" alt=""><b>${esc(state.appName)}</b></a>
+      <button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">${icon(ICON.close)}</button></div>
       <div class="side-nav">
-        ${MENU.map((g) => `<div class="group g-${g.key}"><p>${esc(g.group)}</p>${g.items.map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
-      </div>
-      <div class="side-foot">
-        <span class="avatar" aria-hidden="true">${esc(initials(state.user.name))}</span>
-        <span class="who"><b>${esc(state.user.name)}</b><small>${state.user.role === "admin" ? "Admin" : esc(state.user.role)}</small></span>
-        <button type="button" class="icon-btn" data-logout aria-label="Đăng xuất" title="Đăng xuất">${icon(ICON.logout)}</button>
+        ${MENU.map((g) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${g.items.map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
       </div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
@@ -191,6 +184,7 @@ function renderShell() {
     renderLogin();
   }));
   $("#menu-btn").addEventListener("click", () => toggleMenu(true));
+  $("#menu-top").addEventListener("click", () => toggleMenu(true));
   $("#side-close").addEventListener("click", () => toggleMenu(false));
   $("#scrim").addEventListener("click", () => toggleMenu(false));
   $$(".side a.item").forEach((a) => a.addEventListener("click", () => toggleMenu(false)));
@@ -217,7 +211,7 @@ function toggleMenu(open) {
 
 function setPill(paused) {
   state.paused = paused;
-  $$("#sys-pill, #sys-pill-m").forEach((pill) => {
+  $$("#sys-pill").forEach((pill) => {
     pill.classList.toggle("paused", paused);
     pill.querySelector("span").textContent = paused ? "Đang tạm dừng" : "Đang chạy";
   });
@@ -285,7 +279,7 @@ async function viewOverview(main) {
   }));
 }
 
-const actRow = (a) => `<div><time>${esc(fmtTime(a.at))}</time><span>${esc(a.detail || a.action)}${a.site ? ` · <b>${esc(a.site)}</b>` : ""}</span></div>`;
+const actRow = (a) => `<div><span>${esc(a.detail || a.action)}${a.site ? ` · <b>${esc(a.site)}</b>` : ""}</span><time>${esc(fmtTime(a.at))}</time></div>`;
 
 // ---------------- Site ----------------
 
