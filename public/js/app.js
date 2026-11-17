@@ -432,6 +432,7 @@ const kpi = (tone, ic, value, label, href, cls = "") => `<a class="kpi ${tone}" 
 // Mỗi bước "Bắt đầu" dẫn tới đúng chỗ cần làm
 const CHECK_LINK = {
   encryption: "#/settings/keys",
+  prompts: "#/hq/prompts",
   openrouter: "#/settings/keys/openrouter_api_key",
   dataforseo: "#/settings/keys/dataforseo_login",
   site: "#/sites/new",

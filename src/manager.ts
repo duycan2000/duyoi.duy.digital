@@ -40,7 +40,7 @@ export const PROMPTS: PromptTemplate[] = [
     input: "Bài nháp (HTML kèm các token [[...]]), định dạng, từ khoá, dàn ý, sản phẩm, Hồ sơ site, câu hỏi People Also Ask."
   },
   {
-    id: "article_revise", agent: "writer", title: "Sửa bài theo nhận xét của Biên tập viên", tier: "model_writer", maxTokens: 6000,
+    id: "article_revise", agent: "writer", title: "Sửa bài theo nhận xét của Biên tập viên", tier: "model_writer", maxTokens: 8000,
     system: "You revise ONE article draft to fix the editor's issues and the structure problems listed in the input; add any missing section the FORMAT requires. Keep the author's voice (input.voice) and never add stock phrases listed in RULES. Change only what the issues require; keep everything else as it is. Keep the FORMAT structure, keep every [[...]] token exactly as written and in the same section, keep the internal link and every source link. Use only facts from the input. Output clean HTML using only <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td> plus the tokens. Return JSON {html}.\n{{FORMAT}}\n{{RULES}}",
     input: "Bài nháp hiện tại, danh sách lỗi Biên tập viên nêu, dàn ý, sản phẩm, Hồ sơ site."
   },
@@ -70,7 +70,7 @@ export const PROMPTS: PromptTemplate[] = [
     input: "Định dạng bài, loại site, từ khoá, lượng tìm kiếm, ý định, trang dịch vụ đích, sản phẩm anh nhập (tên, dùng cho ai, đã dùng thật chưa), tiêu đề top kết quả Google, câu hỏi People Also Ask, các trang có sẵn của site (để tránh trùng). Trả về JSON {title, slug, angle, outline[{h2, points[], h3[]}], faq[], expert_input[], photo_requests[{key, what}], interview[], meta_description, internal_link_anchor}."
   },
   {
-    id: "article_draft", agent: "writer", title: "Viết bài nháp từ dàn ý", tier: "model_writer", maxTokens: 6000,
+    id: "article_draft", agent: "writer", title: "Viết bài nháp từ dàn ý", tier: "model_writer", maxTokens: 8000,
     system: "You write ONE article draft from an approved outline, following the FORMAT below exactly. Write like an experienced practitioner talking to a peer: concrete examples, plain words, varied sentence length with some short sentences, short paragraphs, no filler intro, no conclusion that repeats everything. Follow input.voice when given (person, formality, sentence style; the excerpts show the site's real tone, never copy them). Weave the owner's interview answers in as first-hand experience, without inventing more. input.web_facts come from other websites found on Google: use them only with attribution and a link to their source_url in the same sentence (for example: according to <a href=\"source_url\">source_title</a>), and never present them as the owner's own experience or tests. Never use the stock phrases listed in RULES. Use only facts given in the input (outline, products, specs, owner notes) or general well-known knowledge stated without numbers. If a service page is given, include exactly one natural internal link to it using the given anchor; the only other links allowed are source links for web_facts. Output clean HTML using only <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <a>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, plus the tokens the format asks for.\n{{FORMAT}}\n{{RULES}}",
     input: "Định dạng, dàn ý đã duyệt, giọng văn site, câu trả lời phỏng vấn của anh, sản phẩm (tên, nơi bán, dùng cho ai, đã dùng thật chưa, ghi chú trải nghiệm, thông số, ưu/nhược anh nhập), các chỗ ảnh thật, trang dịch vụ đích + anchor, câu hỏi FAQ. Link affiliate và ảnh do hệ thống chèn, model không thấy URL. Trả về JSON {title, html, meta_description}."
   }
@@ -84,7 +84,7 @@ export function lintPrompt(t: PromptTemplate): { ok: boolean; issues: string[] }
   const issues: string[] = [];
   if (!t.system.includes("{{RULES}}")) issues.push("Thiếu chỗ chèn luật viết chung {{RULES}} (ngôn ngữ, cấm bịa số, blocklist).");
   if (t.system.length > 3500) issues.push("Prompt quá dài (> 3500 ký tự): tốn token mỗi lần gọi.");
-  if (t.maxTokens > 6000) issues.push("Giới hạn đầu ra > 6000 token.");
+  if (t.maxTokens > 8000) issues.push("Giới hạn đầu ra > 8000 token.");
   if (t.tier === "model_t3" && t.agent !== "lead") issues.push("Dùng tầng đắt nhất (T3): chỉ nên dùng cho kế hoạch/kiểm định.");
   if (/\b(guarantee|best in|#1|number one)\b/i.test(t.system)) issues.push("Prompt khuyến khích lời hứa hoặc so sánh tuyệt đối.");
   return { ok: issues.length === 0, issues };

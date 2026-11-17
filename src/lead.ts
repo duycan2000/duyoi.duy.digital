@@ -36,7 +36,7 @@ export async function leadState(env: Env) {
     const c = await env.DB.prepare("SELECT id, status, rules, score FROM recovery_cases WHERE site_id = ? AND status != 'archived' ORDER BY id DESC LIMIT 1").bind(s.id).first<{ id: number; status: string; rules: string; score: number | null }>();
     const rules = readRules(c?.rules || "{}");
     const ideas = (await env.DB.prepare("SELECT id, keyword, format, status, covered_by, score, volume, products, gate, wp_post_id, hub_path, updated_at, interview, author FROM content_ideas WHERE site_id = ? AND status IN ('idea', 'approved', 'briefed', 'drafted') ORDER BY CASE status WHEN 'drafted' THEN 0 WHEN 'briefed' THEN 1 WHEN 'approved' THEN 2 ELSE 3 END, score DESC LIMIT 14").bind(s.id).all<Record<string, unknown>>()).results;
-    const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted', 'published') AND updated_at >= ?").bind(s.id, monthStart()).first<{ n: number }>();
+    const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted', 'published') AND approved_at >= ?").bind(s.id, monthStart()).first<{ n: number }>();
     const hubs = c ? (await env.DB.prepare("SELECT path, json_extract(data, '$.title') AS title FROM recovery_pages WHERE case_id = ? AND kind = 'commercial' LIMIT 12").bind(c.id).all<{ path: string; title: string | null }>()).results : [];
     const profile = await readProfile(env, s.id);
     const docs = await env.DB.prepare("SELECT COUNT(*) AS n FROM site_docs WHERE site_id = ? AND status = 'ready'").bind(s.id).first<{ n: number }>();
@@ -84,12 +84,13 @@ async function validate(env: Env, raw: unknown[]): Promise<PlanItem[]> {
     if (!(action in ACTIONS)) { bad("Việc không có trong danh sách agent làm được."); out.push(item); continue; }
     if (p.idea_id != null) item.idea_id = Number(p.idea_id);
     if (["write_brief", "write_draft", "review_draft"].includes(action)) {
-      const i = item.idea_id ? await env.DB.prepare("SELECT site_id, status, keyword FROM content_ideas WHERE id = ?").bind(item.idea_id).first<{ site_id: number; status: string; keyword: string }>() : null;
+      const i = item.idea_id ? await env.DB.prepare("SELECT site_id, status, keyword, author FROM content_ideas WHERE id = ?").bind(item.idea_id).first<{ site_id: number; status: string; keyword: string; author: string | null }>() : null;
       if (!i) bad("Không có chủ đề này.");
       else {
         item.site_id = i.site_id; item.keyword = i.keyword;
         const need = { write_brief: ["approved", "briefed"], write_draft: ["briefed", "drafted"], review_draft: ["drafted"] }[action as "write_brief"];
         if (!need.includes(i.status)) bad(`Chủ đề đang ở bước "${i.status}", chưa làm được việc này.`);
+        else if (action !== "write_brief" && i.author === "owner") bad("Anh đang tự viết bài này bằng Claude.");
       }
     }
     const site = await env.DB.prepare("SELECT id, domain FROM sites WHERE id = ? AND status != 'archived'").bind(item.site_id).first<{ id: number; domain: string }>();
@@ -163,8 +164,9 @@ export async function apiLeadRun(env: Env, req: Request, user: User, msgId: numb
   }
   await env.DB.prepare("UPDATE lead_messages SET ran_at = ? WHERE id = ?").bind(now(), msgId).run();
   await logActivity(env, `user:${user.id}`, "lead.assign", `Giao ${ids.length} việc theo phương án của Trưởng nhóm`, null);
-  // Việc nhẹ chạy ngay
-  for (const id of ids) {
+  // Việc nhẹ chạy ngay (trừ khi đang Tạm dừng toàn bộ)
+  const paused = Boolean((await getSettingsMap(env)).paused);
+  for (const id of paused ? [] : ids) {
     const j = await env.DB.prepare("SELECT action, status FROM agent_jobs WHERE id = ?").bind(id).first<{ action: Action; status: string }>();
     if (j?.status === "queued" && !ACTIONS[j.action].heavy) await runJob(env, id);
   }
@@ -207,10 +209,11 @@ export async function apiRunJob(env: Env, user: User, id: number): Promise<Respo
 }
 
 // Cron: việc treo quá 20 phút coi như lỗi; chạy tối đa n việc đang chờ
-export async function processJobs(env: Env, n = 2): Promise<void> {
+export async function processJobs(env: Env, n = 2, deadline = Date.now() + 6 * 60000): Promise<void> {
+  if ((await getSettingsMap(env)).paused) return; // Tạm dừng toàn bộ: không chạy hàng việc
   await env.DB.prepare("UPDATE agent_jobs SET status = 'failed', error = 'Quá thời gian chạy', finished_at = ? WHERE status = 'running' AND started_at < ?").bind(now(), now() - 20 * 60000).run();
-  const q = await env.DB.prepare("SELECT id FROM agent_jobs WHERE status = 'queued' ORDER BY id LIMIT ?").bind(n).all<{ id: number }>();
-  for (const j of q.results) await runJob(env, j.id);
+  const q = await env.DB.prepare("SELECT j.id FROM agent_jobs j JOIN sites s ON s.id = j.site_id WHERE j.status = 'queued' AND s.status = 'active' ORDER BY j.id LIMIT ?").bind(n).all<{ id: number }>();
+  for (const j of q.results) { if (Date.now() > deadline) break; await runJob(env, j.id); }
 }
 
 // ---------------- Sổ tay Trưởng nhóm ----------------

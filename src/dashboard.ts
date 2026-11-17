@@ -11,12 +11,14 @@ export async function dashboard(env: Env): Promise<Response> {
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
-  const [sites, jobs, usage, secrets, settings] = await Promise.all([
+  const [sites, jobs, usage, secrets, settings, agentJobs, prompts] = await Promise.all([
     env.DB.prepare("SELECT status, platform, COUNT(*) AS n FROM sites WHERE status != 'archived' GROUP BY status, platform").all<{ status: string; platform: string; n: number }>(),
     env.DB.prepare("SELECT status, COUNT(*) AS n FROM jobs WHERE status IN ('queued', 'running', 'waiting') GROUP BY status").all<{ status: string; n: number }>(),
     env.DB.prepare("SELECT provider, ROUND(SUM(cost_usd), 4) AS cost FROM usage_events WHERE at >= ? GROUP BY provider").bind(monthStart.getTime()).all<{ provider: string; cost: number }>(),
     env.DB.prepare("SELECT key FROM secrets").all<{ key: string }>(),
-    getSettingsMap(env)
+    getSettingsMap(env),
+    env.DB.prepare("SELECT status, COUNT(*) AS n FROM agent_jobs WHERE status IN ('queued', 'running') GROUP BY status").all<{ status: string; n: number }>(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM prompt_reviews WHERE status = 'approved'").first<{ n: number }>()
   ]);
   const has = (k: string) => secrets.results.some((r) => r.key === k);
   const siteCount = sites.results.reduce((s, r) => s + r.n, 0);
@@ -25,12 +27,13 @@ export async function dashboard(env: Env): Promise<Response> {
     { id: "openrouter", label: "Nhập OpenRouter API key", done: has("openrouter_api_key") },
     { id: "dataforseo", label: "Nhập DataForSEO login và password", done: has("dataforseo_login") && has("dataforseo_password") },
     { id: "site", label: "Thêm site đầu tiên", done: siteCount > 0 },
+    { id: "prompts", label: "Duyệt prompt cho agent (Agent HQ › Quản lý prompt)", done: (prompts?.n || 0) > 0 },
     { id: "cron", label: "Cron đã chạy ít nhất một lần (sau khi deploy)", done: Boolean(settings.cron_last_run) }
   ];
   return json({
     paused: Boolean(settings.paused),
     sites: { total: siteCount, byPlatform: sites.results },
-    jobs: Object.fromEntries(jobs.results.map((r) => [r.status, r.n])),
+    jobs: (() => { const o: Record<string, number> = {}; for (const r of [...jobs.results, ...agentJobs.results]) o[r.status] = (o[r.status] || 0) + r.n; return o; })(),
     spendThisMonth: Object.fromEntries(usage.results.map((r) => [r.provider, r.cost])),
     caps: { openrouter: settings.openrouter_monthly_cap_usd, dataforseo: settings.dataforseo_monthly_cap_usd },
     cronLastRun: settings.cron_last_run ?? null,

@@ -51,7 +51,7 @@ export async function aiJson<T>(env: Env, run: AiRun): Promise<T> {
     throw new HttpError(502, `Không gọi được OpenRouter: ${(e as Error).message}`, "ai_unreachable");
   }
   const data = (await res.json().catch(() => ({}))) as {
-    choices?: { message?: { content?: string } }[];
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
     error?: { message?: string };
   };
@@ -60,8 +60,12 @@ export async function aiJson<T>(env: Env, run: AiRun): Promise<T> {
     throw new HttpError(502, `OpenRouter báo lỗi: ${data.error?.message || res.status}`, "ai_error");
   }
   await logCall(env, ctx, { status: "ok", tokensIn: data.usage?.prompt_tokens, tokensOut: data.usage?.completion_tokens, cost: data.usage?.cost });
+  if (data.choices?.[0]?.finish_reason === "length") throw new HttpError(502, `Model viết vượt giới hạn ${t.maxTokens} token nên bị cắt giữa chừng. Bớt sản phẩm/mục rồi thử lại.`, "ai_truncated");
   const text = (data.choices?.[0]?.message?.content || "").replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
-  try { return JSON.parse(text) as T; } catch { throw new HttpError(502, "Model trả về không phải JSON hợp lệ. Thử lại.", "ai_bad_json"); }
+  try { return JSON.parse(text) as T; } catch { /* một số model bọc JSON trong lời dẫn: lấy khối {...} ngoài cùng */ }
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(text.slice(a, b + 1)) as T; } catch { /* rơi xuống lỗi */ } }
+  throw new HttpError(502, "Model trả về không phải JSON hợp lệ. Thử lại.", "ai_bad_json");
 }
 
 const LANG_NAME: Record<string, string> = { de: "German (Germany, formal 'Sie')", en: "English", vi: "Vietnamese" };

@@ -110,7 +110,7 @@ export async function researchCore(env: Env, caseId: number, actor: string): Pro
 async function monthCount(env: Env, siteId: number): Promise<number> {
   const d = new Date();
   const since = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-  const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted', 'published') AND updated_at >= ?").bind(siteId, since).first<{ n: number }>();
+  const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted', 'published') AND approved_at >= ?").bind(siteId, since).first<{ n: number }>();
   return r?.n ?? 0;
 }
 
@@ -118,9 +118,10 @@ export async function approveIdeaCore(env: Env, ideaId: number, actor: string): 
   const i = await idea(env, ideaId);
   const c = await caseInfo(env, i.case_id!);
   const rules = readRules(c.rules);
+  if (!["idea", "rejected", "failed"].includes(i.status)) return; // đã duyệt rồi: không tính thêm vào giới hạn, không lùi bước
   if (i.covered_by) throw new HttpError(409, `Site đã có trang ${i.covered_by} cho chủ đề này: viết thêm sẽ ăn thịt từ khoá. Hãy cải thiện trang đó.`, "covered");
   if ((await monthCount(env, c.site_id)) >= rules.maxNewArticlesPerMonth) throw new HttpError(409, `Đã đủ ${rules.maxNewArticlesPerMonth} bài mới tháng này (giới hạn chống spam, chỉnh ở Luật an toàn).`, "limit");
-  await env.DB.prepare("UPDATE content_ideas SET status = 'approved', updated_at = ? WHERE id = ?").bind(now(), ideaId).run();
+  await env.DB.prepare("UPDATE content_ideas SET status = 'approved', approved_at = ?, updated_at = ? WHERE id = ?").bind(now(), now(), ideaId).run();
   await logActivity(env, actor, "content.approved", `Duyệt chủ đề bài mới: "${i.keyword}"`, c.site_id);
 }
 

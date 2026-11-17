@@ -15,7 +15,8 @@ const DAY = 86400000;
 
 interface CaseLite { id: number; site_id: number; status: string; rules: string; finished_at: number | null; domain: string }
 
-export async function runAutopilot(env: Env, maxSites = 3): Promise<void> {
+// deadline: mốc giờ phải dừng để cả lượt cron không vượt giới hạn thời gian của Cloudflare (bước nặng có thể mất vài phút)
+export async function runAutopilot(env: Env, maxSites = 3, deadline = Date.now() + 8 * 60000): Promise<void> {
   const settings = await getSettingsMap(env);
   if (settings.paused) return;
   const { results } = await env.DB.prepare(
@@ -26,6 +27,7 @@ export async function runAutopilot(env: Env, maxSites = 3): Promise<void> {
   const withState = await Promise.all(sites.map(async (c) => ({ c, st: await getAuto(env, c.site_id) })));
   withState.sort((a, b) => Number(a.st.lastRun || 0) - Number(b.st.lastRun || 0));
   for (const { c } of withState.slice(0, maxSites)) {
+    if (Date.now() > deadline) break;
     try { await step(env, c); }
     catch (e) {
       const msg = String((e as Error).message || e).slice(0, 300);

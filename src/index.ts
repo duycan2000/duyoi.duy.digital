@@ -170,6 +170,8 @@ export default {
 
   async scheduled(_event: CronEvent, env: Env, ctx: ExecCtx): Promise<void> {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
-    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2)).then(() => runAutopilot(env)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
+    // Một lượt cron tối đa ~10 phút việc nặng: hàng việc của Trưởng nhóm trước, chế độ tự động dùng phần thời gian còn lại
+    const started = Date.now();
+    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
   }
 };
