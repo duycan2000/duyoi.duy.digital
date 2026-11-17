@@ -41,10 +41,10 @@ window.addEventListener("duyoi:unauthorized", () => { state.user = null; renderL
 
 // Cây trang trí hai góc dưới màn đăng nhập, vẽ bằng SVG đơn giản
 const PLANT = (cls) => `<svg class="plant ${cls}" viewBox="0 0 120 220" aria-hidden="true">
-  <path d="M60 210 C60 150 58 110 62 60" stroke="#264cc8" stroke-opacity=".35" stroke-width="3" fill="none"/>
-  <path d="M61 70 C30 40 34 6 62 2 C88 8 92 42 61 70Z" fill="#264cc8" fill-opacity=".55"/>
-  <path d="M60 120 C24 112 8 80 20 62 C46 62 62 92 60 120Z" fill="#309ff7" fill-opacity=".55"/>
-  <path d="M61 150 C96 140 112 108 100 90 C74 92 58 122 61 150Z" fill="#264cc8" fill-opacity=".4"/>
+  <path d="M60 210 C60 150 58 110 62 60" stroke="#6f4cf6" stroke-opacity=".35" stroke-width="3" fill="none"/>
+  <path d="M61 70 C30 40 34 6 62 2 C88 8 92 42 61 70Z" fill="#6f4cf6" fill-opacity=".55"/>
+  <path d="M60 120 C24 112 8 80 20 62 C46 62 62 92 60 120Z" fill="#d65ce0" fill-opacity=".55"/>
+  <path d="M61 150 C96 140 112 108 100 90 C74 92 58 122 61 150Z" fill="#6f4cf6" fill-opacity=".4"/>
   <rect x="44" y="196" width="32" height="22" rx="3" fill="#c9cdd8"/>
 </svg>`;
 const AUTH_ART = () => `<div class="auth-art" aria-hidden="true"><span class="ground"></span>${PLANT("l")}${PLANT("r")}</div>`;
@@ -205,15 +205,18 @@ const ICON = {
   trend: "M3 17l6-6 4 4 8-8M15 7h6v6",
   logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10",
   menu: "M4 6h16M4 12h16M4 18h16",
+  bolt: "M13 2 4.5 13.5H11L10 22l8.5-11.5H12z",
+  home: "M4 11 12 4l8 7v9h-5v-6H9v6H4z",
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { hq: "users", overview: "grid", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
 // Thanh dưới cùng trên điện thoại: các màn dùng nhiều nhất + nút mở toàn bộ menu
-const TABBAR = [["overview", "Tổng quan"], ["sites", "Site"], ["activity", "Nhật ký"], ["settings", "Cài đặt"]];
+// Thứ tự: 2 lối tắt, nút giữa (Trưởng nhóm), 1 lối tắt, nút mở menu
+const TABBAR = [["overview", "Tổng quan"], ["recovery", "Phục hồi"], ["hq", "Trưởng nhóm", "fab"], ["content", "Bài viết"]];
 const ROLE_NAME = { admin: "Admin", editor: "Biên tập", viewer: "Chỉ xem" };
 const canSee = (item) => !item.admin || state.user?.role === "admin";
 const initials = (name) => (name || "?").trim().split(/\s+/).slice(-1)[0].slice(0, 1).toUpperCase();
@@ -255,8 +258,10 @@ function renderShell() {
     <footer class="foot"><span>© ${new Date().getFullYear()}, ${esc(state.appName)} · AI agent làm SEO cho site của anh</span>
       <nav><a href="#/overview">Tổng quan</a><a href="#/sites">Site</a><a href="#/activity">Nhật ký</a><a href="#/account">Tài khoản</a></nav></footer>
     <nav class="tabbar" aria-label="Lối tắt">
-      ${TABBAR.map(([id, label]) => `<a href="#/${id}" data-tab="${id}">${icon(itemIcon(id))}<span>${esc(label)}</span></a>`).join("")}
-      <button type="button" id="menu-btn" aria-controls="side" aria-expanded="false">${icon(ICON.menu)}<span>Menu</span></button>
+      ${TABBAR.map(([id, label, kind]) => kind === "fab"
+        ? `<a href="#/${id}/lead" data-tab="${id}" class="fab" aria-label="${esc(label)}"><span class="fab-btn">${icon(ICON.bolt)}</span><span>${esc(label)}</span></a>`
+        : `<a href="#/${id}" data-tab="${id}">${icon(itemIcon(id))}<span>${esc(label)}</span></a>`).join("")}
+      <button type="button" id="menu-btn" aria-controls="side" aria-expanded="false">${icon(ICON.menu)}<span>Thêm</span></button>
     </nav>
   </div>`;
   $$("[data-logout]").forEach((b) => b.addEventListener("click", async () => {
@@ -433,22 +438,68 @@ const CHECK_LINK = {
   cron: "#/schedule"
 };
 
+// Vòng đo 270° (kiểu đồng hồ): giá trị đã dùng / trần
+function ring(id, used, cap, unit, label, sub, href) {
+  const r = 52, C = 2 * Math.PI * r, arc = C * 0.75;
+  const ratio = cap > 0 ? Math.min(used / cap, 1) : 0;
+  const tone = ratio >= 0.9 ? ["#ff4c51", "#ff8a65"] : ratio >= 0.7 ? ["#ffb400", "#ff7ab6"] : ["#6f4cf6", "#d65ce0"];
+  return `<a class="ring" href="${href}"><svg viewBox="0 0 140 130" role="img" aria-label="${esc(label)}: ${esc(sub)}">
+    <defs><linearGradient id="g-${id}" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="${tone[0]}"/><stop offset="1" stop-color="${tone[1]}"/></linearGradient></defs>
+    <circle class="track" cx="70" cy="70" r="${r}" stroke-dasharray="${arc.toFixed(1)} ${C.toFixed(1)}" transform="rotate(135 70 70)"/>
+    <circle class="val" cx="70" cy="70" r="${r}" stroke="url(#g-${id})"${ratio === 0 ? ' stroke-opacity="0"' : ""} stroke-dasharray="${(arc * ratio).toFixed(1)} ${C.toFixed(1)}" transform="rotate(135 70 70)"/>
+    <text class="n" x="70" y="72">${esc(unit)}${used >= 100 ? Math.round(used) : used.toFixed(2)}</text><text class="u" x="70" y="92">đã dùng</text>
+  </svg><b>${esc(label)}</b><small>${esc(sub)}</small></a>`;
+}
+
+// Biểu tượng tròn cho từng dòng nhật ký (kiểu danh sách hoá đơn)
+function actIcon(a) {
+  const k = a.action;
+  if (/fail|error|blocked|bị chặn/.test(k) || /lỗi/i.test(a.detail || "")) return ["t-err", "close"];
+  if (k.startsWith("recovery.")) return ["t-warn", "trend"];
+  if (k.startsWith("content.") || k.startsWith("docs.")) return ["t-ok", "pen"];
+  if (k.startsWith("lead.")) return ["", "bolt"];
+  if (k.startsWith("settings.") || k.startsWith("auth.") || k.startsWith("user.")) return ["t-info", "shield"];
+  return ["", "list"];
+}
+
+const greet = () => { const h = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hour12: false, timeZone: "Asia/Ho_Chi_Minh" }).format(new Date())); return h < 11 ? "Chào buổi sáng" : h < 14 ? "Chào buổi trưa" : h < 18 ? "Chào buổi chiều" : "Chào buổi tối"; };
+
 async function viewOverview(main) {
-  const [d, act] = await Promise.all([api("/api/dashboard"), api("/api/activity?limit=8")]);
+  const [d, act, hq] = await Promise.all([api("/api/dashboard"), api("/api/activity?limit=8"), api("/api/hq").catch(() => null)]);
   setPill(d.paused);
-  const spend = (p) => (d.spendThisMonth[p] || 0).toFixed(2);
+  const used = (p) => Number(d.spendThisMonth[p] || 0);
+  const cap = (p) => Number(d.caps[p] || 0);
+  const total = used("openrouter") + used("dataforseo");
   const done = d.checklist.filter((c) => c.done).length;
   main.innerHTML = `
   <div class="page">
     <div class="page-head">
-      <div><h2>Tổng quan</h2><p>Xin chào ${esc(state.user.name)}. Đây là bản thật: chưa có dữ liệu cho tới khi anh thêm site và nhập API key.</p></div>
-      <div class="toolbar">${state.user.role === "admin" ? `<button type="button" id="pause">${d.paused ? "Chạy lại agent" : "Tạm dừng toàn bộ"}</button>` : ""}</div>
+      <div class="hello"><small>${greet()}, ${esc(state.user.name)}</small><h2>Tổng quan</h2></div>
+      <div class="toolbar">${state.user.role === "admin" ? `<button type="button" id="pause">${d.paused ? "Chạy lại agent" : "Tạm dừng toàn bộ"}</button>` : ""}<a class="btn primary" href="#/hq/lead">${icon(ICON.bolt)}Hỏi Trưởng nhóm</a></div>
+    </div>
+    <div class="hero-row">
+      <div class="glass">
+        <a class="go" href="#/hq/spend" aria-label="Xem chi tiêu">${icon(ICON.chevron)}</a>
+        <small>Chi phí agent tháng này</small>
+        <b class="big">$${total.toFixed(2)}</b>
+        <div class="row"><small>${d.paused ? "Đội agent đang tạm dừng" : `Đội agent đang chạy · ${d.sites.total} site`}</small>
+          <span>$${(cap("openrouter") + cap("dataforseo")).toFixed(0)}<em>trần mỗi tháng</em></span></div>
+        ${hq ? `<div class="stats">
+          <a href="#/hq/lead"><b>${(hq.asks?.length || 0) + (hq.lead?.queued || 0)}</b><small>Việc chờ anh / chờ chạy</small></a>
+          <a href="#/hq/prompts"><b>${hq.manager.promptsPending}</b><small>Prompt chờ duyệt</small></a>
+          <a href="#/content"><b>${(hq.ideas?.drafted || 0)}</b><small>Bài nháp chờ xem</small></a>
+        </div>` : ""}
+      </div>
+      <div class="card"><h3>Chi phí AI &amp; dữ liệu</h3>
+        <div class="rings">
+          ${ring("or", used("openrouter"), cap("openrouter"), "$", "OpenRouter", `trần $${cap("openrouter")} / tháng`, "#/hq/spend")}
+          ${ring("dfs", used("dataforseo"), cap("dataforseo"), "$", "DataForSEO", `trần $${cap("dataforseo")} / tháng`, "#/hq/spend")}
+        </div>
+      </div>
     </div>
     <div class="kpis">
       ${kpi("t-site", "globe", d.sites.total, "Site đang theo dõi", d.sites.total ? "#/sites" : "#/sites/new")}
-      ${kpi("t-yellow", "queue", (d.jobs.queued || 0) + (d.jobs.running || 0), "Việc trong hàng đợi", "#/schedule")}
-      ${kpi("t-content", "money", `$${spend("openrouter")}<em>/ $${esc(d.caps.openrouter)}</em>`, "OpenRouter tháng này", "#/settings/models")}
-      ${kpi("t-ops", "chart", `$${spend("dataforseo")}<em>/ $${esc(d.caps.dataforseo)}</em>`, "DataForSEO tháng này", "#/settings/models")}
+      ${kpi("t-yellow", "queue", (d.jobs.queued || 0) + (d.jobs.running || 0), "Việc trong hàng đợi", "#/hq/lead")}
       ${kpi("t-ai", "clock", esc(ago(d.cronLastRun)), "Cron chạy lần cuối", "#/schedule", "sm")}
     </div>
     <div class="grid2">
@@ -456,9 +507,8 @@ async function viewOverview(main) {
         <div class="checklist">${d.checklist.map((c, i) => `<a href="${c.id === "site" && c.done ? "#/sites" : CHECK_LINK[c.id] || "#/settings"}" class="${c.done ? "done" : ""}"><i>${c.done ? "✓" : i + 1}</i><span>${esc(c.label)}</span>${c.done ? "" : `<em>Làm ngay</em>`}${icon(ICON.chevron)}</a>`).join("")}</div>
         <div class="toolbar"><a class="btn" href="#/settings">Mở Cài đặt</a><a class="btn" href="#/sites/new">Thêm site</a></div>
       </div>
-      <div class="card"><h3>Hoạt động gần đây</h3>
-        ${act.activity.length ? `<div class="activity">${act.activity.map(actRow).join("")}</div>` : `<p class="note">Chưa có hoạt động.</p>`}
-        <a href="#/activity">Xem toàn bộ nhật ký</a>
+      <div class="card"><div class="task-head"><h3>Hoạt động gần đây</h3><a class="icon-btn" href="#/activity" aria-label="Xem toàn bộ nhật ký">${icon(ICON.chevron)}</a></div>
+        ${act.activity.length ? `<div class="activity bills">${act.activity.map((a) => { const [t, ic] = actIcon(a); return `<a href="${actLink(a)}"><span class="dot-ic ${t}">${icon(ICON[ic] || ICON.list)}</span><span>${esc(actText(a))}${a.site && a.action !== "site.created" ? ` · <b>${esc(a.site)}</b>` : ""}</span><time>${esc(fmtTime(a.at))}</time></a>`; }).join("")}</div>` : `<p class="note">Chưa có hoạt động.</p>`}
       </div>
     </div>
   </div>`;
