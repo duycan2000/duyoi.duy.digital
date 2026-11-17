@@ -537,7 +537,7 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     // Agent HQ
     const hq = await c4("GET", "/api/hq");
     assert.equal(hq.status, 200);
-    assert.equal(hq.data.manager.promptsPending, 4, "chưa duyệt: đọc tài liệu, chấm bài, sửa bài, Trưởng nhóm");
+    assert.equal(hq.data.manager.promptsPending, 5, "chưa duyệt: đọc tài liệu, giọng văn, chấm bài, sửa bài, Trưởng nhóm");
     assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 6);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
@@ -733,15 +733,71 @@ await test("tài liệu PDF → Hồ sơ site, Biên tập viên chấm và sử
     assert.equal(briefIn.site_profile.tone, "sachlich, per Sie");
     assert.match(briefReq.messages[0].content, /1200/, "số trong hồ sơ được phép dùng");
     assert.match(briefReq.messages[0].content, /Billiganbieter/, "điều cấm trong tài liệu vào blocklist");
+    // Phỏng vấn trải nghiệm: agent chờ anh trả lời trước khi viết
+    assert.equal((await c6("POST", `/api/content/ideas/${idea.data.id}/draft`)).status, 409);
+    let ctI = await c6("GET", `/api/content/${caseId}`);
+    let itI = ctI.data.ideas.find((x) => x.id === idea.data.id);
+    assert.equal(itI.interview.questions.length, 2);
+    assert.equal(itI.waitingInterview, true);
+    let hqI = await c6("GET", "/api/hq");
+    assert.ok(hqI.data.asks.some((x) => x.kind === "interview" && x.ideaId === idea.data.id));
+    assert.equal((await c6("PUT", `/api/content/ideas/${idea.data.id}/interview`, { answers: ["Zuletzt drei Wochen für ein Bürogebäude mit 14 Etagen.", ""] })).status, 200);
+    // Giọng văn: chỉ lấy bài trên chính site, hoặc chữ anh dán
+    assert.equal((await c6("POST", `/api/sites/${siteId}/voice`, { urls: ["https://other-site.de/blog/x"] })).status, 400);
+    const sample = Array.from({ length: 40 }, (_, k) => `Wir planen jedes Projekt gemeinsam mit dem Büro, Schritt ${k}.`).join(" ");
+    const vo = await c6("POST", `/api/sites/${siteId}/voice`, { text: sample });
+    assert.equal(vo.status, 200, JSON.stringify(vo.data));
+    assert.equal(vo.data.voice.person, "Sie, wir");
     const dr = await c6("POST", `/api/content/ideas/${idea.data.id}/draft`);
     assert.equal(dr.status, 200, JSON.stringify(dr.data));
+    const draftReq = seen.filter((x) => /write ONE article draft/.test(x.template)).pop().body;
+    const draftIn = JSON.parse(draftReq.messages[1].content);
+    assert.deepEqual(draftIn.owner_interview, [{ q: "Dự án gần nhất anh làm theo quy trình này mất bao lâu?", a: "Zuletzt drei Wochen für ein Bürogebäude mit 14 Etagen." }]);
+    assert.equal(draftIn.voice.person, "Sie, wir");
+    assert.match(draftReq.messages[0].content, /14/, "số trong câu trả lời phỏng vấn là có nguồn");
+    assert.match(draftReq.messages[0].content, /In der heutigen digitalen Welt/i, "danh sách câu sáo gửi cho người viết");
+    assert.equal(draftReq.model, "anthropic/claude-sonnet-5.5", "bước viết dùng model viết riêng (Sonnet)");
     let ct = await c6("GET", `/api/content/${caseId}`);
     let it = ct.data.ideas.find((x) => x.id === idea.data.id);
     assert.deepEqual(it.draft.review.rounds, [62, 86]);
+    assert.equal(it.author, "agent");
+    assert.ok(!it.gate.problems.some((p) => p.rule === "structure" && p.level === "block"), JSON.stringify(it.gate.problems));
     assert.ok(it.draft.html.includes("Verbessert"));
     assert.ok(!it.gate.problems.some((p) => p.rule === "quality"), JSON.stringify(it.gate.problems));
     const rv = await c6("POST", `/api/content/ideas/${idea.data.id}/review`, { revise: false });
     assert.equal(rv.status, 200);
+    // Anh tự viết bằng Claude: gói yêu cầu → dán bài Markdown → Biên tập viên chấm
+    const own = await c6("POST", `/api/content/${caseId}/ideas`, { keyword: "tga planung ablauf checkliste", format: "article", hub_path: "/cad-dienstleistung-tga/" });
+    await c6("PUT", `/api/content/ideas/${own.data.id}`, { status: "approved" });
+    await c6("POST", `/api/content/ideas/${own.data.id}/brief`);
+    await c6("PUT", `/api/content/ideas/${own.data.id}/interview`, { skip: true });
+    hqI = await c6("GET", "/api/hq");
+    assert.ok(hqI.data.asks.some((x) => x.kind === "author" && x.ideaId === own.data.id), "chế độ mặc định: hỏi anh ai viết");
+    const ho = await c6("GET", `/api/content/ideas/${own.data.id}/handoff.md`);
+    assert.equal(ho.status, 200);
+    assert.match(ho.text, /^# Yêu cầu viết bài: /);
+    assert.match(ho.text, /## Khung định dạng/);
+    assert.match(ho.text, /Giọng văn của site[\s\S]*Sie, wir/);
+    assert.match(ho.text, /Seit 2009 über 1200 Projekte/);
+    assert.match(ho.text, /Meta description/);
+    ctI = await c6("GET", `/api/content/${caseId}`);
+    assert.equal(ctI.data.ideas.find((x) => x.id === own.data.id).author, "owner");
+    const md = ["# TGA-Planung: Ablauf und Checkliste", "", "Wer eine TGA-Planung vergibt, will wissen, was wann passiert und welche Unterlagen fehlen dürfen. Hier ist unser Ablauf aus der Praxis, Schritt für Schritt.", "",
+      ...["Vorbereitung", "Abstimmung mit dem Büro", "Prüfung und Übergabe"].flatMap((h, k) => [`## ${h}`, "", ...Array.from({ length: 7 }, (_, j) => `In diesem Abschnitt beschreiben wir, wie wir Pläne prüfen, Rückfragen bündeln und Termine halten, damit das Projekt ohne Verzögerung weiterläuft (Teil ${k}${j}).`), ""]),
+      "| Phase | Dauer |", "|---|---|", "| Prüfung | kurz |", "", "- **Grundrisse** als DWG", "- Schnitte", "", "Wir sparen so oft 30% Zeit. Mehr bei unserer [CAD-Dienstleistung TGA](/cad-dienstleistung-tga/).", "", "Meta description: Ablauf und Checkliste für die TGA-Planung aus der Praxis."].join("\n");
+    assert.equal((await c6("POST", `/api/content/ideas/${own.data.id}/import`, { content: "zu kurz" })).status, 400);
+    const im = await c6("POST", `/api/content/ideas/${own.data.id}/import`, { content: md, revise: false });
+    assert.equal(im.status, 200, JSON.stringify(im.data));
+    ctI = await c6("GET", `/api/content/${caseId}`);
+    const oi = ctI.data.ideas.find((x) => x.id === own.data.id);
+    assert.equal(oi.draft.author, "owner");
+    assert.equal(oi.draft.title, "TGA-Planung: Ablauf und Checkliste");
+    assert.equal(oi.draft.meta_description, "Ablauf und Checkliste für die TGA-Planung aus der Praxis.");
+    assert.match(oi.draft.html, /<table><thead><tr><th>Phase<\/th><th>Dauer<\/th><\/tr><\/thead><tbody><tr><td>Prüfung<\/td><td>kurz<\/td><\/tr><\/tbody><\/table>/);
+    assert.match(oi.draft.html, /<li><strong>Grundrisse<\/strong> als DWG<\/li>/);
+    assert.equal(oi.gate.problems.find((p) => p.rule === "numbers")?.level, "warn", "anh tự viết: số liệu chỉ nhắc, không chặn");
+    assert.deepEqual(oi.draft.review.rounds, [62]);
+
     // Trưởng nhóm: trả lời từ tình trạng thật, việc lạ/ID bịa bị đánh dấu không hợp lệ
     const ap = await c6("POST", `/api/content/${caseId}/ideas`, { keyword: "bim modellierung kosten", format: "guide" });
     await c6("PUT", `/api/content/ideas/${ap.data.id}`, { status: "approved" });

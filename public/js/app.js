@@ -684,7 +684,8 @@ const MODEL_FIELDS = [
   ["model_t0", "T0 · trích xuất, brief"],
   ["model_t1", "T1 · viết bài, email"],
   ["model_t2", "T2 · humanizer, chỉnh giọng"],
-  ["model_t3", "T3 · kế hoạch, Auditor"],
+  ["model_t3", "T3 · kế hoạch, Trưởng nhóm"],
+  ["model_writer", "Viết bài và sửa bài (nên dùng model viết tự nhiên, ví dụ Claude Sonnet)"],
   ["model_image", "Ảnh bài viết (trả phí)"]
 ];
 

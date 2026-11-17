@@ -6,6 +6,7 @@ import { RECOVERY_AGENTS } from "./recovery-analyze";
 import { readRules } from "./recovery-rules";
 import { getAuto } from "./content";
 import { formatOf, readProducts } from "./formats";
+import { waitingInterview } from "./content";
 import type { Env } from "./types";
 
 const CONTENT_AGENTS = [
@@ -48,10 +49,16 @@ export async function hqView(env: Env): Promise<Response> {
       detail: a.id === "doctor" && scanning.length ? `Đang quét ${scanning.map((c) => `${c.domain} (${c.pages_done}/${c.pages_total || "?"})`).join(", ")}` : "" };
   });
   // Việc chờ anh: bài cần sản phẩm, bài cần ảnh thật
-  const act = await env.DB.prepare("SELECT i.id, i.keyword, i.status, i.format, i.products, i.gate, i.case_id, s.domain FROM content_ideas i JOIN sites s ON s.id = i.site_id WHERE i.status IN ('approved', 'briefed', 'drafted') AND i.wp_post_id IS NULL").all<{ id: number; keyword: string; status: string; format: string; products: string | null; gate: string | null; case_id: number; domain: string }>();
+  const act = await env.DB.prepare("SELECT i.id, i.keyword, i.status, i.format, i.products, i.gate, i.case_id, i.interview, i.author, s.domain, c.rules FROM content_ideas i JOIN sites s ON s.id = i.site_id LEFT JOIN recovery_cases c ON c.id = i.case_id WHERE i.status IN ('approved', 'briefed', 'drafted') AND i.wp_post_id IS NULL").all<{ id: number; keyword: string; status: string; format: string; products: string | null; gate: string | null; case_id: number; interview: string | null; author: string | null; domain: string; rules: string | null }>();
   const asks = act.results.flatMap((r) => {
     const f = formatOf(r.format);
-    const out: { kind: "products" | "images"; ideaId: number; caseId: number; keyword: string; domain: string; text: string }[] = [];
+    const out: { kind: "products" | "images" | "interview" | "author" | "owner_draft"; ideaId: number; caseId: number; keyword: string; domain: string; text: string }[] = [];
+    const rr = readRules(r.rules || "{}");
+    const iv = (() => { try { return r.interview ? JSON.parse(r.interview) : null; } catch { return null; } })();
+    const who = r.author || (rr.authorMode === "ask" ? null : rr.authorMode);
+    if (r.status === "briefed" && waitingInterview(iv, rr.requireInterview)) out.push({ kind: "interview", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: `Trả lời ${iv.questions.length} câu phỏng vấn trải nghiệm (hoặc bỏ qua)` });
+    else if (r.status === "briefed" && !who) out.push({ kind: "author", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: "Chọn ai viết: agent hay anh tự viết bằng Claude" });
+    else if (r.status === "briefed" && who === "owner") out.push({ kind: "owner_draft", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: "Chờ bài anh viết bằng Claude (lấy gói yêu cầu, dán bài vào)" });
     if (r.status === "approved" && readProducts(r.products).items.length < f.minProducts) out.push({ kind: "products", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: `Nhập ít nhất ${f.minProducts} sản phẩm (link affiliate, đã dùng thật chưa) cho bài ${f.label}` });
     const img = r.gate ? (JSON.parse(r.gate) as { problems: { rule: string; level: string; message: string }[] }).problems.find((p) => p.rule === "images" && p.level === "block") : null;
     if (r.status === "drafted" && img) out.push({ kind: "images", ideaId: r.id, caseId: r.case_id, keyword: r.keyword, domain: r.domain, text: img.message });
@@ -61,7 +68,8 @@ export async function hqView(env: Env): Promise<Response> {
     const blockedPrompt = prompts.some((p) => p.agent === a.id && !p.ok);
     const waiting = a.id === "research" ? ideas.idea || 0 : a.id === "planner" ? ideas.approved || 0 : a.id === "writer" ? (ideas.briefed || 0) + (ideas.drafted || 0) : 0;
     const mine = a.id === "writer" ? asks : [];
-    const detail = mine.length ? `Chờ anh: ${mine.filter((x) => x.kind === "images").length} bài cần ảnh thật, ${mine.filter((x) => x.kind === "products").length} bài cần sản phẩm` : "";
+    const cnt = (k: string) => mine.filter((x) => x.kind === k).length;
+    const detail = mine.length ? `Chờ anh: ${[[cnt("interview"), "phỏng vấn"], [cnt("author"), "chọn người viết"], [cnt("owner_draft"), "bài anh viết"], [cnt("images"), "cần ảnh thật"], [cnt("products"), "cần sản phẩm"]].filter(([n]) => n).map(([n, t]) => `${n} ${t}`).join(", ")}` : "";
     return { ...a, zone: "content", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt, state: agentState(a.id, { waiting: waiting + mine.length, blockedPrompt }), waiting, detail };
   });
   const autoSites = await Promise.all(cases.results.filter((c) => readRules(c.rules).autopilot).map(async (c) => ({ siteId: c.site_id, caseId: c.id, domain: c.domain, ...(await getAuto(env, c.site_id)) })));

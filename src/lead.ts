@@ -4,7 +4,7 @@
 
 import { aiJson } from "./ai";
 import { logActivity } from "./activity";
-import { approveIdeaCore, briefCore, createIdeaCore, draftCore, researchCore, reviewCore } from "./content";
+import { approveIdeaCore, briefCore, createIdeaCore, draftCore, researchCore, reviewCore, waitingInterview } from "./content";
 import { readProfile } from "./docs";
 import { FORMATS, formatOf, readProducts } from "./formats";
 import { HttpError, json, now, readJson } from "./http";
@@ -35,7 +35,7 @@ export async function leadState(env: Env) {
   for (const s of sites.slice(0, 20)) {
     const c = await env.DB.prepare("SELECT id, status, rules, score FROM recovery_cases WHERE site_id = ? AND status != 'archived' ORDER BY id DESC LIMIT 1").bind(s.id).first<{ id: number; status: string; rules: string; score: number | null }>();
     const rules = readRules(c?.rules || "{}");
-    const ideas = (await env.DB.prepare("SELECT id, keyword, format, status, covered_by, score, volume, products, gate, wp_post_id, hub_path, updated_at FROM content_ideas WHERE site_id = ? AND status IN ('idea', 'approved', 'briefed', 'drafted') ORDER BY CASE status WHEN 'drafted' THEN 0 WHEN 'briefed' THEN 1 WHEN 'approved' THEN 2 ELSE 3 END, score DESC LIMIT 14").bind(s.id).all<Record<string, unknown>>()).results;
+    const ideas = (await env.DB.prepare("SELECT id, keyword, format, status, covered_by, score, volume, products, gate, wp_post_id, hub_path, updated_at, interview, author FROM content_ideas WHERE site_id = ? AND status IN ('idea', 'approved', 'briefed', 'drafted') ORDER BY CASE status WHEN 'drafted' THEN 0 WHEN 'briefed' THEN 1 WHEN 'approved' THEN 2 ELSE 3 END, score DESC LIMIT 14").bind(s.id).all<Record<string, unknown>>()).results;
     const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted', 'published') AND updated_at >= ?").bind(s.id, monthStart()).first<{ n: number }>();
     const hubs = c ? (await env.DB.prepare("SELECT path, json_extract(data, '$.title') AS title FROM recovery_pages WHERE case_id = ? AND kind = 'commercial' LIMIT 12").bind(c.id).all<{ path: string; title: string | null }>()).results : [];
     const profile = await readProfile(env, s.id);
@@ -53,6 +53,11 @@ export async function leadState(env: Env) {
         const waiting: string[] = [];
         if (readProducts(i.products as string | null).items.length < f.minProducts) waiting.push(`owner must add ${f.minProducts}+ products with affiliate links`);
         if (gate?.problems.some((p) => p.rule === "images" && p.level === "block")) waiting.push("owner must upload real photos");
+        const iv = (() => { try { return i.interview ? JSON.parse(String(i.interview)) : null; } catch { return null; } })();
+        if (i.status === "briefed" && waitingInterview(iv, rules.requireInterview)) waiting.push("owner must answer the experience interview (or skip it)");
+        const who = i.author || (rules.authorMode === "ask" ? null : rules.authorMode);
+        if (i.status === "briefed" && !who) waiting.push("owner must choose who writes (agent or owner with his own Claude)");
+        if (i.status === "briefed" && who === "owner") waiting.push("owner is writing this article himself; do not propose write_draft");
         return { idea_id: i.id, keyword: i.keyword, format: f.id, status: i.status, volume: i.volume, covered_by: i.covered_by, on_wordpress: !!i.wp_post_id, gate_ok: gate?.ok ?? null, waiting_for_owner: waiting };
       })
     });

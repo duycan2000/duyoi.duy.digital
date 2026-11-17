@@ -6,7 +6,7 @@ import { aiJson } from "./ai";
 import { logActivity } from "./activity";
 import { formatOf, type FormatId } from "./formats";
 import { HttpError, json, now, readJson } from "./http";
-import { extractNumbers } from "./recovery-extract";
+import { clean, extractNumbers } from "./recovery-extract";
 import type { Env, User } from "./types";
 
 export const MAX_PDF_BYTES = 15 * 1024 * 1024;
@@ -16,8 +16,19 @@ export interface Profile {
   services: string[]; products: { name: string; specs: string; notes: string }[];
   facts: { text: string; source: string }[]; banned: string[];
   ideas: { title: string; keyword: string; format: FormatId; why: string; source: string }[];
+  voice: Voice | null;
 }
-export const emptyProfile = (): Profile => ({ summary: "", audience: "", tone: "", services: [], products: [], facts: [], banned: [], ideas: [] });
+export interface Voice { person: string; formality: string; sentence_style: string; paragraphing: string; opening_style: string; vocabulary: string[]; avoid: string[]; summary: string; excerpts: string[]; sources: string[]; at: number }
+export const emptyProfile = (): Profile => ({ summary: "", audience: "", tone: "", services: [], products: [], facts: [], banned: [], ideas: [], voice: null });
+
+function cleanVoice(v: unknown): Voice | null {
+  if (!v || typeof v !== "object") return null;
+  const b = v as Record<string, unknown>;
+  const voice = { person: cut(b.person, 300), formality: cut(b.formality, 200), sentence_style: cut(b.sentence_style, 300), paragraphing: cut(b.paragraphing, 200), opening_style: cut(b.opening_style, 300),
+    vocabulary: arr(b.vocabulary, 12).map((x) => cut(x, 80)).filter(Boolean), avoid: arr(b.avoid, 10).map((x) => cut(x, 120)).filter(Boolean),
+    summary: cut(b.summary ?? b.summary_vi, 800), excerpts: arr(b.excerpts, 3).map((x) => cut(x, 500)).filter(Boolean), sources: arr(b.sources, 8).map((x) => cut(x, 300)).filter(Boolean), at: Number(b.at) || 0 };
+  return voice.person || voice.summary || voice.sentence_style ? voice : null;
+}
 
 const cut = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n);
 const arr = (v: unknown, max: number) => (Array.isArray(v) ? v.slice(0, max) : []);
@@ -30,7 +41,8 @@ export function cleanProfile(v: unknown): Profile {
     products: arr(b.products, 60).map((x) => { const p = (x || {}) as Record<string, unknown>; return { name: cut(p.name, 120), specs: cut(p.specs, 800), notes: cut(p.notes, 600) }; }).filter((p) => p.name),
     facts: arr(b.facts, 150).map((x) => { const f = (typeof x === "string" ? { text: x } : x || {}) as Record<string, unknown>; return { text: cut(f.text, 400), source: cut(f.source, 120) }; }).filter((f) => f.text),
     banned: arr(b.banned, 60).map((x) => cut(x, 120)).filter(Boolean),
-    ideas: arr(b.ideas, 40).map((x) => { const i = (x || {}) as Record<string, unknown>; return { title: cut(i.title, 160), keyword: cut(i.keyword, 120).toLowerCase(), format: formatOf(String(i.format)).id, why: cut(i.why ?? i.why_vi, 300), source: cut(i.source, 120) }; }).filter((i) => i.keyword || i.title)
+    ideas: arr(b.ideas, 40).map((x) => { const i = (x || {}) as Record<string, unknown>; return { title: cut(i.title, 160), keyword: cut(i.keyword, 120).toLowerCase(), format: formatOf(String(i.format)).id, why: cut(i.why ?? i.why_vi, 300), source: cut(i.source, 120) }; }).filter((i) => i.keyword || i.title),
+    voice: cleanVoice(b.voice)
   };
 }
 
@@ -59,7 +71,8 @@ export function mergeProfile(p: Profile, r: Record<string, unknown>, source: str
     products: uniq([...p.products, ...add.products], (x) => x.name),
     facts: uniq([...p.facts, ...add.facts], (x) => x.text),
     banned: uniq([...p.banned, ...add.banned], (x) => x),
-    ideas: uniq([...p.ideas, ...add.ideas], (x) => x.keyword || x.title)
+    ideas: uniq([...p.ideas, ...add.ideas], (x) => x.keyword || x.title),
+    voice: p.voice
   });
 }
 
@@ -68,7 +81,7 @@ export function profileFor(p: Profile, keyword: string) {
   const kt = new Set(keyword.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2));
   const scored = p.facts.map((f) => ({ f, s: f.text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => kt.has(w)).length }));
   const facts = scored.sort((a, b) => b.s - a.s).slice(0, 30).map((x) => x.f);
-  return { summary: p.summary, audience: p.audience, tone: p.tone, services: p.services.slice(0, 20), products: p.products.slice(0, 15).map((x) => ({ name: x.name, specs: x.specs })), facts, banned: p.banned };
+  return { voice: p.voice ? { person: p.voice.person, formality: p.voice.formality, sentence_style: p.voice.sentence_style, paragraphing: p.voice.paragraphing, opening_style: p.voice.opening_style, vocabulary: p.voice.vocabulary, avoid: p.voice.avoid, excerpts: p.voice.excerpts } : null, summary: p.summary, audience: p.audience, tone: p.tone, services: p.services.slice(0, 20), products: p.products.slice(0, 15).map((x) => ({ name: x.name, specs: x.specs })), facts, banned: p.banned };
 }
 export const profileNumbers = (p: Profile): string[] => p.facts.flatMap((f) => extractNumbers(f.text)).concat(p.products.flatMap((x) => extractNumbers(`${x.name} ${x.specs}`)));
 
@@ -136,4 +149,39 @@ export async function apiDeleteDoc(env: Env, user: User, siteId: number, docId: 
   canEdit(user);
   await env.DB.prepare("DELETE FROM site_docs WHERE id = ? AND site_id = ?").bind(docId, siteId).run();
   return json({ ok: true });
+}
+
+// POST /api/sites/:id/voice { urls[], text } — rút giọng văn từ bài mẫu (chỉ bài trên chính site, hoặc chữ anh dán)
+export async function apiVoice(env: Env, req: Request, user: User, siteId: number): Promise<Response> {
+  canEdit(user);
+  const site = await env.DB.prepare("SELECT id, domain, language FROM sites WHERE id = ?").bind(siteId).first<{ id: number; domain: string; language: string }>();
+  if (!site) throw new HttpError(404, "Không tìm thấy site.", "not_found");
+  const body = await readJson<{ urls?: unknown; text?: unknown }>(req);
+  const apex = site.domain.replace(/^www\./, "");
+  const urls = (Array.isArray(body.urls) ? body.urls : String(body.urls || "").split(/\s+/)).map((u) => String(u).trim()).filter(Boolean).slice(0, 5);
+  const samples: { source: string; text: string }[] = [];
+  for (const u of urls) {
+    let url: URL;
+    try { url = new URL(u); } catch { throw new HttpError(400, `Địa chỉ không hợp lệ: ${u}`, "validation"); }
+    if (url.protocol !== "https:" || url.hostname.replace(/^www\./, "") !== apex) throw new HttpError(400, `Chỉ lấy bài trên chính ${apex} (giọng văn của site anh, không chép giọng site khác): ${u}`, "validation");
+    const res = await fetch(url.href, { headers: { "User-Agent": "DuyOi/1.0 (+voice)" }, signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (!res || !res.ok) throw new HttpError(502, `Không mở được ${u}`, "fetch_failed");
+    const html = await res.text();
+    const main = (html.match(/<article[\s\S]*?<\/article>/i) || html.match(/<main[\s\S]*?<\/main>/i) || [html])[0].replace(/<(script|style|nav|header|footer|aside)[\s\S]*?<\/\1>/gi, " ");
+    samples.push({ source: url.href, text: clean(main).split(" ").slice(0, 1800).join(" ") });
+  }
+  const pasted = String(body.text || "").trim().slice(0, 12000);
+  if (pasted) samples.push({ source: "đoạn anh dán", text: pasted });
+  if (!samples.length || samples.every((x) => x.text.split(" ").length < 150)) throw new HttpError(400, "Cần ít nhất một bài mẫu dài (từ 150 chữ): dán địa chỉ bài trên site hoặc dán chữ.", "validation");
+  const r = await aiJson<Record<string, unknown>>(env, {
+    template: "voice_profile", task: "docs.voice", siteId,
+    rules: "Copy excerpts exactly from the samples. Reply with a single JSON object only.",
+    input: { site_language: site.language, samples: samples.map((x) => x.text) }
+  });
+  const p = await readProfile(env, siteId);
+  const voice = cleanVoice({ ...r, summary: r.summary_vi, sources: samples.map((x) => x.source), at: now() });
+  if (!voice) throw new HttpError(502, "Không rút được giọng văn: thử bài mẫu khác.", "ai_empty");
+  await saveProfile(env, siteId, { ...p, voice }, "agent:docs");
+  await logActivity(env, "agent:docs", "docs.voice", `Rút giọng văn từ ${samples.length} bài mẫu`, siteId);
+  return json({ ok: true, voice });
 }

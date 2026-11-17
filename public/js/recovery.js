@@ -339,6 +339,15 @@ function docsHtml(ct, canEdit) {
       <td>${x.counts ? `${x.counts.facts} dữ kiện · ${x.counts.products} sản phẩm · ${x.counts.ideas} gợi ý bài` : "—"}</td>
       <td>${canEdit ? `<button type="button" class="danger" data-doc-del="${x.id}">Bỏ</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
     ${ideas.length ? `<h3 class="sub">${K.icon(K.ICON.pen)}Bài viết gợi ý từ tài liệu</h3><div class="tablewrap boxed"><table><thead><tr><th>Bài</th><th>Định dạng</th><th>Vì sao</th><th></th></tr></thead><tbody>${ideas.map((i) => `<tr><td><b>${esc(i.title)}</b><small>${esc(i.keyword)}</small></td><td><span class="tag fmt">${esc(FMT_LABEL[i.format] || i.format)}</span></td><td>${esc(i.why)}<small>${esc(i.source)}</small></td><td>${canEdit ? `<button type="button" data-doc-idea="${esc(i.keyword)}" data-fmt="${esc(i.format)}">Thêm thành chủ đề</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <div class="voice">
+      <h3 class="sub">${K.icon(K.ICON.pen)}Giọng văn của site</h3>
+      ${p.voice ? `<p><b>${esc(p.voice.summary)}</b></p><p class="note">Xưng hô: ${esc(p.voice.person)} · ${esc(p.voice.formality)} · Câu: ${esc(p.voice.sentence_style)}${p.voice.avoid.length ? ` · Tránh: ${esc(p.voice.avoid.join("; "))}` : ""}</p>` : `<p class="note">Chưa có. Người viết sẽ dùng giọng chung, dễ nghe như AI.</p>`}
+      ${canEdit ? `<form id="voice-form" class="form-grid">
+        <label>Địa chỉ 1–5 bài hay nhất trên chính site (mỗi dòng một bài) <textarea name="urls" rows="3" placeholder="https://${esc(ct.docs.domain || "ten-mien")}/bai-hay/"></textarea></label>
+        <label>Hoặc dán đoạn anh tự viết (từ 150 chữ) <textarea name="text" rows="3"></textarea></label>
+        <div class="toolbar full"><button type="submit">${p.voice ? "Rút lại giọng văn" : "Rút giọng văn"}</button></div>
+      </form>` : ""}
+    </div>
     <form id="profile-form" class="profile">
       <h3 class="sub">${K.icon(K.ICON.users)}Hồ sơ site (anh sửa được)</h3>
       <div class="form-grid">
@@ -355,6 +364,42 @@ function docsHtml(ct, canEdit) {
   </details>`;
 }
 
+let AUTHOR_MODE = "ask";
+const writerOf = (i) => i.author || (AUTHOR_MODE === "ask" ? null : AUTHOR_MODE);
+
+function interviewBox(i) {
+  const iv = i.interview;
+  if (!iv || !iv.questions.length || !["briefed", "drafted"].includes(i.status)) return "";
+  const done = iv.answers.some((a) => a && a.trim());
+  const open = i.waitingInterview;
+  return `<details class="iv-box"${open ? " open" : ""}><summary>Phỏng vấn trải nghiệm ${done ? `<span class="tag ok">Đã trả lời</span>` : iv.skipped ? `<span class="tag">Đã bỏ qua</span>` : `<span class="tag warn">Agent đang hỏi anh</span>`}</summary>
+    <p class="note">Vài dòng trải nghiệm thật của anh (dự án, con số của chính anh, lỗi từng gặp) làm bài khác hẳn văn AI. Số liệu anh ghi ở đây được coi là có nguồn.</p>
+    <form data-iv="${i.id}" class="iv">${iv.questions.map((q, n) => `<label>${esc(q)}<textarea name="a${n}" rows="2" maxlength="2000">${esc(iv.answers[n] || "")}</textarea></label>`).join("")}
+      <div class="toolbar"><button type="submit" class="primary">Lưu câu trả lời</button>${!done ? `<button type="button" data-iv-skip="${i.id}">Bỏ qua, viết luôn</button>` : ""}</div>
+    </form></details>`;
+}
+
+function authorBox(i) {
+  if (i.status !== "briefed" && !(i.status === "drafted" && i.draft?.author === "owner" && !i.wp_post_id)) return "";
+  if (i.waitingInterview) return "";
+  const who = writerOf(i);
+  if (!who) return `<div class="author-pick"><b>Ai viết bài này?</b>
+    <div class="toolbar"><button type="button" class="primary" data-author="agent" data-id="${i.id}">Agent viết</button><button type="button" data-author="owner" data-id="${i.id}">Tôi tự viết bằng Claude</button></div>
+    <small class="note">Anh tự viết: lấy gói yêu cầu dán vào Claude của anh, rồi dán bài vào đây; Biên tập viên chấm và sửa nếu chưa đạt.</small></div>`;
+  if (who !== "owner") return i.author ? `<p class="note">Agent viết bài này. <button type="button" class="linkish" data-author="owner" data-id="${i.id}">Đổi: tôi tự viết</button></p>` : "";
+  return `<div class="owner-box">
+    <b>Anh tự viết bằng Claude</b>
+    <ol class="steps"><li>Lấy gói yêu cầu (đủ dàn ý, khung định dạng, giọng văn, dữ kiện, sản phẩm, token) và dán vào Claude của anh.</li><li>Dán bài Claude trả về (Markdown hoặc HTML) vào ô dưới.</li><li>Biên tập viên chấm theo khung; nếu chưa đạt thì sửa (tuỳ anh chọn).</li></ol>
+    <div class="toolbar"><button type="button" data-handoff="${i.id}">Xem gói yêu cầu</button><button type="button" data-handoff-dl="${i.id}">Tải file .md</button>${i.status === "briefed" ? `<button type="button" class="linkish" data-author="agent" data-id="${i.id}">Đổi: để agent viết</button>` : ""}</div>
+    <div class="handoff" id="handoff-${i.id}" hidden><textarea readonly rows="12" aria-label="Gói yêu cầu"></textarea><div class="toolbar"><button type="button" data-copy="${i.id}">Sao chép</button></div></div>
+    <form data-import="${i.id}" class="import">
+      <label>${i.draft?.author === "owner" ? "Dán bản mới (thay bản hiện tại)" : "Dán bài anh viết"}<textarea name="content" rows="8" placeholder="# Tiêu đề&#10;&#10;Đoạn mở bài…&#10;&#10;## Mục 1…"></textarea></label>
+      <label class="check"><input type="checkbox" name="revise" checked><span>Cho phép sửa nếu chưa đạt<small>Biên tập viên chấm; dưới mức hoặc thiếu phần của khung thì Người viết sửa đúng chỗ đó (tối đa 2 vòng). Bỏ chọn nếu anh chỉ muốn chấm.</small></span></label>
+      <div class="toolbar"><button type="submit" class="primary">Đưa bài vào và chấm</button></div>
+    </form>
+  </div>`;
+}
+
 function reviewBox(i) {
   const r = i.draft?.review;
   if (!i.draft) return "";
@@ -368,6 +413,7 @@ function reviewBox(i) {
 }
 
 function contentHtml(c, ct, canEdit) {
+  AUTHOR_MODE = ct.authorMode || "ask";
   const st = ct.structure;
   const active = ct.ideas.filter((i) => ["approved", "briefed", "drafted", "published"].includes(i.status));
   const ideas = ct.ideas.filter((i) => i.status === "idea");
@@ -435,18 +481,21 @@ function contentHtml(c, ct, canEdit) {
       ${fmtSelect(i)}
       ${productsBox(i)}
       ${b ? `<details><summary>Dàn ý</summary><div class="diff">${(b.outline || []).map((o) => `<b>${esc(o.h2 || "")}</b><br>${(o.points || []).map((x) => `· ${esc(x)}`).join("<br>")}`).join("<br>")}${b.expert_input?.length ? `<br><br><b>Chủ site cần bổ sung (kinh nghiệm thật):</b><br>${b.expert_input.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}${b.serp?.paa?.length ? `<br><br><b>People Also Ask:</b><br>${b.serp.paa.map((x) => `· ${esc(x)}`).join("<br>")}` : ""}</div></details>` : ""}
+      ${interviewBox(i)}
+      ${authorBox(i)}
       ${slotsBox(i)}
       ${reviewBox(i)}
       ${i.gate?.problems?.length ? `<ul class="gate">${i.gate.problems.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join("")}</ul>` : ""}
-      ${d ? `<details><summary>Bài nháp (${d.words} từ)</summary><div class="article">${renderArticle(d.html)}</div><p class="note">Meta description: ${esc(d.meta_description)}</p></details>` : ""}
+      ${d ? `<details><summary>Bài nháp (${d.words} từ) <span class="tag ${d.author === "owner" ? "fmt" : "info"}">${d.author === "owner" ? "Anh viết" : "Agent viết"}</span></summary><div class="article">${renderArticle(d.html)}</div><p class="note">Meta description: ${esc(d.meta_description)}</p></details>` : ""}
       ${i.wp_edit_url ? `<div class="msg ok">Đã có bản nháp trên WordPress (chưa đăng). <a href="${esc(i.wp_edit_url)}" target="_blank" rel="noopener">Mở để sửa, chọn tác giả thật và đăng</a></div>` : ""}
       <div class="toolbar">
         ${i.status === "approved" && i.products.items.length >= (F[i.format]?.minProducts || 0) ? btn(i, "brief", "Lập dàn ý", "primary") : ""}
-        ${i.status === "briefed" ? btn(i, "draft", "Viết bài nháp", "primary") + btn(i, "brief", "Lập lại dàn ý") : ""}
+        ${i.status === "briefed" && writerOf(i) === "agent" && !i.waitingInterview ? btn(i, "draft", "Agent viết bài nháp", "primary") : ""}
+        ${i.status === "briefed" ? btn(i, "brief", "Lập lại dàn ý") : ""}
         ${i.status === "drafted" && !i.wp_post_id && i.gate?.ok ? (ct.platform === "astro" ? `<button type="button" class="primary" data-export="${i.id}">Tải file Markdown cho Astro</button>` : btn(i, "wp", "Tạo bản nháp WordPress", "primary")) : ""}
         ${i.status === "drafted" && !i.wp_post_id && i.draft?.review?.issues?.length ? btn(i, "revise", "Sửa theo nhận xét") : ""}
         ${i.status === "drafted" && !i.wp_post_id ? btn(i, "review", "Chấm lại") : ""}
-        ${i.status === "drafted" && !i.wp_post_id ? btn(i, "draft", "Viết lại") : ""}
+        ${i.status === "drafted" && !i.wp_post_id && i.draft?.author !== "owner" ? btn(i, "draft", "Viết lại") : ""}
         ${i.wp_post_id && i.status !== "published" ? btn(i, "published", "Đã đăng") : ""}
         ${["approved", "briefed", "drafted"].includes(i.status) ? btn(i, "rejected", "Bỏ chủ đề", "danger") : ""}
       </div></div>`;
@@ -519,6 +568,10 @@ function rulesHtml(c, canEdit) {
       <label>Quét lại sau (ngày) <input type="number" name="autoRescanDays" min="3" max="60" value="${r.autoRescanDays}"${dis}></label>
     </div>
     <label class="check"><input type="checkbox" name="autoApproveIdeas"${r.autoApproveIdeas ? " checked" : ""}${dis}><span>Tự duyệt chủ đề bài mới tốt nhất<small>Chỉ chủ đề site chưa có trang, gắn với một trang dịch vụ, trong giới hạn bài/tháng.</small></span></label>
+    <div class="form-grid">
+      <label>Ai viết bài mới <select name="authorMode"${dis}>${[["ask", "Hỏi anh từng bài"], ["agent", "Agent viết (model viết bài)"], ["owner", "Anh tự viết bằng Claude, agent kiểm"]].map(([v, l]) => `<option value="${v}"${(r.authorMode || "ask") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+    </div>
+    <label class="check"><input type="checkbox" name="requireInterview"${r.requireInterview !== false ? " checked" : ""}${dis}><span>Phỏng vấn trải nghiệm trước khi viết<small>Sau khi lập dàn ý, agent hỏi anh 3–5 câu về trải nghiệm thật; agent chỉ viết khi anh đã trả lời hoặc bấm Bỏ qua. Đây là thứ làm bài giống người viết nhất.</small></span></label>
     <label class="check"><input type="checkbox" name="autoApplyApproved"${r.autoApplyApproved ? " checked" : ""}${dis}><span>Tự áp dụng việc người đã duyệt<small>Chỉ việc anh đã bấm Duyệt; tối đa 3 trang mỗi ngày; có sao lưu và Hoàn tác. Để tắt nếu muốn tự bấm Áp dụng.</small></span></label>
     <details><summary>Dán luật dạng JSON</summary><textarea name="json" rows="6" placeholder='{"language":"de","blocklist":["…"]}'${dis}></textarea><p class="note">Nếu ô này có nội dung, app dùng JSON thay cho các ô ở trên.</p></details>
     <div class="msg" id="rules-msg" hidden></div>
@@ -622,6 +675,48 @@ function bindCase(main, c, canEdit) {
       try { await api(`/api/sites/${content.media.siteId}/profile`, { method: "PUT", body }); K.state.tabs.rec = "content"; await reload(); } catch (e) { docMsg(e); }
     });
   });
+  $("#voice-form")?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    busy(ev.submitter, "Đang đọc bài mẫu…", async () => {
+      try { await api(`/api/sites/${content.media.siteId}/voice`, { method: "POST", body: { urls: $('[name="urls"]', f).value.split(/\s+/).filter(Boolean), text: $('[name="text"]', f).value } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { docMsg(e); }
+    });
+  });
+  $$("form[data-iv]", main).forEach((f) => f.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const answers = $$("textarea", f).map((t) => t.value);
+    busy(ev.submitter, "Đang lưu…", async () => {
+      try { await api(`/api/content/ideas/${f.dataset.iv}/interview`, { method: "PUT", body: { answers } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+    });
+  }));
+  $$("[data-iv-skip]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { await api(`/api/content/ideas/${b.dataset.ivSkip}/interview`, { method: "PUT", body: { skip: true } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  })));
+  $$("[data-author]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { await api(`/api/content/ideas/${b.dataset.id}`, { method: "PUT", body: { author: b.dataset.author } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+  })));
+  const handoff = async (id) => {
+    const res = await fetch(`/api/content/ideas/${id}/handoff.md`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || `Lỗi ${res.status}`);
+    return { text: await res.text(), name: (/filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "") || [])[1] || "yeu-cau.md" };
+  };
+  $$("[data-handoff]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { const h = await handoff(b.dataset.handoff); const box = $(`#handoff-${b.dataset.handoff}`); $("textarea", box).value = h.text; box.hidden = false; } catch (e) { ideaMsg(e); }
+  })));
+  $$("[data-handoff-dl]", main).forEach((b) => b.addEventListener("click", () => busy(b, "…", async () => {
+    try { const h = await handoff(b.dataset.handoffDl); const url = URL.createObjectURL(new Blob([h.text], { type: "text/markdown" })); const a = document.createElement("a"); a.href = url; a.download = h.name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); } catch (e) { ideaMsg(e); }
+  })));
+  $$("[data-copy]", main).forEach((b) => b.addEventListener("click", async () => {
+    const t = $(`#handoff-${b.dataset.copy} textarea`);
+    try { await navigator.clipboard.writeText(t.value); b.textContent = "Đã chép"; } catch { t.select(); document.execCommand("copy"); b.textContent = "Đã chép"; }
+  }));
+  $$("form[data-import]", main).forEach((f) => f.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const content = $('[name="content"]', f).value;
+    busy(ev.submitter, "Đang đưa bài vào và chấm…", async () => {
+      try { await api(`/api/content/ideas/${f.dataset.import}/import`, { method: "POST", body: { content, revise: $('[name="revise"]', f).checked } }); K.state.tabs.rec = "content"; await reload(); } catch (e) { ideaMsg(e); }
+    });
+  }));
   $("#idea-new")?.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const d = formData(ev.currentTarget);

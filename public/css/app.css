@@ -661,3 +661,13 @@ input, select, textarea { border-radius: 12px; }
 .glass .stats a:hover { background: rgba(255, 255, 255, 0.9); }
 .glass .stats b { font-size: 20px; font-weight: 700; }
 .glass .stats small { font-size: 12px; }
+.iv-box, .owner-box, .author-pick { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.iv-box { display: block; } .iv-box > summary { cursor: pointer; font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.iv-box form { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.author-pick { background: rgba(111, 76, 246, 0.06); border-color: rgba(111, 76, 246, 0.25); }
+.owner-box { background: rgba(214, 92, 224, 0.05); }
+.owner-box .handoff textarea { font-family: var(--mono); font-size: 12px; }
+.owner-box form.import { display: flex; flex-direction: column; gap: 8px; }
+button.linkish { border: 0; padding: 0; min-height: 0; background: none; color: var(--primary); font-weight: 500; text-transform: none; }
+button.linkish:hover { background: none; text-decoration: underline; }
+.voice { border-top: 1px dashed var(--line); padding-top: 8px; margin-top: 8px; }

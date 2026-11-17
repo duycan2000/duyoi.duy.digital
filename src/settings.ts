@@ -30,6 +30,7 @@ export const DEFAULTS = {
   model_t1: "deepseek/deepseek-v4-pro",
   model_t2: "anthropic/claude-haiku-5.5",
   model_t3: "anthropic/claude-sonnet-5.5",
+  model_writer: "anthropic/claude-sonnet-5.5",
   model_image: "openai/gpt-image-2",
   timezone: "Asia/Ho_Chi_Minh",
   cloudflare_account_id: "-"

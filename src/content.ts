@@ -12,6 +12,7 @@ import { readRules, type SiteRules } from "./recovery-rules";
 import { wpCall } from "./wordpress";
 import { mediaReady, mediaSite, storeImage } from "./media";
 import { profileFor, profileNumbers, readProfile, type Profile } from "./docs";
+import { checkStructure, checkVoice, clichesFor, markdownToHtml } from "./style";
 import { imageSize, MAX_IMAGE_BYTES, sniffImage, stripJpegMeta } from "./images";
 import { checkFormat, detectFormat, FORMATS, formatOf, formatSpec, parseProducts, productNumbers, readImages, readProducts, renderDraft, slotsFor, type FormatId, type Slot, type UploadedImage } from "./formats";
 import type { Env, User } from "./types";
@@ -122,7 +123,7 @@ export async function approveIdeaCore(env: Env, ideaId: number, actor: string): 
   await logActivity(env, actor, "content.approved", `Duyệt chủ đề bài mới: "${i.keyword}"`, c.site_id);
 }
 
-interface IdeaRow { id: number; site_id: number; case_id: number | null; keyword: string; volume: number | null; intent: string | null; hub_path: string | null; covered_by: string | null; status: string; brief: string | null; draft: string | null; gate: string | null; wp_post_id: number | null; format: FormatId; products: string | null; images: string | null }
+interface IdeaRow { id: number; site_id: number; case_id: number | null; keyword: string; volume: number | null; intent: string | null; hub_path: string | null; covered_by: string | null; status: string; brief: string | null; draft: string | null; gate: string | null; wp_post_id: number | null; format: FormatId; products: string | null; images: string | null; interview: string | null; author: string | null }
 async function idea(env: Env, id: number): Promise<IdeaRow> {
   const r = await env.DB.prepare("SELECT * FROM content_ideas WHERE id = ?").bind(id).first<IdeaRow>();
   if (!r) throw new HttpError(404, "Không tìm thấy ý tưởng.", "not_found");
@@ -162,7 +163,10 @@ export async function briefCore(env: Env, ideaId: number, actor: string): Promis
   if (pages.some((p) => p.path.replace(/\//g, "") === slug)) throw new HttpError(409, `Slug "${slug}" trùng với trang có sẵn.`, "duplicate");
   const photo_requests = (Array.isArray(b.photo_requests) ? b.photo_requests : []).map((x: { key?: unknown; what?: unknown }) => ({ key: String(x?.key || "").toLowerCase(), what: String(x?.what || "").slice(0, 160) })).filter((x: { key: string; what: string }) => /^[sg]\d{1,2}$/.test(x.key) && x.what).slice(0, 6);
   const brief = { ...b, photo_requests, slug, serp, keyword: i.keyword, hub: i.hub_path, format: f.id };
-  await env.DB.prepare("UPDATE content_ideas SET brief = ?, status = 'briefed', updated_at = ? WHERE id = ?").bind(JSON.stringify(brief), now(), ideaId).run();
+  const questions = (Array.isArray(b.interview) ? b.interview : []).map((q: unknown) => String(q || "").trim().slice(0, 300)).filter(Boolean).slice(0, 5);
+  const prevIv = readInterview(i.interview);
+  const interview: Interview = prevIv && answered(prevIv).length ? prevIv : { questions, answers: [], skipped: false };
+  await env.DB.prepare("UPDATE content_ideas SET brief = ?, interview = ?, status = 'briefed', updated_at = ? WHERE id = ?").bind(JSON.stringify(brief), JSON.stringify(interview), now(), ideaId).run();
   await logActivity(env, actor, "content.brief", `Lập dàn ý: "${String(b.title || i.keyword)}"`, c.site_id);
 }
 
@@ -184,7 +188,7 @@ export function cleanHtml(html: string): string {
     .trim();
 }
 
-export function checkArticle(html: string, rules: SiteRules, hubPath: string | null, opts: { minWords?: number; extraNumbers?: string[]; extra?: GateProblem[] } = {}): GateResult {
+export function checkArticle(html: string, rules: SiteRules, hubPath: string | null, opts: { minWords?: number; extraNumbers?: string[]; extra?: GateProblem[]; numbersLevel?: "block" | "warn" } = {}): GateResult {
   const problems: GateProblem[] = [];
   const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
   const hits = blockHitsIn(text, [], rules);
@@ -196,7 +200,7 @@ export function checkArticle(html: string, rules: SiteRules, hubPath: string | n
   if (rules.language === "en" && r.de > r.en) problems.push({ rule: "language", level: "block", message: "Bài có vẻ là tiếng Đức, site viết tiếng Anh." });
   const allowed = new Set([...rules.verifiedNumbers.flatMap(extractNumbers), ...standardNumbers(text), ...(opts.extraNumbers || [])]);
   const risky = extractNumbers(text).filter((n) => !allowed.has(n) && (/[%€$]|eur|usd/.test(n) || Number(n.replace(/[^\d]/g, "")) >= 10));
-  if (risky.length) problems.push({ rule: "numbers", level: "block", message: `Có số liệu chưa có nguồn: ${risky.slice(0, 8).join(", ")}. Xoá hoặc ghi nguồn đã kiểm chứng.` });
+  if (risky.length) problems.push({ rule: "numbers", level: opts.numbersLevel || "block", message: `Có số liệu chưa có nguồn: ${risky.slice(0, 8).join(", ")}. ${opts.numbersLevel === "warn" ? "Anh tự viết: kiểm lại nguồn trước khi đăng." : "Xoá hoặc ghi nguồn đã kiểm chứng."}` });
   const words = wordCount(text);
   const minWords = opts.minWords ?? 600;
   if (words < minWords) problems.push({ rule: "length", level: "block", message: `Bài quá ngắn (${words} từ, cần ${minWords}): dễ thành nội dung mỏng.` });
@@ -207,7 +211,7 @@ export function checkArticle(html: string, rules: SiteRules, hubPath: string | n
 }
 
 interface Review { score: number; criteria: { name: string; score: number; note: string }[]; issues: { where: string; problem: string; fix: string }[]; verdict: string; rounds: number[]; at: number }
-interface Draft { title: string; slug: string; raw: string; html: string; meta_description: string; words: number; review?: Review | null; reviewError?: string }
+interface Draft { title: string; slug: string; raw: string; html: string; meta_description: string; words: number; review?: Review | null; reviewError?: string; author?: "agent" | "owner" }
 
 const TOKEN_RE = /\[\[(?:DISCLOSURE|BUY:\d+|IMG:[a-z0-9]+)\]\]/g;
 const tokensOf = (h: string) => new Set(h.match(TOKEN_RE) || []);
@@ -218,13 +222,21 @@ async function ctxOf(env: Env, i: IdeaRow): Promise<Ctx> {
   const rules = readRules(c.rules);
   return { i, c, rules, lang: rules.language || c.language, profile: await readProfile(env, c.site_id), products: readProducts(i.products), brief: i.brief ? JSON.parse(i.brief) : {} };
 }
+interface Interview { questions: string[]; answers: string[]; skipped: boolean }
+const readInterview = (s: string | null): Interview | null => { try { const v = s ? JSON.parse(s) as Interview : null; return v && Array.isArray(v.questions) ? { questions: v.questions, answers: Array.isArray(v.answers) ? v.answers : [], skipped: !!v.skipped } : null; } catch { return null; } };
+const answered = (iv: Interview | null) => (iv ? iv.questions.map((q, n) => ({ q, a: String(iv.answers[n] || "").trim() })).filter((x) => x.a) : []);
+// Agent còn chờ anh trả lời phỏng vấn?
+export const waitingInterview = (iv: Interview | null, required: boolean) => required && !!iv && iv.questions.length > 0 && !iv.skipped && answered(iv).length === 0;
+const interviewNumbers = (iv: Interview | null) => answered(iv).flatMap((x) => extractNumbers(x.a));
+
 const writerInput = (x: Ctx) => ({
   format: x.i.format, keyword: x.i.keyword,
   outline: { title: x.brief.title, sections: x.brief.outline },
   products: x.products.items.map((p, n) => ({ n: n + 1, name: p.name, best_for: p.bestFor, tested: p.tested, owner_notes: p.notes, specs: p.specs, pros: p.pros, cons: p.cons })),
+  voice: profileFor(x.profile, x.i.keyword).voice, owner_interview: answered(readInterview(x.i.interview)),
   site_profile: profileFor(x.profile, x.i.keyword), paa: x.brief.serp?.paa || []
 });
-const rulesFor = (x: Ctx) => writingRules(x.lang, [...x.rules.verifiedNumbers, ...productNumbers(x.products), ...profileNumbers(x.profile)], blockOf(x.rules, x.profile));
+const rulesFor = (x: Ctx) => `${writingRules(x.lang, [...x.rules.verifiedNumbers, ...productNumbers(x.products), ...profileNumbers(x.profile), ...interviewNumbers(readInterview(x.i.interview))], blockOf(x.rules, x.profile))}\nNever use these stock phrases: ${clichesFor(x.lang).join(" | ")}.`;
 
 // Biên tập viên chấm (model khác người viết)
 async function reviewOnce(env: Env, x: Ctx, raw: string): Promise<Omit<Review, "rounds" | "at">> {
@@ -255,18 +267,27 @@ async function reviseOnce(env: Env, x: Ctx, raw: string, issues: Review["issues"
   return out;
 }
 
-// Chấm → nếu dưới mức thì sửa → chấm lại (tối đa maxRevisions vòng)
+// Lỗi cấu trúc và câu sáo (kiểm bằng code) đưa vào vòng sửa như nhận xét của Biên tập viên
+function codeIssues(x: Ctx, raw: string): Review["issues"] {
+  const slots = slotsFor(x.i.format, x.products, (x.brief as { photo_requests?: { key: string; what: string }[] }).photo_requests || [], {});
+  return [...checkStructure(x.i.format, raw, x.products, slots), ...checkVoice(raw, x.lang)].filter((p) => p.level === "block")
+    .map((p) => ({ where: p.rule === "structure" ? "Cấu trúc" : "Giọng văn", problem: p.message, fix: p.rule === "structure" ? "Thêm phần còn thiếu đúng theo khung định dạng." : "Viết lại các câu đó cụ thể, tự nhiên hơn." }));
+}
+
+// Chấm → nếu dưới mức hoặc thiếu phần/câu sáo thì sửa → chấm lại (tối đa maxRevisions vòng)
 async function qualityLoop(env: Env, x: Ctx, raw: string, maxRevisions: number, prev?: Review | null): Promise<{ raw: string; review: Review }> {
   const rounds = [...(prev?.rounds || [])];
   let cur = raw;
   let rv = prev && maxRevisions > 0 ? { score: prev.score, criteria: prev.criteria, issues: prev.issues, verdict: prev.verdict } : await reviewOnce(env, x, cur);
   if (!(prev && maxRevisions > 0)) rounds.push(rv.score);
-  for (let n = 0; n < maxRevisions && rv.score < x.rules.minQualityScore && rv.issues.length; n++) {
-    const next = await reviseOnce(env, x, cur, rv.issues);
+  let code = codeIssues(x, cur);
+  for (let n = 0; n < maxRevisions && (rv.score < x.rules.minQualityScore || code.length) && (rv.issues.length || code.length); n++) {
+    const next = await reviseOnce(env, x, cur, [...code, ...rv.issues].slice(0, 12));
     if (next === cur) break;
     const r2 = await reviewOnce(env, x, next);
+    const code2 = codeIssues(x, next);
     rounds.push(r2.score);
-    if (r2.score >= rv.score) { cur = next; rv = r2; } else break;
+    if (r2.score >= rv.score || code2.length < code.length) { cur = next; rv = r2; code = code2; } else break;
   }
   return { raw: cur, review: { ...rv, rounds, at: now() } };
 }
@@ -281,13 +302,14 @@ async function regate(env: Env, i: IdeaRow, c: CaseInfo, draft: Draft): Promise<
   const f = formatOf(i.format);
   const profile = await readProfile(env, c.site_id);
   const extra = checkFormat({ format: i.format, title: draft.title, html, products, slots, rules });
+  extra.push(...checkStructure(i.format, draft.raw ?? draft.html, products, slots), ...checkVoice(html, rules.language || c.language));
   const rv = draft.review;
   if (!rv) extra.push({ rule: "quality", level: "warn", message: `Chưa được Biên tập viên chấm${draft.reviewError ? `: ${draft.reviewError}` : ""}.` });
   else if (rv.score < 60) extra.push({ rule: "quality", level: "block", message: `Biên tập viên chấm ${rv.score}/100 (dưới 60): bấm "Sửa theo nhận xét" hoặc viết lại.` });
   else if (rv.score < rules.minQualityScore) extra.push({ rule: "quality", level: "warn", message: `Biên tập viên chấm ${rv.score}/100, dưới mức anh đặt (${rules.minQualityScore}).` });
   const media = await mediaReady(env, await mediaSite(env, c.site_id));
   if (!media.verified && slots.some((s) => s.image)) extra.push({ rule: "media", level: "block", message: `Site chưa phục vụ ảnh ở ${media.base}: bấm "Dựng kho ảnh" (hoặc Kiểm tra lại) ở mục Ảnh thật.` });
-  const gate = checkArticle(html, { ...rules, blocklist: blockOf(rules, profile) }, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: [...productNumbers(products), ...profileNumbers(profile)], extra });
+  const gate = checkArticle(html, { ...rules, blocklist: blockOf(rules, profile) }, f.affiliate ? null : i.hub_path, { minWords: f.minWords, extraNumbers: [...productNumbers(products), ...profileNumbers(profile), ...interviewNumbers(readInterview(i.interview))], extra, numbersLevel: draft.author === "owner" ? "warn" : "block" });
   const out = { ...draft, raw: draft.raw ?? draft.html, html, words: wordCount(html.replace(/<[^>]+>/g, " ")) };
   await env.DB.prepare("UPDATE content_ideas SET draft = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(out), JSON.stringify(gate), now(), i.id).run();
   return { draft: out, gate, slots };
@@ -305,11 +327,15 @@ export async function draftCore(env: Env, ideaId: number, actor: string): Promis
   if (products.items.length < f.minProducts) throw new HttpError(409, `Định dạng ${f.label} cần ít nhất ${f.minProducts} sản phẩm.`, "need_products");
   const brief = JSON.parse(i.brief) as Record<string, unknown> & { serp?: { paa?: string[] }; photo_requests?: { key: string; what: string }[] };
   const slots = slotsFor(i.format, products, brief.photo_requests || [], {});
+  const iv = readInterview(i.interview);
+  if (waitingInterview(iv, rules.requireInterview)) throw new HttpError(409, "Agent đang chờ anh trả lời phỏng vấn trải nghiệm (hoặc bấm Bỏ qua).", "need_interview");
+  void lang;
+  const x0 = await ctxOf(env, i);
   const r = await aiJson<{ title?: string; html?: string; meta_description?: string }>(env, {
     template: "article_draft", task: "content.draft", siteId: c.site_id, format: formatSpec(f.id),
-    rules: writingRules(lang, [...rules.verifiedNumbers, ...productNumbers(products), ...profileNumbers(await readProfile(env, c.site_id))], blockOf(rules, await readProfile(env, c.site_id))),
+    rules: rulesFor(x0),
     input: {
-      format: f.id, keyword: i.keyword,
+      format: f.id, keyword: i.keyword, voice: x0.profile.voice ? profileFor(x0.profile, i.keyword).voice : null, owner_interview: answered(iv),
       outline: { title: brief.title, angle: brief.angle, sections: brief.outline, faq: brief.faq },
       products: products.items.map((p, n) => ({ n: n + 1, name: p.name, merchant: p.merchant, best_for: p.bestFor, tested: p.tested, owner_notes: p.notes, specs: p.specs, pros: p.pros, cons: p.cons })),
       method: products.method, photo_slots: slots.map((s) => ({ key: s.key, what: s.label })), site_profile: profileFor(await readProfile(env, c.site_id), i.keyword),
@@ -320,11 +346,11 @@ export async function draftCore(env: Env, ideaId: number, actor: string): Promis
   let review: Review | null = null;
   let reviewError = "";
   try {
-    const q = await qualityLoop(env, await ctxOf(env, i), raw, 2);
+    const q = await qualityLoop(env, x0, raw, 2);
     raw = q.raw; review = q.review;
   } catch (e) { reviewError = (e as Error).message.slice(0, 200); }
-  const base: Draft = { title: String(r.title || brief.title || i.keyword).slice(0, 120), slug: String(brief.slug || ""), raw, html: raw, meta_description: String(r.meta_description || brief.meta_description || "").slice(0, 160), words: 0, review, reviewError };
-  await env.DB.prepare("UPDATE content_ideas SET status = 'drafted' WHERE id = ?").bind(ideaId).run();
+  const base: Draft = { title: String(r.title || brief.title || i.keyword).slice(0, 120), slug: String(brief.slug || ""), raw, html: raw, meta_description: String(r.meta_description || brief.meta_description || "").slice(0, 160), words: 0, review, reviewError, author: "agent" };
+  await env.DB.prepare("UPDATE content_ideas SET status = 'drafted', author = 'agent' WHERE id = ?").bind(ideaId).run();
   const { draft, gate, slots: s2 } = await regate(env, i, c, base);
   const missing = s2.filter((x) => x.required && !x.image).length;
   await logActivity(env, actor, "content.draft", `Viết bài nháp "${draft.title}" (${draft.words} từ${review ? `, Biên tập viên ${review.rounds.join(" → ")}/100` : ""})${missing ? ` — cần anh tải ${missing} ảnh thật` : gate.ok ? "" : " — Gác cổng chặn"}`, c.site_id);
@@ -359,6 +385,105 @@ export async function reviewCore(env: Env, ideaId: number, revise: boolean, acto
   return gate;
 }
 export const apiReview = async (env: Env, req: Request, user: User, id: number) => { const b = await readJson(req).catch(() => ({})) as { revise?: boolean }; return run(user, () => reviewCore(env, id, b.revise === true, `user:${user.id}`)); };
+
+// PUT /api/content/ideas/:id/interview { answers[], skip? } — anh trả lời phỏng vấn trải nghiệm
+export async function apiInterview(env: Env, req: Request, user: User, id: number): Promise<Response> {
+  canEdit(user);
+  const i = await idea(env, id);
+  const iv = readInterview(i.interview);
+  if (!iv) throw new HttpError(409, "Bài này chưa có câu hỏi phỏng vấn (lập dàn ý trước).", "no_interview");
+  const body = await readJson<{ answers?: unknown; skip?: unknown }>(req);
+  const answers = iv.questions.map((_, n) => String((Array.isArray(body.answers) ? body.answers[n] : "") ?? "").trim().slice(0, 2000));
+  const next: Interview = { questions: iv.questions, answers, skipped: body.skip === true && !answers.some(Boolean) };
+  await env.DB.prepare("UPDATE content_ideas SET interview = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(next), now(), id).run();
+  await logActivity(env, `user:${user.id}`, "content.interview", next.skipped ? `Bỏ qua phỏng vấn cho "${i.keyword}"` : `Trả lời ${answers.filter(Boolean).length} câu phỏng vấn cho "${i.keyword}"`, i.site_id);
+  return json({ ok: true });
+}
+
+// Gói yêu cầu để anh dán vào Claude của anh: đủ dàn ý, khung định dạng, giọng văn, dữ kiện, sản phẩm, token
+export async function handoffText(env: Env, id: number): Promise<{ text: string; filename: string }> {
+  const i = await idea(env, id);
+  if (!i.brief) throw new HttpError(409, "Cần lập dàn ý trước.", "no_brief");
+  const x = await ctxOf(env, i);
+  const f = formatOf(i.format);
+  const b = x.brief as Record<string, unknown> & { outline?: { h2?: string; points?: string[]; h3?: string[] }[]; faq?: string[]; slug?: string; internal_link_anchor?: string; meta_description?: string; photo_requests?: { key: string; what: string }[] };
+  const slots = slotsFor(i.format, x.products, b.photo_requests || [], {});
+  const pf = profileFor(x.profile, i.keyword);
+  const LANG = { de: "Tiếng Đức (xưng Sie)", en: "Tiếng Anh", vi: "Tiếng Việt" } as Record<string, string>;
+  const lines: string[] = [
+    `# Yêu cầu viết bài: ${String(b.title || i.keyword)}`,
+    "",
+    "Anh dán toàn bộ nội dung này vào Claude. Claude viết xong thì anh dán bài (Markdown) vào Duy Ơi › Bài mới › bài này › \"Đưa bài vào\".",
+    "",
+    "## Thông tin bài",
+    `- Từ khoá chính: ${i.keyword}`,
+    `- Định dạng: ${f.label}`,
+    `- Ngôn ngữ: ${LANG[x.lang] || x.lang}`,
+    `- Độ dài tối thiểu: ${f.minWords} từ`,
+    i.hub_path && !f.affiliate ? `- Chèn đúng 1 link nội bộ tới ${i.hub_path} với anchor "${b.internal_link_anchor || ""}" (dạng Markdown [anchor](${i.hub_path}))` : "- Không chèn link ra ngoài; link mua do hệ thống chèn qua token",
+    "",
+    "## Khung định dạng (bắt buộc đúng thứ tự)",
+    f.spec,
+    "",
+    "## Token (giữ nguyên, mỗi token một dòng riêng)",
+    "- [[DISCLOSURE]]: câu công khai link affiliate (hệ thống tự thay).",
+    ...x.products.items.map((p, n) => `- [[BUY:${n + 1}]]: nút mua ${p.name}`),
+    ...slots.map((s) => `- [[IMG:${s.key}]]: ${s.label}${s.required ? " (bắt buộc)" : ""}`),
+    "",
+    "## Dàn ý đã duyệt",
+    ...(b.outline || []).flatMap((o) => [`### ${o.h2 || ""}`, ...(o.points || []).map((p) => `- ${p}`), ...(o.h3 || []).map((h) => `- (H3) ${h}`)]),
+    ...(b.faq?.length ? ["", "FAQ gợi ý:", ...b.faq.map((q) => `- ${q}`)] : []),
+    "",
+    ...(x.products.items.length ? ["## Sản phẩm (chỉ viết về các sản phẩm này, đúng thứ tự)", ...x.products.items.map((p, n) => `${n + 1}. ${p.name}: dùng tốt cho ${p.bestFor || "?"}; ${p.tested ? "ĐÃ dùng thật" : "CHƯA dùng thật (không được viết là đã test)"}${p.specs ? `; thông số: ${p.specs}` : ""}${p.notes ? `; trải nghiệm: ${p.notes}` : ""}${p.pros ? `; ưu: ${p.pros}` : ""}${p.cons ? `; nhược: ${p.cons}` : ""}`), ...(x.products.method ? [`Cách chọn: ${x.products.method}`] : []), ""] : []),
+    ...(answered(readInterview(i.interview)).length ? ["## Trải nghiệm thật của chủ site (dùng làm chất liệu chính)", ...answered(readInterview(i.interview)).map((q) => `- Hỏi: ${q.q}\n  Đáp: ${q.a}`), ""] : []),
+    ...(pf.voice ? ["## Giọng văn của site", `- Xưng hô: ${pf.voice.person}`, `- Mức trang trọng: ${pf.voice.formality}`, `- Câu: ${pf.voice.sentence_style}`, `- Đoạn: ${pf.voice.paragraphing}`, `- Mở bài: ${pf.voice.opening_style}`, ...(pf.voice.avoid.length ? [`- Không bao giờ: ${pf.voice.avoid.join("; ")}`] : []), ...pf.voice.excerpts.map((e) => `> ${e}`), ""] : []),
+    ...(pf.facts.length ? ["## Dữ kiện có nguồn (chỉ dùng số liệu trong danh sách này hoặc trong trải nghiệm ở trên)", ...pf.facts.map((f2) => `- ${f2.text}${f2.source ? ` (${f2.source})` : ""}`), ""] : []),
+    "## Luật",
+    "- Không bịa số liệu, giá, thống kê. Không ghi giá hay sao đánh giá.",
+    "- Không viết \"chúng tôi đã test\" nếu sản phẩm chưa được đánh dấu đã dùng thật.",
+    ...(blockOf(x.rules, x.profile).length ? [`- Không nhắc tới: ${blockOf(x.rules, x.profile).join(", ")}`] : []),
+    `- Tránh câu sáo kiểu AI: ${clichesFor(x.lang).slice(0, 14).join(" | ")}`,
+    "",
+    "## Cách trả bài",
+    "Trả về Markdown: dòng đầu \"# Tiêu đề\", các mục \"##\", mục con \"###\", bảng Markdown, token mỗi cái một dòng. Dòng cuối: \"Meta description: …\" (tối đa 155 ký tự)."
+  ];
+  return { text: lines.filter((l) => l !== undefined).join("\n"), filename: `${(b.slug || i.keyword).replace(/[^a-z0-9-]+/gi, "-").toLowerCase()}-yeu-cau.md` };
+}
+
+// GET /api/content/ideas/:id/handoff.md
+export async function apiHandoff(env: Env, user: User, id: number): Promise<Response> {
+  canEdit(user);
+  const h = await handoffText(env, id);
+  await env.DB.prepare("UPDATE content_ideas SET author = 'owner', updated_at = ? WHERE id = ? AND author IS NULL").bind(now(), id).run();
+  return new Response(h.text, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${h.filename}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+}
+
+// POST /api/content/ideas/:id/import { content, revise? } — anh dán bài viết bằng Claude (Markdown hoặc HTML)
+export async function importCore(env: Env, id: number, content: string, revise: boolean, actor: string): Promise<GateResult> {
+  const i = await idea(env, id);
+  if (!["approved", "briefed", "drafted"].includes(i.status)) throw new HttpError(409, "Chỉ đưa bài vào chủ đề đang làm.", "locked");
+  if (i.wp_post_id) throw new HttpError(409, "Bài đã có bản nháp trên WordPress: sửa tiếp ở WordPress.", "exists");
+  const text = String(content || "").trim();
+  if (text.split(/\s+/).length < 150) throw new HttpError(400, "Bài quá ngắn: dán toàn bộ bài Claude viết.", "validation");
+  if (text.length > 120000) throw new HttpError(413, "Bài quá dài.", "too_large");
+  const meta = (text.match(/^\s*meta[- ]description\s*:\s*(.+)$/im) || [])[1]?.trim() || "";
+  const body = text.replace(/^\s*meta[- ]description\s*:.*$/im, "").trim();
+  const isHtml = /<(h2|p|ul|table)\b/i.test(body);
+  const conv = isHtml ? { title: (body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]?.replace(/<[^>]+>/g, "").trim() || "", html: body.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, "") } : markdownToHtml(body);
+  let raw = cleanHtml(conv.html);
+  const x = await ctxOf(env, { ...i, author: "owner" });
+  const b = x.brief as { title?: string; slug?: string; meta_description?: string };
+  let review: Review | null = null;
+  let reviewError = "";
+  try { const q = await qualityLoop(env, x, raw, revise ? 2 : 0); raw = q.raw; review = q.review; } catch (e) { reviewError = (e as Error).message.slice(0, 200); }
+  const slug = String(b.slug || i.keyword).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 70);
+  const base: Draft = { title: (conv.title || String(b.title || i.keyword)).slice(0, 120), slug, raw, html: raw, meta_description: (meta || String(b.meta_description || "")).slice(0, 160), words: 0, review, reviewError, author: "owner" };
+  await env.DB.prepare("UPDATE content_ideas SET status = 'drafted', author = 'owner', updated_at = ? WHERE id = ?").bind(now(), id).run();
+  const { draft, gate } = await regate(env, { ...i, author: "owner" }, x.c, base);
+  await logActivity(env, actor, "content.import", `Đưa bài anh viết vào "${draft.title}" (${draft.words} từ${review ? `, Biên tập viên ${review.rounds.join(" → ")}/100` : ""})`, x.c.site_id);
+  return gate;
+}
+export const apiImport = async (env: Env, req: Request, user: User, id: number) => { const b = await readJson<{ content?: string; revise?: boolean }>(req); return run(user, () => importCore(env, id, String(b.content || ""), b.revise !== false, `user:${user.id}`)); };
 
 // Site Astro: xuất bài thành file Markdown (frontmatter + HTML) để đưa vào repo; luôn draft: true
 export async function apiExportMarkdown(env: Env, user: User, id: number): Promise<Response> {
@@ -424,8 +549,9 @@ export async function contentView(env: Env, caseId: number): Promise<Response> {
       const draft = parse(r.draft) as Draft | null;
       const slots = slotsFor(format, products, brief?.photo_requests || [], readImages(r.images as string | null));
       const preview = draft ? renderDraft(draft.raw ?? draft.html, { format, products, slots, rules, preview: true }) : null;
-      return { ...r, format, products, images: undefined, slots, brief, draft: draft ? { ...draft, raw: undefined, html: preview } : null, gate: parse(r.gate) };
+      return { ...r, format, products, images: undefined, slots, brief, interview: readInterview(r.interview as string | null), waitingInterview: waitingInterview(readInterview(r.interview as string | null), rules.requireInterview), draft: draft ? { ...draft, raw: undefined, html: preview } : null, gate: parse(r.gate) };
     }),
+    authorMode: rules.authorMode,
     limits: { perMonth: rules.maxNewArticlesPerMonth, usedThisMonth: await monthCount(env, c.site_id), minVolume: rules.minVolume },
     auto: await getAuto(env, c.site_id)
   });
@@ -539,6 +665,14 @@ export const apiWpDraft = (env: Env, user: User, id: number) => run(user, () => 
 export async function apiIdeaStatus(env: Env, req: Request, user: User, id: number): Promise<Response> {
   canEdit(user);
   const body = await readJson(req);
+  if (body.author !== undefined) {
+    const i = await idea(env, id);
+    const author = body.author === "owner" ? "owner" : body.author === "agent" ? "agent" : null;
+    if (i.wp_post_id) throw new HttpError(409, "Bài đã lên WordPress.", "locked");
+    await env.DB.prepare("UPDATE content_ideas SET author = ?, updated_at = ? WHERE id = ?").bind(author, now(), id).run();
+    await logActivity(env, `user:${user.id}`, "content.author", `"${i.keyword}": ${author === "owner" ? "anh tự viết bằng Claude" : author === "agent" ? "agent viết" : "chưa chọn người viết"}`, i.site_id);
+    return json({ ok: true });
+  }
   if (body.format !== undefined) {
     const i = await idea(env, id);
     if (!["idea", "approved", "briefed"].includes(i.status)) throw new HttpError(409, "Chỉ đổi định dạng trước khi viết bài.", "locked");

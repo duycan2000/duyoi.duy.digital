@@ -27,6 +27,8 @@ export interface SiteRules {
   autoRescanDays: number;      // quét lại sau bao nhiêu ngày
   autoApproveIdeas: boolean;   // tự duyệt chủ đề tốt nhất trong giới hạn tháng
   autoApplyApproved: boolean;  // tự áp dụng việc đã được người duyệt (tối đa 3 trang/ngày)
+  authorMode: "ask" | "agent" | "owner"; // ai viết bài mới: hỏi anh từng bài / agent viết / anh tự viết bằng Claude
+  requireInterview: boolean;   // agent chờ anh trả lời phỏng vấn trải nghiệm trước khi viết
   affiliateDisclosure: string; // câu công khai link affiliate đặt đầu bài (trống = câu mặc định theo ngôn ngữ)
   buyButtonText: string;       // chữ trên nút mua, {merchant} = tên nơi bán
 }
@@ -55,6 +57,8 @@ export const DEFAULT_RULES: SiteRules = {
   autoRescanDays: 7,
   autoApproveIdeas: false,
   autoApplyApproved: false,
+  authorMode: "ask",
+  requireInterview: true,
   affiliateDisclosure: "",
   buyButtonText: ""
 };
@@ -115,6 +119,8 @@ export function parseRules(input: unknown, base: SiteRules = DEFAULT_RULES): Sit
   if (b.autoRescanDays !== undefined) out.autoRescanDays = int(b.autoRescanDays, 3, 60, "Số ngày quét lại");
   if (b.autopilot !== undefined) out.autopilot = b.autopilot === true;
   if (b.autoApproveIdeas !== undefined) out.autoApproveIdeas = b.autoApproveIdeas === true;
+  if (b.authorMode !== undefined) out.authorMode = (["ask", "agent", "owner"] as const).find((x) => x === b.authorMode) || "ask";
+  if (b.requireInterview !== undefined) out.requireInterview = b.requireInterview === true;
   if (b.autoApplyApproved !== undefined) out.autoApplyApproved = b.autoApplyApproved === true;
   if (b.affiliateDisclosure !== undefined) out.affiliateDisclosure = String(b.affiliateDisclosure).trim().slice(0, 500);
   if (b.buyButtonText !== undefined) out.buyButtonText = String(b.buyButtonText).trim().slice(0, 60);

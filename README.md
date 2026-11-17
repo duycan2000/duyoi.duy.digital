@@ -132,6 +132,15 @@ Khi tạo bài (Content Studio hoặc tab **Bài mới**), chọn định dạng
 - **Sổ tay Trưởng nhóm** (cột phải tab Trưởng nhóm): anh viết cách muốn ra quyết định (site ưu tiên, định dạng theo loại site, luật riêng). Trưởng nhóm đọc sổ tay mỗi lần trả lời; sổ tay không vượt được Gác cổng và luật sản phẩm. Khi anh nói một quy tắc lâu dài trong chat ("từ nay…"), Trưởng nhóm đề xuất dòng ghi vào sổ tay, chỉ ghi khi anh bấm. Lưu 50 phiên bản gần nhất, khôi phục được.
 - Sau deploy, admin duyệt 4 prompt mới ở Quản lý prompt: Đọc tài liệu, Biên tập viên chấm, Sửa bài, Trưởng nhóm.
 
+### Văn như người viết, định dạng chuẩn, anh tự viết bằng Claude
+
+- **Model viết bài riêng** (Cài đặt › Model AI: "Viết bài và sửa bài", mặc định Claude Sonnet). Các việc khác vẫn dùng model rẻ.
+- **Phỏng vấn trải nghiệm:** dàn ý kèm 3–5 câu hỏi cho anh về trải nghiệm thật; agent chỉ viết khi anh trả lời hoặc bấm Bỏ qua (tắt được ở Luật an toàn). Số liệu trong câu trả lời được coi là có nguồn.
+- **Giọng văn site:** dán 1–5 bài hay nhất trên chính site (hoặc đoạn anh tự viết), agent rút xưng hô, nhịp câu, cách mở bài, điều tránh và vài đoạn mẫu; người viết và sửa bài đi theo giọng này.
+- **Câu sáo AI** (de/en/vi, `src/style.ts`): gửi cho người viết để tránh; Gác cổng chặn khi có từ 3 câu, cảnh báo câu quá đều và đoạn quá dài.
+- **Kiểm cấu trúc bằng code** cho từng định dạng (mở bài trả lời thẳng, đủ H2, FAQ, bảng chọn nhanh, mục riêng + nhược điểm + nút mua cho từng sản phẩm, các bước đánh số, ý chính…). Thiếu phần chính thì chặn và đưa vào vòng sửa của Người viết.
+- **Anh tự viết bằng Claude:** mỗi bài chọn "Agent viết" hoặc "Tôi tự viết" (mặc định hỏi từng bài; đổi ở Luật an toàn › Ai viết bài mới). "Tôi tự viết": lấy gói yêu cầu (dàn ý, khung định dạng, token, sản phẩm, trải nghiệm, giọng văn, dữ kiện, luật) dán vào Claude, rồi dán bài Markdown/HTML vào app. Biên tập viên chấm theo khung; nếu anh cho phép thì Người viết sửa đúng chỗ chưa đạt. Với bài anh viết, số liệu chưa có nguồn chỉ cảnh báo.
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.

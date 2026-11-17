@@ -11,9 +11,9 @@ import { aiRewriteTask, applyTask, archiveCase, createCase, decideTask, disavow,
 import { wpSave, wpStatus, wpTest } from "./wordpress";
 import { listPrompts, reviewPrompt, spendReport } from "./manager";
 import { apiCheckMedia, apiSetupMedia } from "./cfmedia";
-import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc } from "./docs";
+import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from "./docs";
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
-import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiReview, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
+import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, apiHandoff, apiImport, apiInterview, apiReview, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
@@ -89,9 +89,10 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (ctMatch && !ctMatch[2] && m === "GET") return contentView(env, Number(ctMatch[1]));
   if (ctMatch && ctMatch[2] === "/research" && m === "POST") return apiResearch(env, user, Number(ctMatch[1]));
   if (ctMatch && ctMatch[2] === "/ideas" && m === "POST") return apiCreateIdea(env, req, user, Number(ctMatch[1]));
-  const docMatch = path.match(/^\/api\/sites\/(\d+)\/(docs|profile)(?:\/(\d+))?$/);
+  const docMatch = path.match(/^\/api\/sites\/(\d+)\/(docs|profile|voice)(?:\/(\d+))?$/);
   if (docMatch) {
     const sid = Number(docMatch[1]);
+    if (docMatch[2] === "voice" && m === "POST") return apiVoice(env, req, user, sid);
     if (docMatch[2] === "docs" && !docMatch[3] && m === "GET") return apiDocs(env, sid);
     if (docMatch[2] === "docs" && !docMatch[3] && m === "POST") return apiUploadDoc(env, req, user, sid);
     if (docMatch[2] === "docs" && docMatch[3] && m === "DELETE") return apiDeleteDoc(env, user, sid, Number(docMatch[3]));
@@ -111,7 +112,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   const imgMatch = path.match(/^\/api\/content\/ideas\/(\d+)\/images\/([a-z0-9]{2,6})$/);
   if (imgMatch && m === "POST") return apiUploadImage(env, req, user, Number(imgMatch[1]), imgMatch[2]!);
   if (imgMatch && m === "DELETE") return apiDeleteImage(env, user, Number(imgMatch[1]), imgMatch[2]!);
-  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products|review|export\.md))?$/);
+  const idMatch = path.match(/^\/api\/content\/ideas\/(\d+)(?:\/(brief|draft|wp|products|review|interview|import|handoff\.md|export\.md))?$/);
   if (idMatch) {
     const iid = Number(idMatch[1]);
     if (!idMatch[2] && m === "PUT") return apiIdeaStatus(env, req, user, iid);
@@ -119,6 +120,9 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (idMatch[2] === "draft" && m === "POST") return apiDraft(env, user, iid);
     if (idMatch[2] === "wp" && m === "POST") return apiWpDraft(env, user, iid);
     if (idMatch[2] === "review" && m === "POST") return apiReview(env, req, user, iid);
+    if (idMatch[2] === "interview" && m === "PUT") return apiInterview(env, req, user, iid);
+    if (idMatch[2] === "import" && m === "POST") return apiImport(env, req, user, iid);
+    if (idMatch[2] === "handoff.md" && m === "GET") return apiHandoff(env, user, iid);
     if (idMatch[2] === "export.md" && m === "GET") return apiExportMarkdown(env, user, iid);
     if (idMatch[2] === "products" && m === "PUT") return apiProducts(env, req, user, iid);
   }

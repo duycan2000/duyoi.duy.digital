@@ -7,6 +7,7 @@ import { approveIdeaCore, briefCore, draftCore, getAuto, researchCore, setAuto, 
 import { aiRewriteCore, applyCore, processCase, resetForRescan } from "./recovery";
 import { readRules } from "./recovery-rules";
 import { formatOf, readProducts } from "./formats";
+import { waitingInterview } from "./content";
 import { getSettingsMap } from "./settings";
 import type { Env } from "./types";
 
@@ -82,14 +83,20 @@ async function step(env: Env, c: CaseLite): Promise<void> {
     }
   }
   // 7. Chủ đề đã duyệt → dàn ý → bài nháp → bản nháp WordPress. Bài cần sản phẩm/ảnh thật thì chờ anh, làm bài khác.
-  const next = await env.DB.prepare("SELECT id, status, format, products, gate, wp_post_id FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted') ORDER BY updated_at LIMIT 20").bind(c.site_id).all<{ id: number; status: string; format: string; products: string | null; gate: string | null; wp_post_id: number | null }>();
+  const next = await env.DB.prepare("SELECT id, status, format, products, gate, wp_post_id, interview, author FROM content_ideas WHERE site_id = ? AND status IN ('approved', 'briefed', 'drafted') ORDER BY updated_at LIMIT 20").bind(c.site_id).all<{ id: number; status: string; format: string; products: string | null; gate: string | null; wp_post_id: number | null; interview: string | null; author: string | null }>();
   const hasProducts = (x: { format: string; products: string | null }) => readProducts(x.products).items.length >= formatOf(x.format).minProducts;
   const waiting: string[] = [];
   const a = next.results.find((x) => x.status === "approved" && hasProducts(x));
   if (a) { await briefCore(env, a.id, "agent:planner"); return done("lập dàn ý"); }
   if (next.results.some((x) => x.status === "approved" && !hasProducts(x))) waiting.push("chờ anh nhập sản phẩm");
-  const b = next.results.find((x) => x.status === "briefed");
+  // Agent chỉ tự viết khi bài giao cho agent (hoặc site chọn "agent viết") và không còn chờ anh trả lời phỏng vấn
+  const writer = (x: { author: string | null }) => x.author || (rules.authorMode === "agent" ? "agent" : rules.authorMode === "owner" ? "owner" : null);
+  const ivWait = (x: { interview: string | null }) => { try { return waitingInterview(x.interview ? JSON.parse(x.interview) : null, rules.requireInterview); } catch { return false; } };
+  const b = next.results.find((x) => x.status === "briefed" && writer(x) === "agent" && !ivWait(x));
   if (b) { await draftCore(env, b.id, "agent:writer"); return done("viết bài nháp"); }
+  if (next.results.some((x) => x.status === "briefed" && ivWait(x))) waiting.push("chờ anh trả lời phỏng vấn");
+  if (next.results.some((x) => x.status === "briefed" && !ivWait(x) && writer(x) === null)) waiting.push("chờ anh chọn ai viết");
+  if (next.results.some((x) => x.status === "briefed" && writer(x) === "owner")) waiting.push("chờ bài anh viết bằng Claude");
   const hasWp = await env.DB.prepare("SELECT 1 FROM secrets WHERE key = ?").bind(`wp:${c.site_id}`).first();
   const gateOf = (x: { gate: string | null }) => (x.gate ? JSON.parse(x.gate) as { ok: boolean; problems: { rule: string; level: string }[] } : null);
   const d = next.results.find((x) => x.status === "drafted" && !x.wp_post_id && gateOf(x)?.ok);
