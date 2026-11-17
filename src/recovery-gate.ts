@@ -8,7 +8,9 @@ export interface Edit {
   find: string;
   replace: string;
   section?: string;
-  type: "internal_link" | "cta" | "meta_title" | "meta_description" | "text";
+  type: "internal_link" | "cta" | "meta_title" | "meta_description" | "text" | "insert";
+  mode?: "replace" | "after_block" | "before_block"; // insert: chèn khối HTML trước/sau đoạn chứa find
+  insert?: string;
   target?: string;  // path trang đích (link nội bộ)
   anchor?: string;
 }

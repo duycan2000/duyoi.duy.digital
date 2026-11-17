@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData } from "./ui.js";
 
 let K; // các tiện ích dùng chung từ app.js: state, icon, ICON, tabsNav, panelAttr, bindTabs
+let CTX = { caseId: 0, siteId: 0, wp: false, backups: [] };
 
 const RUNNING = ["discovering", "scanning", "analyzing"];
 const STATUS = { discovering: "Đang tìm trang", scanning: "Đang quét", analyzing: "Đang phân tích", ready: "Đã chẩn đoán", failed: "Lỗi", archived: "Đã lưu trữ" };
@@ -87,6 +88,7 @@ const agentGrid = (agents, tasks = []) => `<div class="agent-grid">${agents.map(
 async function viewCase(main, id) {
   const data = await api(`/api/recovery/${id}`);
   const { case: c, findings, tasks, pages, agents } = data;
+  CTX = { caseId: c.id, siteId: c.siteId, wp: data.wpConnected, backups: data.backups || [] };
   const canEdit = K.state.user.role !== "viewer";
   const running = RUNNING.includes(c.status);
   const openTasks = tasks.filter((t) => t.status === "proposed" || t.status === "blocked").length;
@@ -135,6 +137,12 @@ function diagHtml(c, d, findings, agents, tasks) {
         <div><b>${s.elementor ? "Elementor" : s.wordpress ? "WordPress" : "Khác"}</b><small>nền tảng</small></div>
       </div>
     </div>
+    ${s.traffic ? `<div class="traffic-box">
+      <div><b>${s.traffic.clicks}</b><small>click 28 ngày gần nhất</small></div>
+      <div><b>${s.traffic.clicksPrev}</b><small>click 28 ngày trước đó</small></div>
+      ${s.traffic.clicksBefore ? `<div><b>${s.traffic.clicksBefore} → ${s.traffic.clicksAfter}</b><small>click trước → sau tháng tụt</small></div>` : ""}
+      <div><b>${s.traffic.leads}</b><small>lead GA4 (28 ngày, chậm 24–48 giờ)</small></div>
+    </div>` : ""}
     <div class="timeline-box">
       <h3 class="sub">${K.icon(K.ICON.clock)}Thời điểm tụt so với cập nhật Google</h3>
       ${d.timeline.updates.length ? `<ul class="upd">${d.timeline.updates.map((u) => `<li class="u-${esc(u.kind)}"><b>${esc(u.name)}</b><small>${esc(u.start)} → ${esc(u.end)}</small><span>${esc(u.note)}</span></li>`).join("")}</ul>` : ""}
@@ -154,6 +162,8 @@ function diagHtml(c, d, findings, agents, tasks) {
 }
 
 // Hiện phần chữ được thêm vào, link hiện thành chữ gạch chân kèm đích
+// Khối HTML chèn thêm (FAQ, đoạn trả lời): hiện thành chữ có định dạng đơn giản, không chạy HTML thật
+const renderBlock = (html) => esc(html).replace(/&lt;h[23]&gt;(.*?)&lt;\/h[23]&gt;/g, "<b>$1</b><br>").replace(/&lt;p&gt;(.*?)&lt;\/p&gt;/g, "$1<br>");
 const renderAdded = (html) => esc(html).replace(/&lt;a href=&quot;([^&]*)&quot;&gt;(.*?)&lt;\/a&gt;/g, '<u>$2</u> <small class="to">→ $1</small>');
 
 function editsHtml(edits) {
@@ -162,6 +172,8 @@ function editsHtml(edits) {
     if (isMeta) return `<div class="edit"><small class="note">${e.type === "meta_title" ? "SEO title" : "Meta description"} · ${e.replace.length} ký tự</small>
       ${e.find ? `<div class="diff"><del>${esc(e.find)}</del></div>` : `<div class="diff"><span class="note">(đang trống)</span></div>`}
       <div class="diff"><ins>${esc(e.replace)}</ins></div></div>`;
+    if (e.type === "insert") return `<div class="edit"><small class="note">${e.mode === "before_block" ? "Chèn đoạn mới phía trước" : "Chèn khối mới phía sau"} · mục "${esc(e.section || "")}"</small>
+      <div class="diff">${e.mode === "before_block" ? `<ins class="block">${renderBlock(e.insert)}</ins><span>${esc(e.find)}</span>` : `<span>${esc(e.find)}</span><ins class="block">${renderBlock(e.insert)}</ins>`}</div></div>`;
     const added = e.replace.startsWith(e.find) ? e.replace.slice(e.find.length) : e.replace;
     return `<div class="edit"><small class="note">${e.section ? `Mục "${esc(e.section)}"` : ""}${e.anchor ? ` · anchor "${esc(e.anchor)}"` : ""}</small>
       <div class="diff"><span>${esc(e.find)}</span><ins>${renderAdded(added)}</ins></div></div>`;
@@ -171,21 +183,29 @@ function editsHtml(edits) {
 function taskCard(t, canEdit) {
   const p = t.payload || {};
   const gate = t.gate && t.gate.problems && t.gate.problems.length ? `<ul class="gate">${t.gate.problems.map((x) => `<li class="${x.level}">${esc(x.message)}</li>`).join("")}</ul>` : "";
-  const list = p.urls || p.pages?.map((x) => typeof x === "string" ? x : `${x.label} · ${x.url} (${x.words} từ, ${x.inbound} link vào)`) || p.domains?.map((x) => `domain:${x}`);
+  const list = t.kind === "geo_plan" ? null : p.urls || p.pages?.map((x) => typeof x === "string" ? x : `${x.label} · ${x.url} (${x.words} từ, ${x.inbound} link vào${x.clicks != null ? `, ${x.clicks} click` : ""})`) || p.domains?.map((x) => `domain:${x}`);
+  const canAi = canEdit && ["proposed", "blocked"].includes(t.status) && ["internal_links", "cta"].includes(t.kind);
+  const geoList = t.kind === "geo_plan" ? `<ul class="geo-list">${(p.urls || []).map((u) => `<li><a href="${esc(u)}" target="_blank" rel="noopener">${esc(new URL(u).pathname)}</a>${canEdit ? `<button type="button" data-geo="${esc(u)}">${K.icon(K.ICON.spark)}Soạn GEO bằng AI</button>` : ""}</li>`).join("")}</ul>` : "";
+  const applied = p.applied ? `<div class="msg ok">Đã áp dụng lên site lúc ${esc(fmtTime(p.applied.at))}: ${p.applied.changes} sửa${p.applied.meta?.length ? `, meta ${esc(p.applied.meta.join(", "))}` : ""}${p.applied.purged?.length ? `, đã xoá cache ${esc(p.applied.purged.join(", "))}` : ""}. Có bản sao lưu #${p.applied.backupId}.</div>` : "";
+  const applyBtn = canEdit && t.status === "approved" && p.edits ? (CTX.wp ? `<button type="button" class="primary" data-apply>${K.icon(K.ICON.trend)}Áp dụng lên site</button>` : `<a class="btn" href="#/sites/${CTX.siteId}">Kết nối WordPress để áp dụng</a>`) : "";
+  const undoBtn = canEdit && t.status === "done" && p.applied ? `<button type="button" class="danger" data-rollback>Hoàn tác</button>` : "";
+  const aiBtn = canAi ? `<button type="button" data-ai>${K.icon(K.ICON.spark)}${p.ai ? "Viết lại lần nữa" : "Viết lại bằng AI"}</button>` : "";
   const actions = !canEdit ? "" : t.status === "proposed" ? `<button type="button" class="primary" data-act="approved">Duyệt</button><button type="button" data-act="rejected">Từ chối</button>${t.risk !== "safe" ? "" : `<button type="button" data-act="done">Đã xong</button>`}`
-    : t.status === "approved" ? `<button type="button" data-act="done">Đánh dấu đã xong</button><button type="button" data-act="proposed">Mở lại</button>`
-    : t.status === "blocked" ? `<button type="button" data-act="rejected">Bỏ qua</button>` : `<button type="button" data-act="proposed">Mở lại</button>`;
-  const after = t.status === "approved" && p.edits ? `<p class="note">Đã duyệt. Khi app được kết nối WordPress (giai đoạn kế tiếp), việc này sẽ được áp dụng dạng bản nháp/revision, có sao lưu để hoàn tác; ${p.elementor ? "trang Elementor sửa trong _elementor_data rồi xoá cache." : "xoá cache sau khi sửa."}</p>`
+    : t.status === "approved" ? `${applyBtn}${p.edits ? "" : `<button type="button" data-act="done">Đánh dấu đã xong</button>`}<button type="button" data-act="proposed">Mở lại</button>`
+    : t.status === "blocked" ? `<button type="button" data-act="rejected">Bỏ qua</button>` : t.status === "done" ? undoBtn : `<button type="button" data-act="proposed">Mở lại</button>`;
+  const after = t.status === "approved" && p.edits ? `<p class="note">Đã duyệt. Bấm "Áp dụng lên site": app chạy thử trước, sao lưu bản gốc, rồi mới ghi; ${p.elementor ? "trang Elementor được sửa trong _elementor_data và xoá cache CSS." : "cache được xoá sau khi sửa."} Hoàn tác được bất cứ lúc nào.</p>`
     : t.status === "approved" && t.risk === "irreversible" ? `<p class="note">Đã duyệt: anh hoặc người phụ trách làm trên site, xong bấm "Đánh dấu đã xong".</p>` : "";
   return `<div class="task" data-task="${t.id}">
     <div class="task-head"><b>${esc(t.title)}</b><span class="tags">${tag(RISK[t.risk] || [t.risk, ""])}${tag(TSTATUS[t.status] || [t.status, ""])}</span></div>
     ${t.detail ? `<p>${esc(t.detail)}</p>` : ""}
     ${t.target_url ? `<p class="note"><a href="${esc(t.target_url)}" target="_blank" rel="noopener">${esc(t.target_url)}</a></p>` : ""}
     ${gate}
+    ${p.ai ? `<p class="note">${K.icon(K.ICON.spark)} Câu chèn do AI viết, đã qua Gác cổng. Đọc kỹ trước khi duyệt.</p>` : ""}
     ${p.edits ? editsHtml(p.edits) : ""}
+    ${geoList}${applied}
     ${list && list.length ? `<details><summary>${list.length} mục</summary><ul class="urls">${list.slice(0, 200).map((u) => `<li>${esc(u)}</li>`).join("")}</ul></details>` : ""}
     ${after}
-    ${actions ? `<div class="toolbar">${actions}</div>` : ""}
+    ${actions || aiBtn ? `<div class="toolbar">${actions}${aiBtn}</div>` : ""}
   </div>`;
 }
 
@@ -208,10 +228,12 @@ function findingsHtml(findings) {
 
 function pagesHtml(pages) {
   if (!pages.length) return `<p class="note">Chưa có trang nào.</p>`;
-  return `<div class="tablewrap boxed"><table><thead><tr><th>Trang</th><th>Loại</th><th>Số từ</th><th>Link vào</th><th>Link ra</th><th>CTA</th><th>Ghi chú</th></tr></thead><tbody>
-    ${pages.map((p) => `<tr>
+  const hasT = pages.some((p) => p.traffic);
+  return `<div class="tablewrap boxed"><table><thead><tr><th>Trang</th><th>Loại</th>${hasT ? "<th>Click 28 ngày</th><th>Lead</th>" : ""}<th>Số từ</th><th>Link vào</th><th>Link ra</th><th>CTA</th><th>Ghi chú</th></tr></thead><tbody>
+    ${[...pages].sort((a, b) => (b.traffic?.clicks || 0) - (a.traffic?.clicks || 0)).map((p) => `<tr>
       <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.path)}</a><small>${esc(p.title)}</small></td>
       <td>${esc(KIND[p.kind] || "—")}</td>
+      ${hasT ? `<td>${p.traffic ? `${p.traffic.clicks}${p.traffic.clicksPrev !== p.traffic.clicks ? `<small>trước: ${p.traffic.clicksPrev}</small>` : ""}` : "0"}</td><td>${p.traffic?.leads ?? "—"}</td>` : ""}
       <td>${p.words ?? "—"}</td><td>${p.inbound}</td><td>${p.outLinks}</td>
       <td>${p.cta == null ? "—" : p.cta ? "Có" : `<span class="tag warn">Không</span>`}</td>
       <td>${[p.status === "error" ? `<span class="tag err">${esc(p.error || "lỗi")}</span>` : "", p.httpStatus >= 400 ? `<span class="tag err">HTTP ${p.httpStatus}</span>` : "", p.noindex ? `<span class="tag warn">noindex</span>` : "", p.blockHits.length ? `<span class="tag err">blocklist</span>` : "", p.status === "queued" ? `<span class="tag">chờ quét</span>` : ""].join(" ")}</td></tr>`).join("")}
@@ -223,6 +245,7 @@ function rulesHtml(c, canEdit) {
   const dis = canEdit ? "" : " disabled";
   return `<form id="rules-form" novalidate>
     <p class="note">Luật riêng của site. Gác cổng dùng các luật này để chặn mọi đề xuất vi phạm. Đổi blocklist thì app đọc lại toàn bộ trang.</p>
+    <p class="note">Search Console: Domain property ghi <code>sc-domain:ten-mien.de</code>; URL-prefix ghi nguyên <code>https://ten-mien.com/</code>. Ghi sai loại sẽ báo "không có quyền" dù đã cấp quyền. Cần nhập Google service account trong Cài đặt.</p>
     <div class="form-grid">
       <label>Ngôn ngữ duy nhất của site <select name="language"${dis}>${[["en", "Tiếng Anh"], ["de", "Tiếng Đức"], ["vi", "Tiếng Việt"]].map(([k, l]) => `<option value="${k}"${r.language === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
       <label>Tháng bắt đầu tụt <input type="month" name="dropMonth" value="${esc(c.dropMonth || "")}"${dis}></label>
@@ -233,6 +256,8 @@ function rulesHtml(c, canEdit) {
       <label>Tên file ảnh bị cấm (dùng * ở cuối) <textarea name="blockedFilenames" rows="3"${dis}>${esc(lines(r.blockedFilenames))}</textarea></label>
       <label>Các site khác của anh (link chéo cần gỡ) <textarea name="relatedDomains" rows="3"${dis}>${esc(lines(r.relatedDomains))}</textarea></label>
       <label>Số liệu đã kiểm chứng, được phép dùng lại <textarea name="verifiedNumbers" rows="3" placeholder="Über 50% Kostenersparnis"${dis}>${esc(lines(r.verifiedNumbers))}</textarea></label>
+      <label>Property Search Console <input name="gscProperty" value="${esc(r.gscProperty || "")}" placeholder="sc-domain:ten-mien.de hoặc https://ten-mien.com/"${dis}></label>
+      <label>GA4 property ID <input name="ga4Property" value="${esc(r.ga4Property || "")}" placeholder="123456789"${dis}></label>
       <label>Link nội bộ mới tối đa mỗi trang <select name="maxLinksPerPage"${dis}>${[1, 2, 3].map((n) => `<option${r.maxLinksPerPage === n ? " selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="full">Ghi chú cho agent <textarea name="notes" rows="3"${dis}>${esc(r.notes)}</textarea></label>
     </div>
@@ -270,6 +295,21 @@ function bindCase(main, c, canEdit) {
       catch (e) { showMsg($("#task-msg"), e.message); }
     });
   }));
+  const taskPost = (b, path, label) => busy(b, label, async () => {
+    const id = b.closest("[data-task]").dataset.task;
+    try { await api(`/api/recovery/tasks/${id}/${path}`, { method: "POST" }); await reload(); }
+    catch (e) { showMsg($("#task-msg"), e.message); $("#task-msg").scrollIntoView({ block: "center" }); }
+  });
+  $$("[data-apply]", main).forEach((b) => b.addEventListener("click", () => taskPost(b, "apply", "Đang áp dụng…")));
+  $$("[data-rollback]", main).forEach((b) => b.addEventListener("click", () => {
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Bấm lần nữa để hoàn tác"; return; }
+    taskPost(b, "rollback", "Đang hoàn tác…");
+  }));
+  $$("[data-ai]", main).forEach((b) => b.addEventListener("click", () => taskPost(b, "ai", "AI đang viết…")));
+  $$("[data-geo]", main).forEach((b) => b.addEventListener("click", () => busy(b, "AI đang soạn…", async () => {
+    try { await api(`/api/recovery/${c.id}/geo`, { method: "POST", body: { url: b.dataset.geo } }); await reload(); }
+    catch (e) { showMsg($("#task-msg"), e.message); $("#task-msg").scrollIntoView({ block: "center" }); }
+  })));
   const rf = $("#rules-form");
   rf?.addEventListener("submit", async (ev) => {
     ev.preventDefault();

@@ -3,6 +3,7 @@
 
 import { updatesNear, type GoogleUpdate } from "./google-updates";
 import type { PageData } from "./recovery-extract";
+import type { PageTraffic } from "./google";
 import { checkEdits, type Edit, type GateResult } from "./recovery-gate";
 import type { SiteRules } from "./recovery-rules";
 
@@ -118,8 +119,12 @@ export interface Analysis {
 
 const SEV_WEIGHT = { critical: 25, high: 10, medium: 4, low: 1, info: 0 } as const;
 
-export function analyze(pages: ScannedPage[], checks: SiteChecks, rules: SiteRules, dropMonth: string | null): Analysis {
+export type Traffic = Map<string, PageTraffic>;
+
+export function analyze(pages: ScannedPage[], checks: SiteChecks, rules: SiteRules, dropMonth: string | null, traffic: Traffic = new Map(), dataNotes: string[] = []): Analysis {
   const findings: Finding[] = [];
+  const hasGsc = [...traffic.values()].some((t) => t.impressions || t.impressionsPrev || t.clicksBefore !== undefined);
+  const tr = (path: string) => traffic.get(path);
   const add = (f: Finding) => findings.push({ ...f, urls: f.urls.slice(0, 200) });
   const ok = pages.filter((p) => p.status === "done" && p.data && (p.http_status ?? 0) < 400);
   const kinds = new Map<number, Kind>();
@@ -218,6 +223,26 @@ export function analyze(pages: ScannedPage[], checks: SiteChecks, rules: SiteRul
     ? "Site từng mua link / có thao tác thủ công: nên lập file disavow (dạng domain:) và anh tự nộp trong Search Console."
     : "Google nói phần lớn link rác đã bị bỏ qua tự động; chỉ nên disavow khi từng mua link hoặc có thao tác thủ công.", urls: rules.toxicDomains.map((d) => `domain:${d}`) });
 
+  // ---- Traffic thật từ Search Console / GA4 ----
+  for (const n of dataNotes) add({ code: "data_error", category: "timeline", severity: "info", title: "Không đọc được dữ liệu Google", detail: n, urls: [] });
+  const sum = (k: keyof PageTraffic) => [...traffic.values()].reduce((s2, t) => s2 + (Number(t[k]) || 0), 0);
+  const totals = { clicks: sum("clicks"), clicksPrev: sum("clicksPrev"), clicksBefore: sum("clicksBefore"), clicksAfter: sum("clicksAfter"), leads: sum("leads"), sessions: sum("sessions") };
+  if (hasGsc) {
+    const useDrop = [...traffic.values()].some((t) => t.clicksBefore !== undefined) && totals.clicksBefore > 0;
+    const before = useDrop ? totals.clicksBefore : totals.clicksPrev, after = useDrop ? totals.clicksAfter : totals.clicks;
+    const label = useDrop ? `28 ngày trước và sau đầu tháng ${dropMonth}` : "28 ngày gần nhất so với 28 ngày trước đó";
+    const losers = [...traffic.entries()].map(([path, t]) => ({ path, loss: useDrop ? (t.clicksBefore || 0) - (t.clicksAfter || 0) : t.clicksPrev - t.clicks, t }))
+      .filter((x) => x.loss > 0).sort((a, b) => b.loss - a.loss).slice(0, 25);
+    const pct = before ? Math.round(((before - after) / before) * 100) : 0;
+    add({ code: "traffic_change", category: "timeline", severity: pct >= 30 ? "high" : pct > 0 ? "medium" : "info", title: `Click từ Google: ${before} → ${after} (${pct > 0 ? "-" : "+"}${Math.abs(pct)}%, ${label})`, detail: losers.length ? "Các trang mất nhiều click nhất ở dưới. Ưu tiên sửa và bảo vệ các trang này trước." : "Không có trang nào mất click đáng kể.", urls: losers.map((x) => `${x.path} (${useDrop ? `${x.t.clicksBefore} → ${x.t.clicksAfter}` : `${x.t.clicksPrev} → ${x.t.clicks}`} click)`) });
+    const zero = info.filter((p) => { const t = tr(p.path); return !t || (t.clicks === 0 && t.impressions < 10 && t.clicksPrev === 0); });
+    if (zero.length) add({ code: "zero_traffic", category: "content", severity: zero.length >= 10 ? "medium" : "low", title: `${zero.length} bài thông tin gần như không có ai tìm thấy (0 click, dưới 10 lượt hiển thị/28 ngày)`, detail: "Ứng viên gộp hoặc gỡ. Gỡ hàng loạt cũng là thay đổi đột ngột: làm theo đợt nhỏ.", urls: zero.map((p) => p.url) });
+  }
+  if (totals.leads || totals.sessions) {
+    const top = [...traffic.entries()].filter(([, t]) => t.leads).sort((a, b) => (b[1].leads || 0) - (a[1].leads || 0)).slice(0, 15);
+    add({ code: "leads", category: "timeline", severity: "info", title: `GA4: ${totals.leads} lead (generate_lead) trong 28 ngày`, detail: "Số liệu GA4 Data API chậm 24–48 giờ so với Realtime: số thấp mấy ngày gần đây thường là do xử lý chậm, không phải giảm thật.", urls: top.map(([path, t]) => `${path} (${t.leads} lead, ${t.sessions || 0} phiên)`) });
+  }
+
   // ---- Đối chiếu thời điểm ----
   const near: GoogleUpdate[] = dropMonth ? updatesNear(dropMonth) : [];
   if (dropMonth) add({ code: "timeline", category: "timeline", severity: "info", title: near.length ? `Tháng tụt ${dropMonth} trùng với: ${near.map((u) => u.name).join(", ")}` : `Không có bản cập nhật Google nào được xác nhận gần tháng ${dropMonth}`, detail: near.map((u) => `${u.name} (${u.start} → ${u.end}): ${u.note}`).join("\n") || "Nguyên nhân có thể là thay đổi trên site (theme, plugin, xoá trang, đổi URL) hoặc đối thủ. So với lịch sử sửa site.", urls: [] });
@@ -244,11 +269,16 @@ export function analyze(pages: ScannedPage[], checks: SiteChecks, rules: SiteRul
     summary: {
       pages: pages.length, scanned: ok.length, errors: errors.length,
       kinds: { home: byKind("home").length, commercial: commercial.length, conversion: byKind("conversion").length, informational: info.length, system: byKind("system").length },
-      wordpress: checks.wordpress, elementor: checks.elementor
+      wordpress: checks.wordpress, elementor: checks.elementor,
+      traffic: hasGsc || totals.leads || totals.sessions ? totals : null
     },
     causes: causes.filter((c) => c.weight > 0),
     timeline: { dropMonth, updates: near, hint: spamNear ? "Tụt gần một bản cập nhật chống spam: ưu tiên kiểm tra nội dung hàng loạt và hồ sơ link." : coreNear ? "Tụt gần một bản cập nhật lõi: Google đánh giá lại chất lượng cả site; sửa xong có thể phải chờ tới bản cập nhật lõi sau mới thấy phục hồi." : dropMonth ? "Không trùng bản cập nhật nào: xem lại thay đổi trên site và đối thủ." : "Anh chưa nhập tháng tụt." },
-    needsData: ["Search Console: so sánh click 2 tuần sau và trước bản cập nhật, theo từng trang, để biết trang nào mất nhiều nhất.", "Search Console › Bảo mật & Thao tác thủ công: xác nhận không có thao tác thủ công.", "GA4: lead (generate_lead) theo trang. Số liệu GA4 Data API chậm 24–48 giờ."],
+    needsData: [
+      ...(hasGsc ? [] : ["Search Console: nối service account và nhập property ở tab Luật an toàn để biết trang nào có traffic và mất bao nhiêu click."]),
+      "Search Console › Bảo mật & Thao tác thủ công: xác nhận không có thao tác thủ công (API không đọc được mục này).",
+      ...(totals.leads || totals.sessions ? [] : ["GA4: nhập property ID để đếm lead (generate_lead) theo trang. Số liệu GA4 Data API chậm 24–48 giờ."])
+    ],
     recovery: "Google cho biết thay đổi có thể có hiệu lực sau vài ngày, nhưng có khi cần vài tháng để hệ thống xác nhận cả site đã tốt lên; nhiều trường hợp phải chờ tới bản cập nhật lõi kế tiếp.",
     sources: [
       { title: "Google: core updates and your website", url: "https://developers.google.com/search/updates/core-updates" },
@@ -275,9 +305,12 @@ export interface PlanInput {
   analysis: Analysis;
   rules: SiteRules;
   elementor: boolean;
+  traffic?: Traffic;
 }
 
-export function plan({ pages, analysis, rules, elementor }: PlanInput): PlannedTask[] {
+export function plan({ pages, analysis, rules, traffic = new Map() }: PlanInput): PlannedTask[] {
+  const hasGsc = [...traffic.values()].some((t) => t.impressions || t.impressionsPrev);
+  const clicks = (path: string) => traffic.get(path)?.clicks ?? 0;
   const tasks: PlannedTask[] = [];
   const lang = LINK_TEMPLATES[rules.language] ? rules.language : "en";
   const { kinds, inbound, findings } = analysis;
@@ -326,7 +359,7 @@ export function plan({ pages, analysis, rules, elementor }: PlanInput): PlannedT
   const anchorUse = new Map<string, number>();
   const deadEnd = new Set((f("dead_end")?.urls || []));
   const sources = ok.filter((p) => kindOf(p) === "informational" && deadEnd.has(p.url) && p.data!.words >= 300)
-    .sort((a, b) => (inbound.get(b.path) || 0) - (inbound.get(a.path) || 0) || b.data!.words - a.data!.words)
+    .sort((a, b) => clicks(b.path) - clicks(a.path) || (inbound.get(b.path) || 0) - (inbound.get(a.path) || 0) || b.data!.words - a.data!.words)
     .slice(0, 30);
   let linkTasks = 0;
   for (const src of sources) {
@@ -353,7 +386,7 @@ export function plan({ pages, analysis, rules, elementor }: PlanInput): PlannedT
     }
     if (!edits.length) continue;
     const gate = gateFor(src, edits);
-    tasks.push({ agent: "linker", kind: "internal_links", title: `Chèn ${edits.length} link nội bộ vào ${src.path}`, detail: `Từ bài thông tin tới: ${edits.map((e) => e.target).join(", ")}.`, target_url: src.url, payload: { edits, elementor: src.data!.elementor, words: src.data!.words }, risk: "review", priority: 10 + linkTasks, gate });
+    tasks.push({ agent: "linker", kind: "internal_links", title: `Chèn ${edits.length} link nội bộ vào ${src.path}${hasGsc ? ` (${clicks(src.path)} click/28 ngày)` : ""}`, detail: `Từ bài thông tin tới: ${edits.map((e) => e.target).join(", ")}.`, target_url: src.url, payload: { edits, elementor: src.data!.elementor, words: src.data!.words }, risk: "review", priority: 10 + linkTasks, gate });
     linkTasks++;
   }
 
@@ -389,24 +422,26 @@ export function plan({ pages, analysis, rules, elementor }: PlanInput): PlannedT
   const cg = f("cannibalisation");
   if (cg) for (const [i, g] of cg.urls.slice(0, 10).entries()) {
     const paths = g.split("  |  ");
-    const strongest = paths.map((p) => byPath.get(p)).filter(Boolean).sort((a, b) => (inbound.get(b!.path) || 0) - (inbound.get(a!.path) || 0) || b!.data!.words - a!.data!.words)[0];
+    const strongest = paths.map((p) => byPath.get(p)).filter(Boolean).sort((a, b) => clicks(b!.path) - clicks(a!.path) || (inbound.get(b!.path) || 0) - (inbound.get(a!.path) || 0) || b!.data!.words - a!.data!.words)[0];
     tasks.push({ agent: "editor", kind: "merge", title: `Xử lý nhóm từ khoá trùng (${paths.length} trang)`, detail: `Đề xuất giữ ${strongest?.path || paths[0]} làm trang chính, củng cố nó trước; sau đó mới cân nhắc gộp/redirect các trang còn lại. Redirect là việc khó đảo ngược: người duyệt quyết.`, target_url: null, payload: { pages: paths, keep: strongest?.path || paths[0] }, risk: "irreversible", priority: 40 + i, gate: null });
   }
-  const thinF = f("thin");
-  if (thinF) {
-    const prune = ok.filter((p) => kindOf(p) === "informational" && p.data!.words < 300 && (inbound.get(p.path) || 0) === 0);
-    if (prune.length) tasks.push({ agent: "editor", kind: "prune", title: `Xem xét gỡ ${prune.length} bài mỏng không có link trỏ về`, detail: "Chỉ gỡ (hoặc noindex) bài không có traffic trong Search Console 6 tháng gần nhất. Bài có traffic thì viết lại cho đầy đủ.", target_url: null, payload: { urls: prune.map((p) => p.url) }, risk: "irreversible", priority: 50, gate: null });
-  }
-  const sc = f("scaled_content");
-  if (sc) {
-    const cls = ok.filter((p) => kindOf(p) === "informational").map((p) => ({
+  // Không traffic = 0 click, < 10 lượt hiển thị trong cả 2 kỳ 28 ngày
+  const noTraffic = (path: string) => { const t = traffic.get(path); return hasGsc && (!t || (t.clicks === 0 && t.clicksPrev === 0 && t.impressions < 10)); };
+  const prune = ok.filter((p) => kindOf(p) === "informational" && p.data!.words < 300 && (hasGsc ? noTraffic(p.path) : (inbound.get(p.path) || 0) === 0));
+  if (prune.length) tasks.push({ agent: "editor", kind: "prune", title: `Xem xét gỡ ${prune.length} bài mỏng ${hasGsc ? "không có traffic" : "không có link trỏ về"}`, detail: hasGsc ? "Bài dưới 300 từ, 0 click và dưới 10 lượt hiển thị trong 56 ngày. Gỡ hoặc noindex theo đợt nhỏ; bài nào còn giá trị thì gộp vào bài mạnh hơn." : "Chưa có dữ liệu Search Console: chỉ gỡ (hoặc noindex) bài không có traffic 6 tháng gần nhất. Bài có traffic thì viết lại cho đầy đủ.", target_url: null, payload: { urls: prune.map((p) => p.url) }, risk: "irreversible", priority: 50, gate: null });
+  const infoPages = ok.filter((p) => kindOf(p) === "informational");
+  if (infoPages.length >= 5) {
+    const mergeSet = new Set<string>();
+    for (const g of (f("cannibalisation")?.urls || [])) { const ps = g.split("  |  "); const keep = [...ps].sort((a, b) => clicks(b) - clicks(a))[0]; ps.filter((x) => x !== keep).forEach((x) => mergeSet.add(x)); }
+    const cls = infoPages.map((p) => ({
       url: p.url,
       words: p.data!.words,
       inbound: inbound.get(p.path) || 0,
-      label: p.data!.words < 300 && !(inbound.get(p.path) || 0) ? "PRUNE" : deadEnd.has(p.url) ? "FUNNEL" : "KEEP"
-    }));
+      clicks: hasGsc ? clicks(p.path) : null,
+      label: mergeSet.has(p.path) ? "MERGE" : p.data!.words < 300 && (hasGsc ? noTraffic(p.path) : !(inbound.get(p.path) || 0)) ? "PRUNE" : deadEnd.has(p.url) ? "FUNNEL" : "KEEP"
+    })).sort((a, b) => (b.clicks || 0) - (a.clicks || 0));
     const count = (l: string) => cls.filter((c) => c.label === l).length;
-    tasks.push({ agent: "editor", kind: "classify", title: "Phân loại bài thông tin: KEEP / FUNNEL / PRUNE (bản nháp)", detail: `Theo dữ liệu quét: KEEP ${count("KEEP")}, FUNNEL ${count("FUNNEL")}, PRUNE ${count("PRUNE")}. MERGE xem ở các việc "nhóm từ khoá trùng". Cần đối chiếu traffic Search Console trước khi chốt.`, target_url: null, payload: { pages: cls }, risk: "safe", priority: 35, gate: null });
+    tasks.push({ agent: "editor", kind: "classify", title: "Phân loại bài thông tin: KEEP / FUNNEL / MERGE / PRUNE (bản nháp)", detail: `KEEP ${count("KEEP")} · FUNNEL ${count("FUNNEL")} · MERGE ${count("MERGE")} · PRUNE ${count("PRUNE")}. ${hasGsc ? "Đã tính theo click Search Console 28 ngày." : "Chưa có Search Console: cần đối chiếu traffic trước khi chốt."}`, target_url: null, payload: { pages: cls }, risk: "safe", priority: 35, gate: null });
   }
 
   // Liên kết ngoài

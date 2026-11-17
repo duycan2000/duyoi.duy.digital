@@ -1,9 +1,10 @@
 // Site WordPress giả (tiếng Đức) để kiểm thử chức năng Phục hồi thứ hạng mà không cần mạng.
 
-export function fakeSite() {
+export function fakeSite(opts = {}) {
   const host = "caddemo.de";
   const filler = (topic, n) => Array.from({ length: n }, (_, i) => `<p>Im Bereich ${topic} ist die saubere Planung der erste Schritt für jedes Projekt und sie spart später viel Aufwand bei der Abstimmung mit allen Beteiligten im Team ${i}. Die Zeichnungen müssen klar und eindeutig sein, damit alle Gewerke die gleiche Grundlage haben und Fehler früh erkannt werden. Zum Schluss prüfen wir alle Details zu ${topic} noch einmal gründlich, bevor die Unterlagen an den Kunden gehen (Abschnitt ${i}).</p>`).join("");
-  const page = (title, h1, body, extra = "") => `<!doctype html><html lang="de"><head><title>${title}</title><meta name="description" content="${h1} – Beschreibung."><link rel="canonical" href="https://${host}${extra}"></head><body class="elementor-default"><header><nav><a href="/">Start</a><a href="/cad-dienstleistung-tga/">TGA</a><a href="/kontakt/">Kontakt</a></nav></header><main><h1>${h1}</h1>${body}</main><footer><a href="/impressum/">Impressum</a></footer></body></html>`;
+  const render = (title, h1, body, extra = "") => `<!doctype html><html lang="de"><head><title>${title}</title><meta name="description" content="${h1} – Beschreibung."><link rel="canonical" href="https://${host}${extra}"></head><body class="elementor-default"><header><nav><a href="/">Start</a><a href="/cad-dienstleistung-tga/">TGA</a><a href="/kontakt/">Kontakt</a></nav></header><main><h1>${h1}</h1>${body}</main><footer><a href="/impressum/">Impressum</a></footer></body></html>`;
+  const page = (title, h1, body, extra = "") => ({ title, h1, body, extra });
   const pages = {
     "/": page("CAD Demo", "CAD Dienstleistungen aus einer Hand", `<h2>Leistungen</h2>${filler("CAD", 4)}<p><a href="/cad-dienstleistung-tga/">TGA</a></p>`, "/"),
     "/cad-dienstleistung-tga/": page("CAD-Dienstleistung TGA | CAD Demo", "CAD-Dienstleistung TGA", `<h2>TGA Planung</h2>${filler("TGA", 4)}<p><a href="/kontakt/">Jetzt anfragen</a></p>`, "/cad-dienstleistung-tga/"),
@@ -19,11 +20,93 @@ export function fakeSite() {
   const urls = Object.keys(pages).concat(["/geloeschte-seite/"]);
   const sitemap = `<?xml version="1.0"?><urlset>${urls.map((u, i) => `<url><loc>https://${host}${u}</loc><lastmod>2025-0${(i % 3) + 6}-01</lastmod></url>`).join("")}</urlset>`;
   const index = `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://${host}/page-sitemap.xml</loc></sitemap></sitemapindex>`;
-  return async (input) => {
+  // Trạng thái WordPress giả: mỗi trang là một bài; bài CAD-Symbole dựng bằng Elementor
+  const wp = opts.wp || {};
+  const posts = Object.fromEntries(Object.keys(pages).map((path, i) => [path, { id: 100 + i, modified: "2026-11-01 10:00:00", meta: { rank_math_title: pages[path].title, rank_math_description: "" }, elementor: path.includes("symbole") }]));
+  const elData = (path) => JSON.stringify([{ id: "s1", elType: "section", settings: {}, elements: [{ id: "w1", elType: "widget", widgetType: "text-editor", settings: { editor: pages[path].body }, elements: [] }] }]);
+  const count = (hay, n) => (n ? hay.split(n).length - 1 : 0);
+  const blockEnd = (h, end) => { const m = /<\/(p|h[1-6]|ul|ol|li)>/i.exec(h.slice(end)); return m ? end + m.index + m[0].length : h.length; };
+  const blockStart = (h, start) => { const head = h.slice(0, start); const all = [...head.matchAll(/<(p|h[1-6]|ul|ol|li)\b[^>]*>/gi)]; return all.length ? all[all.length - 1].index : 0; };
+  const jsonRes = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+  wp.calls = [];
+  async function wpRoute(u, init) {
+    const auth = (init?.headers?.Authorization || "");
+    if (auth !== `Basic ${Buffer.from(`${wp.user}:${wp.pass}`).toString("base64")}`) return jsonRes({ code: "rest_not_logged_in", message: "Sorry, you are not allowed" }, 401);
+    const route = u.pathname.replace("/wp-json/duyoi/v1", "");
+    const body = init?.body ? JSON.parse(init.body) : {};
+    wp.calls.push({ route, body });
+    const byId = (id) => Object.entries(posts).find(([, p]) => p.id === Number(id));
+    if (route === "/ping") return jsonRes({ ok: true, version: "1.0.0", elementor: true, rankmath: true, flyingpress: true, user: wp.user });
+    if (route === "/post") {
+      const path = new URL(u.searchParams.get("url")).pathname;
+      const p = posts[path];
+      if (!p) return jsonRes({ code: "not_found", message: "Không tìm thấy" }, 404);
+      return jsonRes({ id: p.id, type: "page", status: "publish", slug: path, link: `https://${host}${path}`, modified_gmt: p.modified, content: p.elementor ? "" : pages[path].body, elementor: p.elementor, elementor_data: p.elementor ? elData(path) : null, meta: p.meta });
+    }
+    if (route === "/apply" || route === "/restore") {
+      const hit = byId(body.id);
+      if (!hit) return jsonRes({ code: "not_found", message: "x" }, 404);
+      const [path, p] = hit;
+      if (route === "/restore") {
+        if (body.elementor_data) pages[path].body = JSON.parse(body.elementor_data)[0].elements[0].settings.editor;
+        else if (typeof body.content === "string") pages[path].body = body.content;
+        Object.assign(p.meta, body.meta || {});
+        p.modified = new Date().toISOString().slice(0, 19).replace("T", " ");
+        return jsonRes({ ok: true, purged: ["flyingpress"] });
+      }
+      if (body.expected_modified && body.expected_modified !== p.modified) return jsonRes({ code: "conflict", message: "Bài vừa được sửa ở nơi khác" }, 409);
+      let h = pages[path].body;
+      for (const [i, e] of (body.edits || []).entries()) {
+        const n = count(h, e.find);
+        if (n !== 1) return jsonRes({ code: "no_match", message: `Sửa #${i + 1}: đoạn gốc khớp ${n} lần` }, 422);
+        const at = h.indexOf(e.find);
+        if (e.mode === "replace") { if (!e.replace.includes(e.find)) return jsonRes({ code: "no_match", message: "mất chữ gốc" }, 422); h = h.slice(0, at) + e.replace + h.slice(at + e.find.length); }
+        else if (e.mode === "after_block") { const pos = blockEnd(h, at + e.find.length); h = h.slice(0, pos) + e.insert + h.slice(pos); }
+        else { const pos = blockStart(h, at); h = h.slice(0, pos) + e.insert + h.slice(pos); }
+      }
+      if (body.dry_run) return jsonRes({ ok: true, dry_run: true, changes: (body.edits || []).length, meta: Object.keys(body.meta || {}), elementor: p.elementor });
+      pages[path].body = h;
+      Object.assign(p.meta, body.meta || {});
+      p.modified = `2026-11-17 10:${String(10 + wp.calls.length).padStart(2, "0")}:00`;
+      return jsonRes({ ok: true, changes: (body.edits || []).length, meta: Object.keys(body.meta || {}), elementor: p.elementor, purged: ["flyingpress"].concat(p.elementor ? ["elementor-css"] : []), modified_gmt: p.modified });
+    }
+    return jsonRes({ code: "rest_no_route", message: "No route" }, 404);
+  }
+  async function google(u, init) {
+    if (u.hostname === "oauth2.googleapis.com") return jsonRes({ access_token: "tok", expires_in: 3600 });
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (u.hostname === "www.googleapis.com") {
+      const rows = { "/12-wichtige-cad-symbole-fur-architektur/": 110, "/cad-software-vergleich-beste-programme/": 101, "/cad-dienstleistung-tga/": 4, "/": 20 };
+      const before = body.startDate < "2025-10-01";
+      return jsonRes({ rows: Object.entries(rows).map(([p, c]) => ({ keys: [`https://${host}${p}`], clicks: before && body.startDate.startsWith("2025") ? c * 3 : c, impressions: c * 40, ctr: 0.02, position: 12.3 })) });
+    }
+    if (u.hostname === "analyticsdata.googleapis.com") {
+      const leads = body.dimensions?.[0]?.name === "pagePath";
+      return jsonRes({ rows: leads ? [{ dimensionValues: [{ value: "/kontakt/" }], metricValues: [{ value: "3" }] }] : [{ dimensionValues: [{ value: "/12-wichtige-cad-symbole-fur-architektur/" }], metricValues: [{ value: "140" }] }] });
+    }
+    return null;
+  }
+  async function openrouter(init) {
+    const body = JSON.parse(init.body);
+    const user = JSON.parse(body.messages[1].content);
+    let content;
+    if (user.sections) {
+      const bad = /Kosten/.test(user.page_title || "");
+      content = { answers: user.sections.slice(0, 2).map((s) => ({ heading: s.heading, answer: bad ? "Mit uns arbeiten Sie 40% schneller und sparen Zeit bei jedem Projekt." : `Kurz gesagt: Bei ${s.heading} kommt es auf eine saubere und abgestimmte Planung an. Wir prüfen alle Unterlagen gründlich, bevor sie an Sie gehen.` })), faq_title: "Häufige Fragen", faq: [1, 2, 3].map((i) => ({ q: `Wie läuft die Zusammenarbeit ab (Frage ${String.fromCharCode(64 + i)})?`, a: "Sie senden uns Ihre Unterlagen, wir stimmen die Anforderungen ab und liefern geprüfte Zeichnungen." })) };
+    } else if (user.target_page?.purpose === "contact") content = { sentence: "Haben Sie ein konkretes Vorhaben? Sprechen Sie mit unserem Team über Ihr Projekt.", anchor: "Sprechen Sie mit unserem Team" };
+    else content = { sentence: `Für die Umsetzung unterstützen Sie unsere Experten für ${user.target_page.title.split("|")[0].trim()}.`, anchor: user.target_page.title.split("|")[0].trim() };
+    return jsonRes({ choices: [{ message: { content: JSON.stringify(content) } }], usage: { prompt_tokens: 500, completion_tokens: 80, cost: 0.0012 } });
+  }
+  return async (input, init) => {
     const u = new URL(typeof input === "string" ? input : input.url);
+    if (u.hostname === "openrouter.ai") return openrouter(init);
+    const g = await google(u, init);
+    if (g) return g;
     if (u.hostname !== host) return new Response("not found", { status: 404 });
+    if (u.pathname.startsWith("/wp-json/duyoi/v1")) return wpRoute(u, init);
+    const pg = pages[u.pathname];
     const body = u.pathname === "/robots.txt" ? `User-agent: *\nDisallow: /wp-admin/\nSitemap: https://${host}/sitemap_index.xml`
-      : u.pathname === "/sitemap_index.xml" ? index : u.pathname === "/page-sitemap.xml" ? sitemap : pages[u.pathname];
+      : u.pathname === "/sitemap_index.xml" ? index : u.pathname === "/page-sitemap.xml" ? sitemap : pg ? render(pg.title, pg.h1, pg.body, pg.extra) : null;
     if (!body) return new Response("<html>404</html>", { status: 404, headers: { "content-type": "text/html" } });
     const type = u.pathname.endsWith(".xml") ? "application/xml" : u.pathname.endsWith(".txt") ? "text/plain" : "text/html; charset=utf-8";
     const res = new Response(body, { status: 200, headers: { "content-type": type } });

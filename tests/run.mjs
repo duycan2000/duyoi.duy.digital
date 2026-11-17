@@ -349,6 +349,104 @@ await test("phục hồi: quét site, chẩn đoán, lập việc có Gác cổn
   }
 });
 
+await test("phục hồi: Search Console/GA4, AI viết lại, áp dụng lên WordPress, hoàn tác, GEO", async () => {
+  const env3 = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const c3 = client(env3);
+  await c3("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const kp = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const der = Buffer.from(await crypto.subtle.exportKey("pkcs8", kp.privateKey)).toString("base64");
+  const sa = JSON.stringify({ type: "service_account", client_email: "duyoi@proj.iam.gserviceaccount.com", private_key: `-----BEGIN PRIVATE KEY-----\n${der.match(/.{1,64}/g).join("\n")}\n-----END PRIVATE KEY-----\n`, token_uri: "https://oauth2.googleapis.com/token" });
+  assert.equal((await c3("PUT", "/api/settings", { secrets: { google_service_account: "{}" } })).status, 400);
+  const st = await c3("PUT", "/api/settings", { secrets: { google_service_account: sa, openrouter_api_key: "sk-or-test-123456" } });
+  assert.equal(st.status, 200);
+  assert.equal(st.data.secrets.google_service_account.hint, "duyoi@proj.iam.gserviceaccount.com");
+  const wp = { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ wp });
+  try {
+    const cr = await c3("POST", "/api/recovery", { url: "caddemo.de", dropMonth: "2025-10", language: "de", rules: {
+      commercialPaths: ["/cad-dienstleistung-tga/", "/cad-outsourcing-kosten-sparen/"], gscProperty: "sc-domain:caddemo.de", ga4Property: "123456789", builder: "elementor", cachePlugin: "flyingpress"
+    } });
+    assert.equal(cr.status, 201);
+    let g = await c3("GET", `/api/recovery/${cr.data.id}`);
+    assert.equal(g.data.case.status, "ready", g.data.case.error);
+    const codes = g.data.findings.map((f) => f.code);
+    assert.ok(codes.includes("traffic_change") && codes.includes("leads"), codes.join(","));
+    assert.match(g.data.findings.find((f) => f.code === "traffic_change").title, /-\d+%/);
+    assert.equal(g.data.pages.find((p) => p.path === "/12-wichtige-cad-symbole-fur-architektur/").traffic.clicks, 110);
+    let link = g.data.tasks.find((t) => t.kind === "internal_links" && t.target_url.includes("symbole"));
+    assert.match(link.title, /110 click/);
+    assert.equal(g.data.wpConnected, false);
+    // Kết nối WordPress
+    const siteId = g.data.case.siteId;
+    assert.equal((await c3("POST", `/api/sites/${siteId}/wp/test`)).status, 400);
+    const ws = await c3("PUT", `/api/sites/${siteId}/wp`, { wpUser: wp.user, appPassword: wp.pass });
+    assert.equal(ws.data.password.set, true);
+    assert.ok(!JSON.stringify(ws.data).includes("efgh"));
+    assert.equal((await c3("POST", `/api/sites/${siteId}/wp/test`)).data.info.version, "1.0.0");
+    // AI viết lại câu chèn link, qua Gác cổng
+    const ai = await c3("POST", `/api/recovery/tasks/${link.id}/ai`);
+    assert.equal(ai.status, 200, JSON.stringify(ai.data));
+    assert.equal(ai.data.gate.ok, true, JSON.stringify(ai.data.gate));
+    g = await c3("GET", `/api/recovery/${cr.data.id}`);
+    link = g.data.tasks.find((t) => t.id === link.id);
+    assert.equal(link.payload.ai, true);
+    assert.match(link.payload.edits[0].replace, /unsere Experten für <a href="\/cad-dienstleistung-tga\/">CAD-Dienstleistung TGA<\/a>/);
+    assert.ok(link.payload.edits[0].replace.startsWith(link.payload.edits[0].find));
+    const usage = env3.DB.raw.prepare("SELECT COUNT(*) AS n, SUM(cost_usd) AS c FROM usage_events WHERE provider = 'openrouter'").get();
+    assert.ok(usage.n >= 1 && usage.c > 0);
+    // Chưa duyệt thì không áp dụng được
+    assert.equal((await c3("POST", `/api/recovery/tasks/${link.id}/apply`)).status, 409);
+    await c3("PUT", `/api/recovery/tasks/${link.id}`, { status: "approved" });
+    const ap = await c3("POST", `/api/recovery/tasks/${link.id}/apply`);
+    assert.equal(ap.status, 200, JSON.stringify(ap.data));
+    assert.deepEqual(ap.data.applied.purged, ["flyingpress", "elementor-css"]);
+    assert.ok(wp.calls.some((c) => c.route === "/apply" && c.body.dry_run), "phải chạy thử trước khi ghi");
+    const live = await (await globalThis.fetch("https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/")).text();
+    assert.match(live, /<a href="\/cad-dienstleistung-tga\/">CAD-Dienstleistung TGA<\/a>/);
+    g = await c3("GET", `/api/recovery/${cr.data.id}`);
+    assert.equal(g.data.tasks.find((t) => t.id === link.id).status, "done");
+    assert.equal(g.data.backups.length, 1);
+    assert.equal((await c3("POST", `/api/recovery/tasks/${link.id}/apply`)).status, 409);
+    // Hoàn tác về đúng bản gốc
+    const rb = await c3("POST", `/api/recovery/tasks/${link.id}/rollback`);
+    assert.equal(rb.status, 200, JSON.stringify(rb.data));
+    const back = await (await globalThis.fetch("https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/")).text();
+    assert.doesNotMatch(back, /CAD-Dienstleistung TGA<\/a>/);
+    assert.equal((await c3("POST", `/api/recovery/tasks/${link.id}/rollback`)).status, 404);
+    // Meta: áp dụng qua Rank Math
+    const meta = g.data.tasks.find((t) => t.kind === "meta" && t.status === "proposed");
+    if (meta) {
+      await c3("PUT", `/api/recovery/tasks/${meta.id}`, { status: "approved" });
+      const am = await c3("POST", `/api/recovery/tasks/${meta.id}/apply`);
+      assert.equal(am.status, 200, JSON.stringify(am.data));
+      assert.ok(am.data.applied.meta.length >= 1);
+    }
+    // GEO: đoạn trả lời trực tiếp + FAQ, chèn trước/sau khối
+    const geo = await c3("POST", `/api/recovery/${cr.data.id}/geo`, { url: "https://caddemo.de/cad-dienstleistung-tga/" });
+    assert.equal(geo.status, 200, JSON.stringify(geo.data));
+    assert.equal(geo.data.gate.ok, true, JSON.stringify(geo.data.gate));
+    await c3("PUT", `/api/recovery/tasks/${geo.data.taskId}`, { status: "approved" });
+    const ag = await c3("POST", `/api/recovery/tasks/${geo.data.taskId}/apply`);
+    assert.equal(ag.status, 200, JSON.stringify(ag.data));
+    const tga = await (await globalThis.fetch("https://caddemo.de/cad-dienstleistung-tga/")).text();
+    assert.match(tga, /<h2>TGA Planung<\/h2><p>Kurz gesagt: Bei TGA Planung/);
+    assert.match(tga, /<h2>Häufige Fragen<\/h2><h3>/);
+    // AI bịa số liệu: Gác cổng chặn
+    const bad = await c3("POST", `/api/recovery/${cr.data.id}/geo`, { url: "https://caddemo.de/cad-outsourcing-kosten-sparen/" });
+    assert.equal(bad.data.gate.ok, false);
+    assert.ok(bad.data.gate.problems.some((p) => p.rule === "numbers"));
+    await c3("PUT", `/api/recovery/tasks/${bad.data.taskId}`, { status: "approved" }).then((r) => assert.equal(r.status, 409));
+    // Viewer không được áp dụng
+    const act = await c3("GET", "/api/activity?limit=50");
+    assert.ok(act.data.activity.some((a) => a.action === "recovery.applied"));
+    assert.ok(act.data.activity.some((a) => a.action === "recovery.rollback"));
+    assert.ok(!JSON.stringify(act.data).includes("efgh"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 await test("đường dẫn không phải /api trả giao diện (SPA)", async () => {
   const res = await worker.fetch(new Request(BASE + "/sites/12"), env);
   assert.equal(res.status, 200);

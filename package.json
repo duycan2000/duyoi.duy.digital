@@ -10,7 +10,8 @@
     "db:migrate:local": "wrangler d1 migrations apply duyoi --local",
     "db:migrate:remote": "wrangler d1 migrations apply duyoi --remote",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs && php wordpress/tests/test.php",
+    "plugin:zip": "cd wordpress && rm -f ../public/duyoi-connector.zip && zip -qr ../public/duyoi-connector.zip duyoi-connector"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

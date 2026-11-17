@@ -6,7 +6,7 @@ import { loadWorker, makeEnv } from "./harness.mjs";
 import { fakeSite } from "./fake-site.mjs";
 
 // FAKE_SITE=1: mọi lệnh tải trang ra ngoài trả về site giả caddemo.de (để thử chức năng Phục hồi khi không có mạng)
-if (process.env.FAKE_SITE) globalThis.fetch = fakeSite();
+if (process.env.FAKE_SITE) globalThis.fetch = fakeSite({ wp: { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" } });
 
 const port = Number(process.argv[2]) || 8788;
 const worker = await loadWorker();

@@ -7,6 +7,8 @@ export interface PageSection {
   heading: string;
   lastSentence: string;   // câu cuối của đoạn văn cuối trong mục — chỗ chèn link "phẫu thuật"
   occurrences: number;    // số lần câu đó xuất hiện trong nội dung (phải đúng 1 mới được sửa)
+  firstSentence?: string; // câu đầu của đoạn văn đầu — chỗ chèn đoạn trả lời trực tiếp (GEO) phía trước
+  firstOccurrences?: number;
   sample: string;         // đầu mục, để so chủ đề
   words: number;
 }
@@ -196,11 +198,14 @@ export function extractPage(html: string, pageUrl: string, rules: SiteRules): Pa
     const bodyHtml = rest.join(" ").split(/<h[1-2]\b/i)[0] ?? "";
     const paras = [...bodyHtml.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => clean(m[1] ?? "")).filter((p) => wordCount(p) >= 8);
     const last = paras.length ? splitSentences(paras[paras.length - 1] ?? "").filter((s) => wordCount(s) >= 6).pop() || "" : "";
+    const first = paras.length ? splitSentences(paras[0] ?? "").find((s) => wordCount(s) >= 5) || "" : "";
     const bodyText = clean(bodyHtml);
     sections.push({
       heading: clean(headHtml).slice(0, 200),
       lastSentence: last.slice(0, 500),
       occurrences: countOccurrences(contentText, last),
+      firstSentence: first.slice(0, 500),
+      firstOccurrences: countOccurrences(contentText, first),
       sample: bodyText.slice(0, 400),
       words: wordCount(bodyText)
     });

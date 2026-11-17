@@ -2,7 +2,11 @@
 
 import { HttpError, json, now, readJson, str } from "./http";
 import { logActivity } from "./activity";
-import { analyze, disavowFile, plan, RECOVERY_AGENTS, type ScannedPage, type SiteChecks } from "./recovery-analyze";
+import { analyze, disavowFile, plan, RECOVERY_AGENTS, type ScannedPage, type SiteChecks, type Traffic } from "./recovery-analyze";
+import { ga4ByPage, gscTraffic, hasGoogle, type PageTraffic } from "./google";
+import { checkEdits, type Edit } from "./recovery-gate";
+import { aiJson, writingRules } from "./ai";
+import { wpApply, wpGetPost, wpRestore, type WpEdit } from "./wordpress";
 import { extractPage, type PageData } from "./recovery-extract";
 import { parseRules, readRules, type SiteRules } from "./recovery-rules";
 import { normalizeDomain } from "./sites";
@@ -157,10 +161,23 @@ async function loadPages(env: Env, caseId: number): Promise<ScannedPage[]> {
 async function finish(env: Env, c: CaseRow, rules: SiteRules, domain: string): Promise<void> {
   const pages = await loadPages(env, c.id);
   const checks: SiteChecks = c.site_checks ? JSON.parse(c.site_checks) : { https: true, robotsTxt: null, robotsBlocksAll: false, sitemapUrl: null, homepageStatus: null, wordpress: false, elementor: false };
-  const a = analyze(pages, checks, rules, c.drop_month);
-  const tasks = plan({ pages, analysis: a, rules, elementor: checks.elementor });
+  // Traffic thật (nếu đã nối Google)
+  const traffic: Traffic = new Map();
+  const notes: string[] = [];
+  if ((rules.gscProperty || rules.ga4Property) && (await hasGoogle(env))) {
+    if (rules.gscProperty) {
+      try { for (const [k, v] of await gscTraffic(env, rules.gscProperty, c.drop_month)) traffic.set(k.endsWith("/") || /\.[a-z0-9]{2,5}$/i.test(k) ? k : `${k}/`, v); }
+      catch (e) { notes.push(`Search Console (${rules.gscProperty}): ${(e as Error).message}`); }
+    }
+    if (rules.ga4Property) {
+      try { for (const [k, v] of await ga4ByPage(env, rules.ga4Property)) traffic.set(k, { ...(traffic.get(k) || { clicks: 0, impressions: 0, position: null, clicksPrev: 0, impressionsPrev: 0 }), ...v }); }
+      catch (e) { notes.push(`GA4 (${rules.ga4Property}): ${(e as Error).message}`); }
+    }
+  } else if (rules.gscProperty || rules.ga4Property) notes.push("Đã nhập property nhưng chưa có Google service account trong Cài đặt.");
+  const a = analyze(pages, checks, rules, c.drop_month, traffic, notes);
+  const tasks = plan({ pages, analysis: a, rules, elementor: checks.elementor, traffic });
   const t = now();
-  const kindStmts = pages.map((p) => env.DB.prepare("UPDATE recovery_pages SET kind = ? WHERE id = ?").bind(a.kinds.get(p.id) || null, p.id));
+  const kindStmts = pages.map((p) => { const t = traffic.get(p.path); return env.DB.prepare("UPDATE recovery_pages SET kind = ?, traffic = ? WHERE id = ?").bind(a.kinds.get(p.id) || null, t ? JSON.stringify(t) : null, p.id); });
   for (let i = 0; i < kindStmts.length; i += 80) await env.DB.batch(kindStmts.slice(i, i + 80));
   // Giữ việc đã duyệt/đã làm từ lần quét trước; thay các đề xuất cũ
   await env.DB.batch([
@@ -268,7 +285,7 @@ export async function getCase(env: Env, id: number): Promise<Response> {
   const [findings, tasks, pages] = await Promise.all([
     env.DB.prepare("SELECT * FROM recovery_findings WHERE case_id = ? ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, id").bind(id).all<Record<string, unknown>>(),
     env.DB.prepare("SELECT * FROM recovery_tasks WHERE case_id = ? ORDER BY CASE status WHEN 'blocked' THEN 1 WHEN 'proposed' THEN 0 WHEN 'approved' THEN 2 WHEN 'done' THEN 3 ELSE 4 END, priority, id").bind(id).all<Record<string, unknown>>(),
-    env.DB.prepare("SELECT id, url, path, status, http_status, kind, data, error FROM recovery_pages WHERE case_id = ? ORDER BY path LIMIT 500").bind(id).all<{ id: number; url: string; path: string; status: string; http_status: number | null; kind: string | null; data: string | null; error: string | null }>()
+    env.DB.prepare("SELECT id, url, path, status, http_status, kind, data, traffic, error FROM recovery_pages WHERE case_id = ? ORDER BY path LIMIT 500").bind(id).all<{ id: number; url: string; path: string; status: string; http_status: number | null; kind: string | null; data: string | null; traffic: string | null; error: string | null }>()
   ]);
   const inbound = new Map<string, number>();
   const parsed = pages.results.map((p) => ({ ...p, d: p.data ? (JSON.parse(p.data) as PageData) : null }));
@@ -278,10 +295,13 @@ export async function getCase(env: Env, id: number): Promise<Response> {
     agents: RECOVERY_AGENTS,
     findings: findings.results.map((f) => ({ ...f, urls: JSON.parse(String(f.urls || "[]")) })),
     tasks: tasks.results.map((t) => ({ ...t, payload: t.payload ? JSON.parse(String(t.payload)) : null, gate: t.gate ? JSON.parse(String(t.gate)) : null })),
+    backups: (await env.DB.prepare("SELECT id, task_id, url, created_at, restored_at FROM recovery_backups WHERE site_id = ? ORDER BY id DESC LIMIT 100").bind(c.site_id).all()).results,
+    wpConnected: Boolean((await env.DB.prepare("SELECT wp_user FROM sites WHERE id = ?").bind(c.site_id).first<{ wp_user: string | null }>())?.wp_user) && Boolean(await env.DB.prepare("SELECT 1 FROM secrets WHERE key = ?").bind(`wp:${c.site_id}`).first()),
     pages: parsed.map((p) => ({
       id: p.id, url: p.url, path: p.path, status: p.status, httpStatus: p.http_status, kind: p.kind, error: p.error,
       title: p.d?.title || "", words: p.d?.words ?? null, inbound: inbound.get(p.path) || 0, outLinks: p.d?.internalLinks.length ?? 0,
-      cta: p.d?.ctaFound ?? null, elementor: p.d?.elementor ?? null, noindex: p.d ? /noindex/.test(p.d.robots) : null, blockHits: p.d?.blockHits || []
+      cta: p.d?.ctaFound ?? null, elementor: p.d?.elementor ?? null, noindex: p.d ? /noindex/.test(p.d.robots) : null, blockHits: p.d?.blockHits || [],
+      traffic: p.traffic ? (JSON.parse(p.traffic) as PageTraffic) : null
     }))
   });
 }
@@ -360,4 +380,187 @@ export async function archiveCase(env: Env, user: User, id: number): Promise<Res
   await env.DB.prepare("UPDATE recovery_cases SET status = 'archived', updated_at = ? WHERE id = ?").bind(now(), id).run();
   await logActivity(env, `user:${user.id}`, "recovery.archived", `Lưu trữ ca phục hồi ${c.domain}`, c.site_id);
   return json({ ok: true });
+}
+
+
+// ---------------- Áp dụng việc đã duyệt lên WordPress (có sao lưu, hoàn tác) ----------------
+
+interface TaskRow {
+  id: number; case_id: number; agent: string; kind: string; title: string; target_url: string | null; payload: string | null;
+  risk: string; status: string; gate: string | null; site_id: number; rules: string; domain: string;
+}
+
+async function taskRow(env: Env, id: number): Promise<TaskRow> {
+  const t = await env.DB.prepare("SELECT t.*, c.site_id, c.rules, s.domain FROM recovery_tasks t JOIN recovery_cases c ON c.id = t.case_id JOIN sites s ON s.id = c.site_id WHERE t.id = ?").bind(id).first<TaskRow>();
+  if (!t) throw new HttpError(404, "Không tìm thấy việc.", "not_found");
+  return t;
+}
+
+async function pageData(env: Env, caseId: number, url: string): Promise<PageData | null> {
+  const r = await env.DB.prepare("SELECT data FROM recovery_pages WHERE case_id = ? AND url = ?").bind(caseId, url).first<{ data: string | null }>();
+  return r?.data ? (JSON.parse(r.data) as PageData) : null;
+}
+
+function gateContext(rules: SiteRules, d: PageData | null, titleOf: (path: string) => string, occ?: (find: string) => number) {
+  return {
+    rules,
+    pageNumbers: d?.numbers || [],
+    occurrences: occ || ((find: string) => (d?.sections.find((s) => s.lastSentence === find)?.occurrences ?? d?.sections.find((s) => s.firstSentence === find)?.firstOccurrences ?? (d?.title === find || d?.metaDescription === find ? 1 : 0))),
+    elementor: Boolean(d?.elementor) || rules.builder === "elementor",
+    targetText: titleOf
+  };
+}
+
+async function titleLookup(env: Env, caseId: number): Promise<(path: string) => string> {
+  const { results } = await env.DB.prepare("SELECT path, data FROM recovery_pages WHERE case_id = ? AND kind IN ('commercial', 'conversion', 'home')").bind(caseId).all<{ path: string; data: string | null }>();
+  const m = new Map(results.map((r) => { const d = r.data ? (JSON.parse(r.data) as PageData) : null; return [r.path, d ? d.h1[0] || d.title.split(/\s[|–—]\s/)[0] || d.title : r.path]; }));
+  return (path: string) => m.get(path) || path;
+}
+
+// POST /api/recovery/tasks/:id/apply
+export async function applyTask(env: Env, user: User, taskId: number): Promise<Response> {
+  canEdit(user);
+  const t = await taskRow(env, taskId);
+  if (t.status !== "approved") throw new HttpError(409, "Chỉ áp dụng được việc đã duyệt.", "not_approved");
+  const p = t.payload ? (JSON.parse(t.payload) as { edits?: Edit[]; applied?: unknown }) : {};
+  if (!p.edits?.length || !t.target_url) throw new HttpError(400, "Việc này không có nội dung sửa để áp dụng tự động; làm tay rồi bấm Đã xong.", "manual");
+  const rules = readRules(t.rules);
+  // Gác cổng chạy lại ngay trước khi ghi (luật có thể đã đổi sau lúc duyệt). Việc khớp đúng 1 chỗ do plugin kiểm trên dữ liệu thật.
+  const gate = checkEdits(p.edits, gateContext(rules, await pageData(env, t.case_id, t.target_url), await titleLookup(env, t.case_id), () => 1));
+  if (!gate.ok) {
+    await env.DB.prepare("UPDATE recovery_tasks SET status = 'blocked', gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(gate), now(), taskId).run();
+    throw new HttpError(409, `Gác cổng chặn: ${gate.problems.filter((x) => x.level === "block").map((x) => x.message).join(" ")}`, "blocked");
+  }
+  const post = await wpGetPost(env, t.site_id, t.target_url);
+  const content: WpEdit[] = [];
+  const meta: Record<string, string> = {};
+  for (const e of p.edits) {
+    if (e.type === "meta_title") meta.rank_math_title = e.replace;
+    else if (e.type === "meta_description") meta.rank_math_description = e.replace;
+    else if (e.type === "insert") content.push({ find: e.find, insert: e.insert || e.replace.slice(e.find.length), mode: e.mode === "before_block" ? "before_block" : "after_block" });
+    else content.push({ find: e.find, replace: e.replace, mode: "replace" });
+  }
+  // Thử trước (không ghi) để biết chắc mọi sửa đều khớp, rồi mới sao lưu và ghi thật
+  await wpApply(env, t.site_id, { id: post.id, expected_modified: post.modified_gmt, edits: content, meta, dry_run: true });
+  const b = await env.DB.prepare("INSERT INTO recovery_backups (task_id, site_id, post_id, url, content, elementor_data, meta, modified_gmt, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(taskId, t.site_id, post.id, t.target_url, post.content, post.elementor_data, JSON.stringify(post.meta || {}), post.modified_gmt, user.id, now()).run();
+  const backupId = Number(b.meta.last_row_id);
+  const res = await wpApply(env, t.site_id, { id: post.id, expected_modified: post.modified_gmt, edits: content, meta });
+  const applied = { backupId, at: now(), postId: post.id, changes: res.changes, meta: res.meta, elementor: res.elementor, purged: res.purged || [] };
+  await env.DB.batch([
+    env.DB.prepare("UPDATE recovery_backups SET applied = ? WHERE id = ?").bind(JSON.stringify({ edits: content, meta, result: res }), backupId),
+    env.DB.prepare("UPDATE recovery_tasks SET status = 'done', payload = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify({ ...p, applied }), JSON.stringify(gate), now(), taskId)
+  ]);
+  await logActivity(env, `user:${user.id}`, "recovery.applied", `Áp dụng lên site: ${t.title} (${res.changes} sửa${res.meta.length ? `, meta ${res.meta.join(", ")}` : ""}${res.purged?.length ? `, xoá cache ${res.purged.join(", ")}` : ""})`, t.site_id);
+  return json({ ok: true, applied });
+}
+
+// POST /api/recovery/tasks/:id/rollback
+export async function rollbackTask(env: Env, user: User, taskId: number): Promise<Response> {
+  canEdit(user);
+  const t = await taskRow(env, taskId);
+  const b = await env.DB.prepare("SELECT * FROM recovery_backups WHERE task_id = ? AND restored_at IS NULL ORDER BY id DESC LIMIT 1").bind(taskId)
+    .first<{ id: number; post_id: number; content: string | null; elementor_data: string | null; meta: string | null }>();
+  if (!b) throw new HttpError(404, "Không có bản sao lưu nào để hoàn tác cho việc này.", "no_backup");
+  const meta = JSON.parse(b.meta || "{}") as Record<string, unknown>;
+  const r = await wpRestore(env, t.site_id, { id: b.post_id, content: b.elementor_data ? null : b.content, elementor_data: b.elementor_data, meta: { rank_math_title: meta.rank_math_title ?? "", rank_math_description: meta.rank_math_description ?? "", rank_math_focus_keyword: meta.rank_math_focus_keyword ?? "" } });
+  const p = t.payload ? JSON.parse(t.payload) : {};
+  delete p.applied;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE recovery_backups SET restored_at = ?, restored_by = ? WHERE id = ?").bind(now(), user.id, b.id),
+    env.DB.prepare("UPDATE recovery_tasks SET status = 'approved', payload = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify(p), now(), taskId)
+  ]);
+  await logActivity(env, `user:${user.id}`, "recovery.rollback", `Hoàn tác: ${t.title}${r.purged?.length ? ` (xoá cache ${r.purged.join(", ")})` : ""}`, t.site_id);
+  return json({ ok: true });
+}
+
+// ---------------- AI viết câu chèn link / CTA ----------------
+
+// POST /api/recovery/tasks/:id/ai
+export async function aiRewriteTask(env: Env, user: User, taskId: number): Promise<Response> {
+  canEdit(user);
+  const t = await taskRow(env, taskId);
+  if (!["proposed", "blocked"].includes(t.status) || !["internal_links", "cta"].includes(t.kind) || !t.target_url) throw new HttpError(400, "Chỉ viết lại được việc chèn link/CTA đang chờ duyệt.", "validation");
+  const rules = readRules(t.rules);
+  const d = await pageData(env, t.case_id, t.target_url);
+  const titleOf = await titleLookup(env, t.case_id);
+  const p = JSON.parse(t.payload || "{}") as { edits: Edit[]; templateEdits?: Edit[] };
+  const base = p.templateEdits || p.edits;
+  const out: Edit[] = [];
+  for (const e of base) {
+    const isLink = e.type === "internal_link";
+    const href = (e.replace.match(/href="([^"]+)"/) || [])[1] || e.target || "";
+    const r = await aiJson<{ sentence?: string; anchor?: string }>(env, {
+      task: `recovery.${t.kind}`, siteId: t.site_id, tier: "model_t1", maxTokens: 300,
+      system: `You are a careful B2B copy editor adding ONE short sentence after an existing sentence on a live web page.\n${writingRules(rules.language, [...(d?.numbers || []), ...rules.verifiedNumbers], rules.blocklist)}`,
+      user: JSON.stringify({
+        page_title: d?.title, section_heading: e.section, existing_sentence: e.find,
+        goal: isLink ? "Write one natural follow-up sentence that links to the target page. The anchor must describe the target page (use its main keyword or a close natural variant), 2–6 words, not generic." : "Write one short, friendly call-to-action sentence inviting the reader to contact the team. No promises, no numbers.",
+        target_page: isLink ? { path: href, title: titleOf(href) } : { path: href, purpose: "contact" },
+        avoid_anchors: base.filter((x) => x !== e).map((x) => x.anchor).filter(Boolean),
+        output: { sentence: "the full new sentence", anchor: "exact substring of sentence to turn into the link" }
+      })
+    });
+    const sentence = String(r.sentence || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    const anchor = String(r.anchor || "").replace(/<[^>]+>/g, "").trim();
+    if (!sentence || !anchor || !sentence.includes(anchor) || sentence.length > 300) { out.push(e); continue; }
+    const html = sentence.replace(anchor, `<a href="${href}">${anchor}</a>`);
+    out.push({ ...e, replace: `${e.find} ${html}`, anchor: isLink ? anchor : e.anchor });
+  }
+  const gate = checkEdits(out, gateContext(rules, d, titleOf));
+  await env.DB.prepare("UPDATE recovery_tasks SET payload = ?, gate = ?, status = ?, note = ?, updated_at = ? WHERE id = ?")
+    .bind(JSON.stringify({ ...p, edits: out, templateEdits: base, ai: true }), JSON.stringify(gate), gate.ok ? "proposed" : "blocked", "AI viết lại câu chèn, đã qua Gác cổng", now(), taskId).run();
+  await logActivity(env, `user:${user.id}`, "recovery.ai", `AI viết lại: ${t.title}${gate.ok ? "" : " (Gác cổng chặn)"}`, t.site_id);
+  return json({ ok: true, gate });
+}
+
+// ---------------- GEO: đoạn trả lời trực tiếp + FAQ cho một trang ----------------
+
+// POST /api/recovery/:id/geo { url }
+export async function geoDraft(env: Env, req: Request, user: User, caseId: number): Promise<Response> {
+  canEdit(user);
+  const c = await getCaseRow(env, caseId);
+  const body = await readJson(req);
+  const url = str(body.url, "URL", { max: 500 });
+  const d = await pageData(env, caseId, url);
+  if (!d) throw new HttpError(404, "Trang này chưa được quét.", "not_found");
+  const rules = readRules(c.rules);
+  const secs = d.sections.filter((s) => s.firstSentence && s.firstOccurrences === 1).slice(0, 8);
+  const last = [...d.sections].reverse().find((s) => s.lastSentence && s.occurrences === 1);
+  if (!secs.length || !last) throw new HttpError(400, "Trang không có mục H2 với đoạn văn đủ rõ để chèn an toàn.", "validation");
+  const r = await aiJson<{ answers?: { heading?: string; answer?: string }[]; faq_title?: string; faq?: { q?: string; a?: string }[] }>(env, {
+    task: "recovery.geo", siteId: c.site_id, tier: "model_t1", maxTokens: 1400,
+    system: `You improve pages so AI answer engines can cite them. You only ADD text, never change existing text.\n${writingRules(rules.language, [...d.numbers, ...rules.verifiedNumbers], rules.blocklist)}`,
+    user: JSON.stringify({
+      page_title: d.title, h1: d.h1[0],
+      task: "For up to 3 of the sections below, write a direct answer (2–4 sentences) to the question the heading implies, based ONLY on the section text given. Then write 3–5 FAQ items a potential B2B customer would ask before hiring (commercial intent), answered only with what the page supports.",
+      sections: secs.map((s) => ({ heading: s.heading, text: s.sample })),
+      output: { answers: [{ heading: "exact heading from input", answer: "..." }], faq_title: "short FAQ heading", faq: [{ q: "...", a: "..." }] }
+    })
+  });
+  const clean = (x: unknown) => String(x || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const escHtml = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const edits: Edit[] = [];
+  for (const a of (r.answers || []).slice(0, 3)) {
+    const s = secs.find((x) => x.heading === clean(a.heading));
+    const ans = clean(a.answer);
+    if (!s || !ans) continue;
+    const insert = `<p>${escHtml(ans)}</p>`;
+    edits.push({ type: "insert", mode: "before_block", section: s.heading, find: s.firstSentence!, insert, replace: `${s.firstSentence} ${insert}` });
+  }
+  const faq = (r.faq || []).map((x) => ({ q: clean(x.q), a: clean(x.a) })).filter((x) => x.q && x.a).slice(0, 5);
+  if (faq.length >= 3) {
+    const insert = `<h2>${escHtml(clean(r.faq_title) || (rules.language === "de" ? "Häufige Fragen" : "Frequently asked questions"))}</h2>${faq.map((x) => `<h3>${escHtml(x.q)}</h3><p>${escHtml(x.a)}</p>`).join("")}`;
+    edits.push({ type: "insert", mode: "after_block", section: last.heading, find: last.lastSentence, insert, replace: `${last.lastSentence} ${insert}` });
+  }
+  if (!edits.length) throw new HttpError(502, "AI không trả về nội dung dùng được. Thử lại.", "ai_empty");
+  const gate = checkEdits(edits, gateContext(rules, d, await titleLookup(env, caseId)));
+  const tNow = now();
+  const path = new URL(url).pathname;
+  await env.DB.prepare("DELETE FROM recovery_tasks WHERE case_id = ? AND kind = 'geo' AND target_url = ? AND status IN ('proposed', 'blocked')").bind(caseId, url).run();
+  const ins = await env.DB.prepare("INSERT INTO recovery_tasks (case_id, agent, kind, title, detail, target_url, payload, risk, priority, status, gate, created_at, updated_at) VALUES (?, 'geo', 'geo', ?, ?, ?, ?, 'review', 62, ?, ?, ?, ?)")
+    .bind(caseId, `GEO cho ${path}`, `${edits.filter((e) => e.mode === "before_block").length} đoạn trả lời trực tiếp${faq.length >= 3 ? ` + FAQ ${faq.length} câu` : ""}. Nội dung do AI soạn từ chính trang này: đọc kỹ trước khi duyệt.`, url,
+      JSON.stringify({ edits, elementor: d.elementor, ai: true }), gate.ok ? "proposed" : "blocked", JSON.stringify(gate), tNow, tNow).run();
+  await logActivity(env, `user:${user.id}`, "recovery.geo", `Soạn GEO cho ${path}${gate.ok ? "" : " (Gác cổng chặn)"}`, c.site_id);
+  return json({ ok: true, taskId: Number(ins.meta.last_row_id), gate });
 }

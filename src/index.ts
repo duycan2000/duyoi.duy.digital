@@ -7,7 +7,8 @@ import { HttpError, assertSameOrigin, errorResponse, json } from "./http";
 import { getSettings, updateSettings } from "./settings";
 import { createSite, getSite, listSites, updateSite } from "./sites";
 import { createUser, deleteUser, listUsers, resetUserPassword, updateUser } from "./users";
-import { archiveCase, createCase, decideTask, disavow, getCase, listCases, processRecoveryQueue, rescanCase, updateRules } from "./recovery";
+import { aiRewriteTask, applyTask, archiveCase, createCase, decideTask, disavow, geoDraft, getCase, listCases, processRecoveryQueue, rescanCase, rollbackTask, updateRules } from "./recovery";
+import { wpSave, wpStatus, wpTest } from "./wordpress";
 import type { CronEvent, Env, ExecCtx } from "./types";
 
 async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promise<Response> {
@@ -55,6 +56,13 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
 
   if (path === "/api/sites" && m === "GET") return listSites(env, url);
   if (path === "/api/sites" && m === "POST") return createSite(env, req, user);
+  const wpMatch = path.match(/^\/api\/sites\/(\d+)\/wp(\/test)?$/);
+  if (wpMatch) {
+    const sid = Number(wpMatch[1]);
+    if (!wpMatch[2] && m === "GET") return wpStatus(env, sid);
+    if (!wpMatch[2] && m === "PUT") return wpSave(env, req, user, sid);
+    if (wpMatch[2] && m === "POST") return wpTest(env, sid);
+  }
   const siteMatch = path.match(/^\/api\/sites\/(\d+)$/);
   if (siteMatch) {
     const id = Number(siteMatch[1]);
@@ -65,9 +73,15 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   // Phục hồi thứ hạng
   if (path === "/api/recovery" && m === "GET") return listCases(env);
   if (path === "/api/recovery" && m === "POST") return createCase(env, req, user, ctx);
-  const taskMatch = path.match(/^\/api\/recovery\/tasks\/(\d+)$/);
-  if (taskMatch && m === "PUT") return decideTask(env, req, user, Number(taskMatch[1]));
-  const recMatch = path.match(/^\/api\/recovery\/(\d+)(?:\/(rescan|rules|disavow|archive))?$/);
+  const taskMatch = path.match(/^\/api\/recovery\/tasks\/(\d+)(?:\/(apply|rollback|ai))?$/);
+  if (taskMatch) {
+    const tid = Number(taskMatch[1]);
+    if (!taskMatch[2] && m === "PUT") return decideTask(env, req, user, tid);
+    if (taskMatch[2] === "apply" && m === "POST") return applyTask(env, user, tid);
+    if (taskMatch[2] === "rollback" && m === "POST") return rollbackTask(env, user, tid);
+    if (taskMatch[2] === "ai" && m === "POST") return aiRewriteTask(env, user, tid);
+  }
+  const recMatch = path.match(/^\/api\/recovery\/(\d+)(?:\/(rescan|rules|disavow|archive|geo))?$/);
   if (recMatch) {
     const id = Number(recMatch[1]);
     const action = recMatch[2];
@@ -76,6 +90,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (action === "rules" && m === "PUT") return updateRules(env, req, user, id, ctx);
     if (action === "disavow" && m === "GET") return disavow(env, id);
     if (action === "archive" && m === "POST") return archiveCase(env, user, id);
+    if (action === "geo" && m === "POST") return geoDraft(env, req, user, id);
   }
 
   throw new HttpError(404, "Không có API này.", "not_found");

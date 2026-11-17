@@ -11,7 +11,8 @@ export const SECRET_KEYS = {
   dataforseo_password: "DataForSEO password",
   groq_api_key: "Groq API key",
   cloudflare_api_token: "Cloudflare API token",
-  google_api_key: "Google Cloud API key"
+  google_api_key: "Google Cloud API key",
+  google_service_account: "Google service account (JSON)"
 } as const;
 type SecretKey = keyof typeof SECRET_KEYS;
 
@@ -106,11 +107,20 @@ export async function updateSettings(env: Env, req: Request, user: User): Promis
       if (v === null) {
         await env.DB.prepare("DELETE FROM secrets WHERE key = ?").bind(k).run();
       } else {
-        if (typeof v !== "string" || !v.trim() || v.length > 500) throw new HttpError(400, `${SECRET_KEYS[k as SecretKey]} không hợp lệ.`, "validation");
+        const max = k === "google_service_account" ? 6000 : 500;
+        if (typeof v !== "string" || !v.trim() || v.length > max) throw new HttpError(400, `${SECRET_KEYS[k as SecretKey]} không hợp lệ.`, "validation");
         const plain = v.trim();
+        let hint = hintOf(plain);
+        if (k === "google_service_account") {
+          // Chỉ nhận file JSON của service account; gợi ý là email service account (không phải bí mật, cần để cấp quyền trong GSC/GA4)
+          let sa: { client_email?: string; private_key?: string } = {};
+          try { sa = JSON.parse(plain); } catch { /* báo lỗi bên dưới */ }
+          if (!sa.client_email || !sa.private_key || !String(sa.private_key).includes("PRIVATE KEY")) throw new HttpError(400, "Cần dán nguyên file JSON của service account (có client_email và private_key).", "validation");
+          hint = sa.client_email;
+        }
         const { iv, ciphertext } = await encryptText(env.ENCRYPTION_KEY, plain, k);
         await env.DB.prepare("INSERT INTO secrets (key, iv, ciphertext, hint, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET iv = excluded.iv, ciphertext = excluded.ciphertext, hint = excluded.hint, updated_at = excluded.updated_at")
-          .bind(k, iv, ciphertext, hintOf(plain), now()).run();
+          .bind(k, iv, ciphertext, hint, now()).run();
       }
       changed.push(k);
     }
@@ -124,6 +134,34 @@ export async function updateSettings(env: Env, req: Request, user: User): Promis
 
 // Dùng nội bộ ở các giai đoạn sau (gọi OpenRouter, DataForSEO…). Không bao giờ trả ra API.
 export async function readSecret(env: Env, key: SecretKey): Promise<string | null> {
+  const r = await env.DB.prepare("SELECT iv, ciphertext FROM secrets WHERE key = ?").bind(key).first<{ iv: string; ciphertext: string }>();
+  if (!r) return null;
+  return decryptText(env.ENCRYPTION_KEY, r.iv, r.ciphertext, key);
+}
+
+// ---- Bí mật theo site (Application Password WordPress). Khoá lưu dạng "wp:<siteId>". ----
+
+const siteKey = (siteId: number) => `wp:${siteId}`;
+
+export async function setSiteSecret(env: Env, siteId: number, value: string | null): Promise<void> {
+  const key = siteKey(siteId);
+  if (value === null) { await env.DB.prepare("DELETE FROM secrets WHERE key = ?").bind(key).run(); return; }
+  if (!encryptionReady(env.ENCRYPTION_KEY)) throw new HttpError(503, "Worker chưa có ENCRYPTION_KEY hợp lệ nên chưa lưu được mật khẩu.", "encryption_missing");
+  const plain = value.trim();
+  if (!plain || plain.length > 200) throw new HttpError(400, "Application Password không hợp lệ.", "validation");
+  const { iv, ciphertext } = await encryptText(env.ENCRYPTION_KEY, plain, key);
+  await env.DB.prepare("INSERT INTO secrets (key, iv, ciphertext, hint, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET iv = excluded.iv, ciphertext = excluded.ciphertext, hint = excluded.hint, updated_at = excluded.updated_at")
+    .bind(key, iv, ciphertext, hintOf(plain.replace(/\s/g, "")), now()).run();
+}
+
+export async function siteSecretInfo(env: Env, siteId: number): Promise<{ set: boolean; hint: string | null; updatedAt: number | null }> {
+  const r = await env.DB.prepare("SELECT hint, updated_at FROM secrets WHERE key = ?").bind(siteKey(siteId)).first<{ hint: string; updated_at: number }>();
+  return { set: Boolean(r), hint: r?.hint ?? null, updatedAt: r?.updated_at ?? null };
+}
+
+// Dùng nội bộ để gọi WordPress. Không bao giờ trả ra API.
+export async function readSiteSecret(env: Env, siteId: number): Promise<string | null> {
+  const key = siteKey(siteId);
   const r = await env.DB.prepare("SELECT iv, ciphertext FROM secrets WHERE key = ?").bind(key).first<{ iv: string; ciphertext: string }>();
   if (!r) return null;
   return decryptText(env.ENCRYPTION_KEY, r.iv, r.ciphertext, key);

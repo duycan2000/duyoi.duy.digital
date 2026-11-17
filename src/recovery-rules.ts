@@ -17,6 +17,8 @@ export interface SiteRules {
   builder: "" | "elementor" | "gutenberg" | "classic";
   cachePlugin: string;         // flyingpress, wp-rocket… (xoá cache sau khi sửa)
   notes: string;
+  gscProperty: string;         // sc-domain:ten-mien.de (Domain property) hoặc https://ten-mien.com/ (URL-prefix)
+  ga4Property: string;         // ID số của property GA4
 }
 
 export const DEFAULT_RULES: SiteRules = {
@@ -32,7 +34,9 @@ export const DEFAULT_RULES: SiteRules = {
   maxLinksPerPage: 3,
   builder: "",
   cachePlugin: "",
-  notes: ""
+  notes: "",
+  gscProperty: "",
+  ga4Property: ""
 };
 
 const list = (v: unknown, max = 300, itemMax = 200): string[] => {
@@ -78,6 +82,16 @@ export function parseRules(input: unknown, base: SiteRules = DEFAULT_RULES): Sit
   }
   if (b.cachePlugin !== undefined) out.cachePlugin = String(b.cachePlugin).trim().slice(0, 40);
   if (b.notes !== undefined) out.notes = String(b.notes).slice(0, 3000);
+  if (b.gscProperty !== undefined) {
+    const v = String(b.gscProperty).trim();
+    if (v && !/^sc-domain:([a-z0-9-]+\.)+[a-z]{2,}$/i.test(v) && !/^https?:\/\/[^\s]+\/$/i.test(v)) throw new HttpError(400, "Property Search Console dạng sc-domain:ten-mien.de hoặc https://ten-mien.com/ (có dấu / ở cuối).", "validation");
+    out.gscProperty = v;
+  }
+  if (b.ga4Property !== undefined) {
+    const v = String(b.ga4Property).trim().replace(/^properties\//, "");
+    if (v && !/^\d{5,15}$/.test(v)) throw new HttpError(400, "GA4 property là dãy số (Admin › Property details › Property ID).", "validation");
+    out.ga4Property = v;
+  }
   return out;
 }
 

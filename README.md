@@ -81,11 +81,26 @@ Menu **Phục hồi › Phục hồi thứ hạng**: nhập địa chỉ site (v
 - đối chiếu tháng tụt với các bản cập nhật Google đã xác nhận (`src/google-updates.ts`, thêm bản mới vào cuối danh sách);
 - lập việc cho đội 9 agent. Việc sửa nội dung là danh sách find/replace "phẫu thuật" (giữ nguyên câu gốc, thêm link/CTA), đã qua **Gác cổng**: blocklist, dấu biên tập, ngôn ngữ, số liệu không nguồn, đoạn gốc phải khớp đúng 1 lần, tối đa 3 link mỗi trang.
 
-Không việc nào tự đăng lên site. Redirect, xoá trang, đổi canonical, disavow là việc "khó đảo ngược": chỉ admin duyệt và người làm tay. Áp dụng việc đã duyệt vào WordPress (bản nháp, sao lưu, hoàn tác, sửa `_elementor_data`, xoá cache) là giai đoạn kế tiếp.
+Không việc nào tự đăng lên site. Redirect, xoá trang, đổi canonical, disavow là việc "khó đảo ngược": chỉ admin duyệt và người làm tay.
+
+### Áp dụng lên WordPress
+
+1. Cài plugin **Duy Ơi Connector** (`/duyoi-connector.zip` trên app, mã nguồn ở `wordpress/duyoi-connector/`). Plugin chỉ có REST API dưới `/wp-json/duyoi/v1/`, bắt buộc đăng nhập bằng Application Password.
+2. Tạo user Editor riêng (ví dụ `duyoi-bot`), tạo Application Password, nhập ở màn **Site › Kết nối WordPress** rồi bấm **Thử kết nối**. Mật khẩu được mã hoá AES-GCM như API key.
+3. Ở tab **Việc của agent**: duyệt việc → **Áp dụng lên site**. App chạy thử (dry run) trên dữ liệu thật, lưu bản gốc (`post_content`, `_elementor_data`, meta Rank Math) vào D1, rồi mới ghi; trang Elementor sửa trong `_elementor_data`, xoá cache CSS Elementor và FlyingPress/WP Rocket/LiteSpeed/W3TC nếu có. Bài vừa bị sửa ở nơi khác (Hermes, người khác) thì từ chối ghi. **Hoàn tác** đưa bài về bản gốc.
+4. Plugin chỉ cho sửa `rank_math_title`, `rank_math_description`, `rank_math_focus_keyword`; canonical và robots không sửa qua app.
+
+### Search Console và GA4
+
+Cài đặt › API key › **Google service account (JSON)**. Bật *Google Search Console API* và *Google Analytics Data API* trong Google Cloud, thêm email service account vào property Search Console (Restricted) và GA4 (Viewer). Ở tab **Luật an toàn** của ca phục hồi, nhập property: Domain property ghi `sc-domain:ten-mien.de`, URL-prefix ghi `https://ten-mien.com/`. App lấy click/impression theo trang (28 ngày gần nhất, 28 ngày trước đó, và quanh tháng tụt) và lead `generate_lead` theo trang.
+
+### AI
+
+Dùng OpenRouter key và model tầng T1 trong Cài đặt, có trần chi phí tháng. Nút **Viết lại bằng AI** cho câu chèn link/CTA, **Soạn GEO bằng AI** cho đoạn trả lời trực tiếp đầu mục H2 và FAQ. Mọi nội dung AI viết qua Gác cổng: số liệu không có trên trang hoặc trong danh sách đã kiểm chứng sẽ bị chặn.
 
 Luật riêng của từng site (blocklist, ngôn ngữ, trang dịch vụ, số liệu đã kiểm chứng…) nhập ở tab **Luật an toàn**, lưu trong D1. Không ghi luật của khách vào code vì repo công khai.
 
-Thử trên máy không cần mạng: `FAKE_SITE=1 node tests/serve.mjs` rồi nhập `caddemo.de`.
+Thử trên máy không cần mạng: `FAKE_SITE=1 node tests/serve.mjs` rồi nhập `caddemo.de` (WordPress, Google và OpenRouter đều là bản giả; user WP `duyoi-bot`, mật khẩu `abcd efgh ijkl mnop`). Test plugin PHP: `php wordpress/tests/test.php`.
 
 ## Chạy trên máy
 

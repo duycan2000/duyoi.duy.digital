@@ -536,7 +536,7 @@ function siteForm(main, site) {
   const opt = (map, cur) => Object.entries(map).map(([k, v]) => `<option value="${k}"${k === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
   main.innerHTML = `
   <div class="page">
-    <div class="page-head"><div><h2>${site ? esc(site.name) : "Thêm site"}</h2><p>${site ? esc(site.domain) : "Khai báo site để agent làm SEO. Thông tin đăng nhập WordPress, GitHub và email của site sẽ thêm ở giai đoạn sau."}</p></div>
+    <div class="page-head"><div><h2>${site ? esc(site.name) : "Thêm site"}</h2><p>${site ? esc(site.domain) : "Khai báo site để agent làm SEO."}</p></div>
       <div class="toolbar"><a class="btn" href="#/sites">← Danh sách site</a></div></div>
     <form class="card" id="site-form" novalidate>
       <div class="form-grid">
@@ -547,26 +547,39 @@ function siteForm(main, site) {
         <label>Thị trường chính (mã quốc gia) <input name="market" maxlength="2" value="${esc(s.market)}" placeholder="US, AU, DE, CA…"></label>
         <label>Ngôn ngữ <input name="language" maxlength="5" value="${esc(s.language)}" placeholder="en, de…"></label>
         <label class="full" data-for="astro">Repo GitHub của site (owner/repo) <input name="repo" value="${esc(s.repo || "")}" placeholder="vd: duycan2000/golfgaragelab.com"></label>
-        <label class="full" data-for="wp">User WordPress dành riêng cho app (quyền Editor) <input name="wpUser" value="${esc(s.wpUser || "")}" placeholder="vd: duyoi-bot"></label>
         <label class="full">Ghi chú <textarea name="notes" maxlength="2000" placeholder="Luật riêng, đối thủ chính, điều agent cần biết…">${esc(s.notes || "")}</textarea></label>
         ${site ? `<label>Trạng thái <select name="status">${opt({ active: "Đang chạy", paused: "Tạm dừng", archived: "Lưu trữ (ẩn khỏi danh sách)" }, s.status)}</select></label>` : ""}
       </div>
       <div class="msg" id="site-msg" hidden></div>
       <div class="toolbar"><button class="primary" type="submit">${site ? "Lưu thay đổi" : "Thêm site"}</button></div>
     </form>
+    ${site && site.platform !== "astro" ? `<form class="card" id="wp-form" novalidate><h3>Kết nối WordPress</h3>
+      <p class="note">Để agent áp dụng các việc đã duyệt (chèn link, CTA, meta Rank Math, GEO) có sao lưu và hoàn tác. App không bao giờ dùng mật khẩu đăng nhập web.</p>
+      <ol class="steps">
+        <li><a href="/duyoi-connector.zip" download>Tải plugin Duy Ơi Connector</a>, vào WordPress › Plugins › Add New › Upload, cài và bật.</li>
+        <li>Tạo user riêng cho app (quyền Editor), ví dụ <code>duyoi-bot</code>.</li>
+        <li>Đăng nhập bằng user đó › Users › Profile › Application Passwords › đặt tên "Duy Ơi" › Add. Dán mật khẩu vào đây.</li>
+      </ol>
+      <div class="form-grid">
+        <label>User WordPress của app <input name="wpUser" value="${esc(s.wpUser || "")}" placeholder="duyoi-bot" autocomplete="off"></label>
+        <label>Application Password <input name="appPassword" type="password" autocomplete="off" placeholder="Đang tải…"></label>
+      </div>
+      <div class="msg" id="wp-msg" hidden></div>
+      <div class="toolbar"><button class="primary" type="submit">Lưu kết nối</button><button type="button" id="wp-test">Thử kết nối</button><button type="button" class="danger" id="wp-clear" hidden>Xoá mật khẩu</button></div>
+    </form>` : ""}
   </div>`;
+  if (site && site.platform !== "astro") bindWp(site);
   const form = $("#site-form");
   const sync = () => {
     const p = form.platform.value;
     $('[data-for="astro"]', form).hidden = p !== "astro";
-    $('[data-for="wp"]', form).hidden = p === "astro";
   };
   form.platform.addEventListener("change", sync);
   sync();
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const d = formData(form);
-    if (d.platform === "astro") d.wpUser = ""; else d.repo = "";
+    if (d.platform !== "astro") d.repo = "";
     await busy(form.querySelector("button[type=submit]"), "Đang lưu…", async () => {
       try {
         const res = site ? await api(`/api/sites/${site.id}`, { method: "PUT", body: d }) : await api("/api/sites", { method: "POST", body: d });
@@ -577,6 +590,37 @@ function siteForm(main, site) {
       }
     });
   });
+}
+
+async function bindWp(site) {
+  const f = $("#wp-form");
+  const msg = $("#wp-msg");
+  const load = async () => {
+    const st = await api(`/api/sites/${site.id}/wp`);
+    f.appPassword.value = "";
+    f.appPassword.placeholder = st.password.set ? `Đã lưu ${st.password.hint} · nhập để thay` : "xxxx xxxx xxxx xxxx xxxx xxxx";
+    $("#wp-clear").hidden = !st.password.set;
+  };
+  load().catch((e) => showMsg(msg, e.message));
+  f.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const d = formData(f);
+    await busy(f.querySelector("button[type=submit]"), "Đang lưu…", async () => {
+      try { await api(`/api/sites/${site.id}/wp`, { method: "PUT", body: { wpUser: d.wpUser, appPassword: d.appPassword || undefined } }); await load(); showMsg(msg, "Đã lưu (mật khẩu được mã hoá).", "ok"); }
+      catch (e) { showMsg(msg, e.message); }
+    });
+  });
+  $("#wp-test").addEventListener("click", (ev) => busy(ev.currentTarget, "Đang thử…", async () => {
+    try {
+      const r = await api(`/api/sites/${site.id}/wp/test`, { method: "POST" });
+      const i = r.info;
+      showMsg(msg, `Kết nối được: plugin ${i.version}, WordPress ${i.wp || "?"}, user ${i.user}. ${[i.elementor && "Elementor", i.rankmath && "Rank Math", i.flyingpress && "FlyingPress"].filter(Boolean).join(", ") || ""}`.trim(), "ok");
+    } catch (e) { showMsg(msg, e.message); }
+  }));
+  $("#wp-clear").addEventListener("click", (ev) => busy(ev.currentTarget, "Đang xoá…", async () => {
+    try { await api(`/api/sites/${site.id}/wp`, { method: "PUT", body: { wpUser: f.wpUser.value || site.wpUser || "duyoi-bot", appPassword: null } }); await load(); showMsg(msg, "Đã xoá mật khẩu.", "ok"); }
+    catch (e) { showMsg(msg, e.message); }
+  }));
 }
 
 // ---------------- Cài đặt ----------------
@@ -597,7 +641,8 @@ const SECRET_HELP = {
   dataforseo_password: "Mật khẩu API (khác mật khẩu đăng nhập web)",
   groq_api_key: "console.groq.com › API Keys (model free riêng tư)",
   cloudflare_api_token: "Quyền: DNS Edit, Email Routing Edit, Email Sending, chỉ các zone của site",
-  google_api_key: "Knowledge Graph Search API (cho tab Entity)"
+  google_api_key: "Knowledge Graph Search API (cho tab Entity)",
+  google_service_account: "Google Cloud › IAM › Service accounts › Keys › JSON. Bật Search Console API và Google Analytics Data API, rồi thêm email service account vào property GSC (Restricted) và GA4 (Viewer)."
 };
 
 async function viewSettings(main, args = []) {
