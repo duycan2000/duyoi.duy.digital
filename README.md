@@ -7,6 +7,8 @@ App **không dựng site**. Anh dựng site bằng Claude, rồi khai báo site 
 > Các màn đang chạy nằm trên menu; màn chưa làm nằm ở trang **Lộ trình** (không hiện trên menu).
 > Menu đã có đủ các mục như bản demo. Mục nào chưa làm thì hiện nội dung sẽ có và thuộc giai đoạn nào. Xem [docs/ROADMAP.md](docs/ROADMAP.md).
 
+> Tiếp nhận dự án (người hoặc phiên Claude mới): đọc [`docs/HANDOVER.md`](docs/HANDOVER.md).
+
 ## Deploy lần đầu
 
 Cần: Node 22 trở lên, tài khoản Cloudflare. Giai đoạn 1 chạy được trên gói Workers Free. Từ giai đoạn 2 (Queues, Workflows) nên dùng gói Workers Paid $5/tháng.
@@ -296,7 +298,7 @@ src/
 migrations/      schema D1
 public/          giao diện (static assets, không tính request Worker)
 tests/           test API và máy chủ chạy thử
-docs/            lộ trình, bản demo tham khảo
+docs/            tài liệu chuyển giao (HANDOVER.md), lộ trình, bản demo tham khảo
 ```
 
 ## Bảo mật
