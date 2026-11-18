@@ -7,6 +7,7 @@
 
 import { logActivity } from "./activity";
 import { cf, creds } from "./cfmedia";
+import { indexKey } from "./indexnow";
 import { HttpError, json, now, readJson } from "./http";
 import type { DbStatement, Env, User } from "./types";
 
@@ -49,8 +50,8 @@ document.addEventListener("click",ck,true);document.addEventListener("auxclick",
 }
 
 // Worker thu dữ liệu, dựng riêng cho từng tên miền. Chỉ nhận đường dẫn bí mật của tên miền đó; ngoài ra chuyển tiếp về site.
-export function statsWorker(domain: string, path: string): string {
-  return `const P = ${JSON.stringify(path)}, HOST = ${JSON.stringify(domain)}, JS = ${JSON.stringify(trackerJs(path))};
+export function statsWorker(domain: string, path: string, indexKey = ""): string {
+  return `const P = ${JSON.stringify(path)}, HOST = ${JSON.stringify(domain)}, JS = ${JSON.stringify(trackerJs(path))}, IK = ${JSON.stringify(indexKey)};
 const BOT = /bot|crawl|spider|slurp|headless|lighthouse|preview|facebookexternalhit|curl|wget|python|go-http|java\\//i;
 const T = { pv: 1, leave: 1, aff: 1, out: 1, cta: 1 };
 const s = (v, n) => String(v == null ? "" : v).slice(0, n);
@@ -58,6 +59,8 @@ const num = (v, max) => { const x = Number(v); return Number.isFinite(x) && x >=
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    // File khoá IndexNow ở gốc tên miền
+    if (IK && url.pathname === "/" + IK + ".txt") return new Response(IK, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" } });
     if (!url.pathname.startsWith(P + "/")) return fetch(req);
     const rest = url.pathname.slice(P.length);
     if (rest === "/s.js" && (req.method === "GET" || req.method === "HEAD")) return new Response(req.method === "HEAD" ? null : JS, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff" } });
@@ -111,17 +114,20 @@ export async function installCore(env: Env, d: Row): Promise<{ ok: boolean; stat
     const zone = zones?.[0];
     if (!zone) return done("pending", `Tên miền ${d.domain} chưa có trong tài khoản Cloudflare. App tự thử lại mỗi giờ; script đã dán sẵn sẽ tự chạy khi xong.`);
     const worker = statsWorkerName(d.domain);
+    const site = await env.DB.prepare("SELECT id FROM sites WHERE lower(replace(domain, 'www.', '')) = ? AND status != 'archived'").bind(d.domain).first<{ id: number }>();
+    const ik = site ? (await indexKey(env, site.id)).key : "";
     const fd = new FormData();
     fd.append("metadata", new Blob([JSON.stringify({ main_module: "worker.js", compatibility_date: "2026-11-01", bindings: [{ type: "analytics_engine", name: "AE", dataset: DATASET }] })], { type: "application/json" }));
-    fd.append("worker.js", new Blob([statsWorker(d.domain, d.path)], { type: "application/javascript+module" }), "worker.js");
+    fd.append("worker.js", new Blob([statsWorker(d.domain, d.path, ik)], { type: "application/javascript+module" }), "worker.js");
     await cf(env, `/accounts/${account}/workers/scripts/${worker}`, { method: "PUT", body: fd });
     const existing = (await cf<{ pattern: string; script: string }[]>(env, `/zones/${zone.id}/workers/routes`)) || [];
-    for (const pattern of [`${d.domain}${d.path}/*`, `www.${d.domain}${d.path}/*`]) {
+    for (const pattern of [`${d.domain}${d.path}/*`, `www.${d.domain}${d.path}/*`, ...(ik ? [`${d.domain}/${ik}.txt`, `www.${d.domain}/${ik}.txt`] : [])]) {
       const r = existing.find((x) => x.pattern === pattern);
       if (r && r.script === worker) continue;
       if (r) return done("error", `Route ${pattern} đang thuộc Worker ${r.script}.`);
       await cf(env, `/zones/${zone.id}/workers/routes`, { method: "POST", json: { pattern, script: worker } });
     }
+    await env.DB.prepare("UPDATE stats_domains SET worker_v = ? WHERE id = ?").bind(ik ? 2 : 1, d.id).run();
     const res = await fetch(`https://${d.domain}${d.path}/s.js`, { headers: { "User-Agent": "DuyOi/1.0 (+stats check)" }, signal: AbortSignal.timeout(15000) }).catch(() => null);
     const body = res?.ok ? await res.text() : "";
     if (body.includes(MARKER)) return done("verified", "Bộ đo đang chạy.", true);
@@ -212,7 +218,8 @@ export async function rollupCore(env: Env, days: number): Promise<{ rows: number
 export async function processStats(env: Env, deadline: number): Promise<void> {
   const sites = (await env.DB.prepare("SELECT domain FROM sites WHERE status = 'active'").all<{ domain: string }>()).results;
   for (const s of sites) { const d = normDomain(s.domain); if (d) await addDomain(env, d); }
-  const todo = (await env.DB.prepare("SELECT * FROM stats_domains WHERE status != 'verified' AND COALESCE(last_try, 0) < ? ORDER BY COALESCE(last_try, 0) LIMIT 3").bind(now() - 3600000).all<Row>()).results;
+  // Chưa xong, hoặc Worker đời cũ (chưa phục vụ file khoá IndexNow) của tên miền đã có site: dựng lại
+  const todo = (await env.DB.prepare(`SELECT d.* FROM stats_domains d WHERE COALESCE(d.last_try, 0) < ? AND (d.status != 'verified' OR (d.worker_v < 2 AND EXISTS (SELECT 1 FROM sites s WHERE lower(replace(s.domain, 'www.', '')) = d.domain AND s.status = 'active'))) ORDER BY COALESCE(d.last_try, 0) LIMIT 3`).bind(now() - 3600000).all<Row>()).results;
   for (const d of todo) { if (Date.now() > deadline) return; await installCore(env, d); }
   const anyLive = await env.DB.prepare("SELECT COUNT(*) AS n FROM stats_domains WHERE status IN ('verified', 'installed')").first<{ n: number }>();
   if (!anyLive?.n || Date.now() > deadline) return;

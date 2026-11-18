@@ -181,6 +181,11 @@ Menu **Off-page team** (và các lối tắt Prospects, Email outreach, Backlink
 - **Link Monitor** (mỗi tuần): mở trang nguồn của backlink đã có (từ "Có link" ở Prospects hoặc thêm tay), ghi còn/mất, dofollow/nofollow, anchor; báo khi mất link.
 - **Citations**: chỉ cho site dịch vụ có NAP thật; danh bạ theo thị trường (AU, US, CA, GB, DE, NZ + Bing Places, Apple Business Connect, Foursquare), anh tự gửi, app theo dõi trạng thái.
 
+- **IndexNow**: bài mới (phát hiện qua sitemap) và trang app vừa sửa (việc phục hồi, chèn link affiliate) được báo ngay cho Bing, Yandex, Seznam, Naver (Google không dùng IndexNow). Mỗi site một khoá; file khoá `https://ten-mien/<khoá>.txt` do Worker bộ đo phục vụ (tên miền trong Cloudflare, cron tự dựng lại Worker đời cũ) hoặc plugin Duy Ơi Connector **1.3.0** (WordPress). Mỗi URL tối đa 1 lần/24 giờ.
+- **Pinterest Pin mới cho bài cũ** (bật mặc định): mỗi bài thêm tối đa 3 Pin, cách nhau ít nhất 7 ngày, mỗi Pin một ảnh thật khác trong bài và tiêu đề khác (không trùng Pin trước).
+- **Postiz (tuỳ chọn)**: dán API key Postiz (Cloud hoặc tự cài) theo site, gắn kênh để đăng thêm Threads, Instagram, Mastodon, Google Business Profile (chỉ site dịch vụ) hoặc đăng Pinterest/LinkedIn/X qua app đã được duyệt của Postiz. Agent vẫn soạn, Gác cổng vẫn kiểm; Reddit, diễn đàn, kênh chat không gắn được.
+- **Prospector** xoay bộ dấu hiệu tìm kiếm mỗi lượt: "write for us", "become a contributor", "submit a guest post", trang tài nguyên ("useful links", inurl:resources) và bài tổng hợp "best … blogs" (loại roundup).
+
 **Mỗi site một tài khoản riêng** cho email và từng mạng xã hội. Email gửi bắt buộc thuộc tên miền của site. App chặn khi một tài khoản, trang/board/công ty hoặc link profile đã gắn với site khác. Nên tạo app developer bằng tài khoản của chính site đó và nhập ở Off-page › Mạng xã hội › App developer riêng; app chung ở Cài đặt › API key chỉ là dự phòng. Trước khi bấm Kết nối, đăng nhập đúng tài khoản của site (một profile Chrome riêng cho mỗi site).
 
 Cần làm một lần:
@@ -188,6 +193,7 @@ Cần làm một lần:
 2. Từng site: Off-page › Team & cài đặt: tên người gửi, email gửi thuộc tên miền site, chủ đề.
 3. Cloudflare › Email Service › Sending: bật tên miền gửi (cần gói Workers Paid); Email Routing: bật; bấm **Dựng hộp thư** (token cần thêm Zone › Email Routing Rules Edit), rồi **Gửi thư thử**.
 4. Agent HQ › Quản lý prompt: duyệt 4 prompt mới (`outreach_draft`, `outreach_review`, `community_answer`, `social_caption`) và duyệt lại `lead_plan` (thêm việc off-page).
+5. WordPress: cập nhật plugin Duy Ơi Connector lên 1.3.0 (file khoá IndexNow).
 
 ### Số liệu site (bộ đo riêng cho site Astro)
 
@@ -245,7 +251,8 @@ src/
   http.ts        JSON, cookie, chặn CSRF, kiểm tra dữ liệu
   offpage.ts     Prospector, Outreach (Email Service), thư đến, Community Scout, Link Monitor, Citations
   social.ts      tài khoản mạng xã hội (OAuth), tự đăng bài mới, sameAs
-  web.ts         đọc trang, sitemap, email liên hệ
+  web.ts         đọc trang, sitemap, email liên hệ, ảnh thật trong bài
+  indexnow.ts    báo IndexNow khi có bài mới hoặc trang vừa sửa
   stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request
 migrations/      schema D1

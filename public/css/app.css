@@ -802,3 +802,7 @@ tr.st-low td { background: rgba(255, 180, 0, .08); }
 .op-thread ul { margin: 6px 0; padding-left: 18px; color: var(--muted); font-size: .88rem; }
 .op-steps li.ok::marker { color: #1e8449; } .op-steps li.warn::marker { color: #b9770e; }
 .op-won-url { min-width: 220px; }
+.op-index { border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; margin: 0 0 14px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.op-index small { flex-basis: 100%; color: var(--muted); }
+.op-index small.err, small.err { color: #c0392b; }
+.op-index details { flex-basis: 100%; font-size: .85rem; }

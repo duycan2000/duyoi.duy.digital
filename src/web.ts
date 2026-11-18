@@ -37,14 +37,27 @@ const meta = (html: string, key: string) => {
   return "";
 };
 
-export interface PageInfo { url: string; title: string; description: string; image: string; excerpt: string; lang: string }
+export interface PageInfo { url: string; title: string; description: string; image: string; images: string[]; excerpt: string; lang: string }
 export function pageInfo(html: string, url: string): PageInfo {
   const body = (html.match(/<article[\s\S]*?<\/article>/i) || html.match(/<main[\s\S]*?<\/main>/i) || [html])[0];
   const paras = [...body.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => clean(m[1]!)).filter((t) => t.length > 40);
   let image = meta(html, "og:image") || meta(html, "twitter:image");
   try { if (image) image = new URL(image, url).href; } catch { image = ""; }
+  // Ảnh thật trong bài (cho nhiều Pin khác nhau): bỏ icon, logo, avatar, svg, ảnh nhúng
+  const images: string[] = [];
+  for (const m of body.matchAll(/<img\b[^>]*>/gi)) {
+    const t = m[0];
+    let src = attr(t, "src") || attr(t, "data-src");
+    const srcset = attr(t, "srcset");
+    if (srcset) { const parts = srcset.split(",").map((x) => x.trim().split(/\s+/)); const big = parts.sort((a, b) => parseInt(b[1] || "0") - parseInt(a[1] || "0"))[0]; if (big?.[0]) src = big[0]; }
+    if (!src || /^data:|\.svg(\?|$)|logo|icon|avatar|gravatar|emoji|sprite|pixel|badge/i.test(src)) continue;
+    const w = Number(attr(t, "width")), h = Number(attr(t, "height"));
+    if ((w && w < 300) || (h && h < 300)) continue;
+    try { const abs = new URL(src, url).href; if (abs.startsWith("https://") && !images.includes(abs)) images.push(abs); } catch { /* bỏ */ }
+    if (images.length >= 8) break;
+  }
   return {
-    url,
+    url, images,
     title: (meta(html, "og:title") || clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "")).slice(0, 200),
     description: (meta(html, "og:description") || meta(html, "description")).slice(0, 400),
     image: image.startsWith("https://") ? image : "",
@@ -94,7 +107,7 @@ export async function sitemapUrls(domain: string, limit = 1500): Promise<string[
     } else locs(r.text).forEach((u) => urls.add(u));
     if (urls.size) break;
   }
-  return [...urls].filter((u) => hostOf(u) === domain && !NOT_ARTICLE.test(new URL(u).pathname) && new URL(u).pathname !== "/").slice(0, limit);
+  return [...urls].filter((u) => hostOf(u) === domain && !NOT_ARTICLE.test(new URL(u).pathname) && new URL(u).pathname !== "/" && !/\.(txt|xml|pdf|jpe?g|png|webp|gif|svg|zip|json)$/i.test(new URL(u).pathname)).slice(0, limit);
 }
 
 export const tokens = (s: string) => new Set(s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9äöüß]+/).filter((w) => w.length > 3));

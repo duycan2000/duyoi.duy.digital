@@ -1275,13 +1275,19 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
     assert.equal((await cO("GET", `/api/social/oauth/callback?state=${loc.searchParams.get("state")}&code=x-code`)).status, 302, "state chỉ dùng một lần");
     v = (await cO("GET", `/api/offpage/${sid}`)).data;
     assert.equal(v.accounts.find((a) => a.network === "x").handle, "@golfdemo");
+    // File khoá IndexNow (site Astro: Worker bộ đo phục vụ; ở đây giả lập đã có)
+    const ik = (await cO("GET", `/api/offpage/${sid}`)).data.indexnow.key;
+    assert.match(ik, /^[a-f0-9]{32}$/);
+    extra[`/${ik}.txt`] = ik;
     r = await cO("POST", `/api/offpage/${sid}/run`, { what: "social" });
     assert.match(r.data.note, /Lần đầu/, "bài cũ không đăng lại");
     assert.equal(fake.social.posts.length, 0);
     extra["/garage-golf-simulator-guide/"] = `<html lang="en"><head><title>Garage golf simulator guide</title><meta property="og:image" content="https://golfdemo.com/images/hero.jpg"></head><body><article><p>How to plan a garage golf simulator: ceiling height, mat and screen, step by step for beginners.</p></article></body></html>`;
     r = await cO("POST", `/api/offpage/${sid}/run`, { what: "social" });
-    assert.equal(r.data.newUrls, 1);
+    assert.equal(r.data.newUrls, 1, "file khoá .txt không bị coi là bài");
     assert.equal(r.data.posted, 1, JSON.stringify(r.data));
+    assert.equal(r.data.indexnow, 1, "bài mới được báo IndexNow");
+    assert.deepEqual(fake.social.indexnow[0], { host: "golfdemo.com", key: ik, keyLocation: `https://golfdemo.com/${ik}.txt`, urlList: ["https://golfdemo.com/garage-golf-simulator-guide/"] });
     assert.equal(fake.social.posts[0].net, "bluesky");
     assert.equal(fake.social.posts[0].record.embed.external.uri, "https://golfdemo.com/garage-golf-simulator-guide/");
     v = (await cO("GET", `/api/offpage/${sid}`)).data;
@@ -1299,6 +1305,32 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
     const cb2 = await cO("GET", `/api/social/oauth/callback?state=${st2}&code=x-code`);
     assert.match(decodeURIComponent(cb2.headers.get("Location")), /đang gắn với site golfdemo\.com/);
     assert.ok(!(await cO("GET", `/api/offpage/${s2}`)).data.accounts.some((a) => a.network === "x"));
+    // Postiz: gắn Threads + Pinterest (board), không gắn Reddit; đăng qua Postiz; Pin mới cho bài cũ sau 7 ngày với ảnh khác
+    assert.equal((await cO("PUT", `/api/social/${sid}/postiz`, { key: "pz-key" })).status, 200);
+    const pz = (await cO("GET", `/api/social/${sid}/postiz/integrations`)).data.items;
+    assert.equal(pz.find((i) => i.identifier === "reddit").allowed, false);
+    assert.equal((await cO("POST", `/api/social/${sid}/postiz/link`, { integration_id: "pz-reddit", identifier: "reddit", name: "r" })).status, 400);
+    assert.equal((await cO("POST", `/api/social/${sid}/postiz/link`, { integration_id: "pz-pin", identifier: "pinterest", name: "Golfdemo Pins" })).status, 400, "Pinterest cần board");
+    assert.equal((await cO("POST", `/api/social/${sid}/postiz/link`, { integration_id: "pz-pin", identifier: "pinterest", name: "Golfdemo Pins", board: "b1" })).status, 200);
+    assert.equal((await cO("POST", `/api/social/${sid}/postiz/link`, { integration_id: "pz-threads", identifier: "threads", name: "golfdemo" })).status, 200);
+    extra["/golf-mat-guide/"] = `<html lang="en"><head><title>Golf mat guide</title><meta property="og:image" content="https://golfdemo.com/images/mat.jpg"></head><body><article><p>How to choose a golf hitting mat for a garage simulator: thickness, size and feel explained simply.</p><img src="https://golfdemo.com/images/mat-closeup.jpg" width="1200" height="800"><img src="/images/logo.svg"></article></body></html>`;
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "social" });
+    const pzPosts = fake.social.posts.filter((p) => p.net.startsWith("postiz:"));
+    const pin = pzPosts.find((p) => p.net === "postiz:pinterest");
+    assert.ok(pin, JSON.stringify(r.data));
+    assert.equal(pin.posts[0].settings.board, "b1");
+    assert.equal(pin.posts[0].settings.link, "https://golfdemo.com/golf-mat-guide/");
+    assert.equal(pin.posts[0].value[0].image[0].path, "https://uploads.postiz.com/mat.jpg");
+    const th = pzPosts.find((p) => p.net === "postiz:threads");
+    assert.match(th.posts[0].value[0].content, /https:\/\/golfdemo\.com\/golf-mat-guide\/$/, "Threads có link bài trong chữ");
+    envO.DB.prepare("UPDATE social_posts SET posted_at = ? WHERE network = 'pinterest'").bind(Date.now() - 8 * 86400000).run();
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "social" });
+    assert.equal(r.data.freshPins, 1);
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    const v1 = v.posts.find((p) => p.network === "pinterest" && p.variant === 1);
+    assert.equal(v1.status, "posted", JSON.stringify(v1));
+    assert.equal(v1.image_url, "https://golfdemo.com/images/mat-closeup.jpg", "Pin mới dùng ảnh thật khác trong bài, bỏ logo");
+    assert.notEqual(v1.title, v.posts.find((p) => p.network === "pinterest" && p.variant === 0).title);
     // Link Monitor
     await cO("PUT", `/api/offpage/prospects/${v.prospects.find((p) => p.domain === "mentioner.example").id}`, { status: "won" });
     web["https://mentioner.example/best-tools/"] = `<html><body><p>We like the guides from <a href="https://golfdemo.com/garage-golf-simulator-guide/">Golfdemo</a>.</p></body></html>`;

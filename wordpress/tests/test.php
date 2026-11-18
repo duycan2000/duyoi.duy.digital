@@ -45,5 +45,6 @@ ok(substr_count($r, 'href="https://amzn.to/new"') === 2 && strpos($r, 'old') ===
 ok(duyoi_apply_edit($aff, ['find' => 'https://amzn.to/old', 'mode' => 'swap_url', 'replace' => 'javascript:alert(1)']) === null, 'swap_url: chỉ nhận URL https');
 $sw = duyoi_apply_all($aff, [['find' => 'https://amzn.to/old', 'mode' => 'swap_url', 'replace' => 'https://amzn.to/new']], false);
 ok($sw['ok'] && substr_count($sw['content'], 'amzn.to/new') === 2, 'swap_url qua apply_all: thay cả 2 chỗ');
+ok(duyoi_indexnow_key_ok('0123456789abcdef0123456789abcdef') && !duyoi_indexnow_key_ok('../x') && !duyoi_indexnow_key_ok('ABC'), 'IndexNow: chỉ nhận khoá 32 ký tự hex');
 echo $fail ? "\n$fail test lỗi.\n" : "\nTất cả test PHP đạt.\n";
 exit($fail ? 1 : 0);

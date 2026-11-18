@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Duy Ơi Connector
  * Description: Cho app Duy Ơi đọc và sửa "phẫu thuật" nội dung SEO (post_content, Elementor, Rank Math) qua REST API, có kiểm tra khớp đúng 1 chỗ, xoá cache và khôi phục.
- * Version: 1.2.0
+ * Version: 1.3.0
  * Requires PHP: 7.4
  * Author: Duy Ơi
  * License: GPLv2 or later
@@ -15,7 +15,7 @@ if (!defined('ABSPATH') && !defined('DUYOI_TEST')) {
     exit;
 }
 
-const DUYOI_VERSION = '1.2.0';
+const DUYOI_VERSION = '1.3.0';
 const DUYOI_META_KEYS = ['rank_math_title', 'rank_math_description', 'rank_math_focus_keyword'];
 
 // ---------------------------------------------------------------------------
@@ -303,7 +303,40 @@ function duyoi_can_edit_from_request(WP_REST_Request $r)
     return $id ? current_user_can('edit_post', $id) : current_user_can('edit_posts');
 }
 
+// IndexNow: phục vụ file khoá ở gốc tên miền (https://ten-mien/<key>.txt) để app báo Bing/Yandex khi có bài mới hoặc vừa sửa
+add_action('init', function () {
+    $key = get_option('duyoi_indexnow_key');
+    if (!$key || !isset($_SERVER['REQUEST_URI'])) {
+        return;
+    }
+    $path = (string) parse_url((string) $_SERVER['REQUEST_URI'], PHP_URL_PATH);
+    if ($path === '/' . $key . '.txt') {
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: public, max-age=86400');
+        echo $key;
+        exit;
+    }
+}, 0);
+
+function duyoi_indexnow_key_ok($key)
+{
+    return is_string($key) && preg_match('/^[a-f0-9]{32}$/', $key) === 1;
+}
+
 add_action('rest_api_init', function () {
+    register_rest_route('duyoi/v1', '/indexnow-key', [
+        'methods' => 'POST',
+        'permission_callback' => function () { return current_user_can('edit_posts'); },
+        'callback' => function (WP_REST_Request $r) {
+            $key = (string) $r->get_param('key');
+            if (!duyoi_indexnow_key_ok($key)) {
+                return new WP_Error('bad_key', 'Khoá IndexNow không hợp lệ.', ['status' => 400]);
+            }
+            update_option('duyoi_indexnow_key', $key, false);
+            return ['ok' => true];
+        },
+    ]);
+
     register_rest_route('duyoi/v1', '/ping', [
         'methods' => 'GET',
         'permission_callback' => function () { return current_user_can('edit_posts'); },
@@ -317,7 +350,7 @@ add_action('rest_api_init', function () {
                 'elementor' => defined('ELEMENTOR_VERSION'),
                 'rankmath' => class_exists('RankMath'),
                 'flyingpress' => class_exists('\FlyingPress\Purge'),
-                'features' => ['post', 'apply', 'restore', 'create', 'wrap_link', 'swap_url'],
+                'features' => ['post', 'apply', 'restore', 'create', 'wrap_link', 'swap_url', 'indexnow'],
             ];
         },
     ]);

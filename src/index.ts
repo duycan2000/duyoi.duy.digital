@@ -16,8 +16,9 @@ import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from ".
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
+import { apiIndexnowCheck } from "./indexnow";
 import { apiAddLink as opAddLink, apiCitation, apiDeleteLink as opDeleteLink, apiInboxRead, apiMessage, apiOffpageList, apiOffpageRun, apiOffpageView, apiProspect, apiSaveOpSettings, apiSetupMailbox, apiTestEmail, apiThread, handleInbound, runOffpage } from "./offpage";
-import { apiDeleteAccount, apiSaveApp, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
+import { apiDeleteAccount, apiPostizIntegrations, apiPostizLink, apiSavePostiz, apiSaveApp, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
 import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
 import { apiApply as affApply, apiDecide as affDecide, apiDeleteLink as affDelete, apiLinks as affLinks, apiRollback as affRollback, apiSaveLink as affSave, apiScan as affScan } from "./affiliate";
 import { runAutopilot } from "./autopilot";
@@ -85,7 +86,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   // Agent HQ và cấp Quản lý
   if (path === "/api/hq" && m === "GET") return hqView(env);
   if (path === "/api/offpage" && m === "GET") return apiOffpageList(env);
-  const opSite = path.match(/^\/api\/offpage\/(\d+)(?:\/(settings|run|links|mailbox|test-email))?$/);
+  const opSite = path.match(/^\/api\/offpage\/(\d+)(?:\/(settings|run|links|mailbox|test-email|indexnow))?$/);
   if (opSite) {
     const sid = Number(opSite[1]);
     if (!opSite[2] && m === "GET") return apiOffpageView(env, sid);
@@ -94,6 +95,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (opSite[2] === "links" && m === "POST") return opAddLink(env, req, user, sid);
     if (opSite[2] === "mailbox" && m === "POST") return apiSetupMailbox(env, user, sid);
     if (opSite[2] === "test-email" && m === "POST") return apiTestEmail(env, req, user, sid);
+    if (opSite[2] === "indexnow" && m === "POST") return apiIndexnowCheck(env, user, sid);
   }
   const opItem = path.match(/^\/api\/offpage\/(prospects|messages|threads|links|citations|inbox)\/(\d+)$/);
   if (opItem) {
@@ -108,6 +110,10 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (path === "/api/social/oauth/callback" && m === "GET") return apiOAuthCallback(env, req, user, url);
   const soStart = path.match(/^\/api\/social\/oauth\/(\w+)\/start$/);
   if (soStart && m === "GET") return apiOAuthStart(env, req, user, soStart[1]!, url);
+  const soPz = path.match(/^\/api\/social\/(\d+)\/postiz(\/integrations|\/link)?$/);
+  if (soPz && !soPz[2] && m === "PUT") return apiSavePostiz(env, req, user, Number(soPz[1]));
+  if (soPz && soPz[2] === "/integrations" && m === "GET") return apiPostizIntegrations(env, user, Number(soPz[1]));
+  if (soPz && soPz[2] === "/link" && m === "POST") return apiPostizLink(env, req, user, Number(soPz[1]));
   const soApp = path.match(/^\/api\/social\/(\d+)\/app$/);
   if (soApp && m === "PUT") return apiSaveApp(env, req, user, Number(soApp[1]));
   const soAcc = path.match(/^\/api\/social\/(\d+)\/accounts$/);

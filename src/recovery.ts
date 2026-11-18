@@ -1,5 +1,6 @@
 // Phục hồi thứ hạng: tạo ca, quét site theo lô (trong request bằng waitUntil, phần còn lại do cron), phân tích, lập việc, duyệt việc.
 
+import { pingChanged } from "./indexnow";
 import { HttpError, json, now, readJson, str } from "./http";
 import { logActivity } from "./activity";
 import { analyze, disavowFile, plan, RECOVERY_AGENTS, type ScannedPage, type SiteChecks, type Traffic } from "./recovery-analyze";
@@ -471,6 +472,7 @@ export async function applyCore(env: Env, taskId: number, userId: number | null,
     env.DB.prepare("UPDATE recovery_backups SET applied = ? WHERE id = ?").bind(JSON.stringify({ edits: content, meta, result: res }), backupId),
     env.DB.prepare("UPDATE recovery_tasks SET status = 'done', payload = ?, gate = ?, updated_at = ? WHERE id = ?").bind(JSON.stringify({ ...p, applied }), JSON.stringify(gate), now(), taskId)
   ]);
+  await pingChanged(env, t.site_id, t.target_url, "app vừa sửa");
   await logActivity(env, actor, "recovery.applied", `Áp dụng lên site: ${t.title} (${res.changes} sửa${res.meta.length ? `, meta ${res.meta.join(", ")}` : ""}${res.purged?.length ? `, xoá cache ${res.purged.join(", ")}` : ""})`, t.site_id);
   return applied;
 }

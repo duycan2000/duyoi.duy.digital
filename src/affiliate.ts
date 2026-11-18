@@ -4,6 +4,7 @@
 // hoặc Astro (pull request). Đổi link: thay URL cũ ở mọi bài. Áp dụng quá 3 trang một lần cần anh xác nhận rõ.
 
 import { logActivity } from "./activity";
+import { pingChanged } from "./indexnow";
 import { b64Text, branchSha, createBranch, openPr, readFile, tree, writeFile } from "./github";
 import { HttpError, json, now, readJson } from "./http";
 import { readPublishProfile, parseFrontmatter } from "./publish";
@@ -268,6 +269,7 @@ export async function applyCore(env: Env, siteId: number, confirmBulk: boolean, 
         await wpApply(env, siteId, { id: post.id, expected_modified: post.modified_gmt, edits, meta: {} });
         await mark(eds.map((e) => e.id), "applied", a!.id, null);
         applied += eds.length;
+        await pingChanged(env, siteId, page, "chèn link affiliate");
       } catch (e) {
         await mark(eds.map((x) => x.id), "failed", null, (e as Error).message.slice(0, 300));
         failed += eds.length;

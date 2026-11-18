@@ -13,6 +13,7 @@ import { extractNumbers } from "./recovery-extract";
 import { readRules } from "./recovery-rules";
 import { getSettingsMap, readSecret } from "./settings";
 import { entityLd, siteApps, socialRun } from "./social";
+import { indexnowView } from "./indexnow";
 import { emailsIn, fetchText, hostOf, linksIn, overlap, pageInfo } from "./web";
 import type { Env, InboundEmail, User } from "./types";
 
@@ -22,7 +23,7 @@ const DAY = 86400000;
 export interface OpSettings {
   brand: string; senderName: string; outreachEmail: string; forwardTo: string; postalAddress: string;
   topics: string[]; brandTerms: string[]; dailyCap: number; followupDays: number; minTraffic: number;
-  prospecting: boolean; community: boolean; social: boolean; socialDailyCap: number;
+  prospecting: boolean; community: boolean; social: boolean; socialDailyCap: number; pinterestFresh: boolean;
   nap: { name: string; address: string; phone: string; city: string };
 }
 interface OpState { prospectAt?: number; draftAt?: number; threadsAt?: number; linksAt?: number; socialAt?: number; topicIdx?: number; lastError?: string | null; lastSendAt?: number }
@@ -54,7 +55,7 @@ export function cleanSettings(raw: unknown, s: SiteRow): OpSettings {
     forwardTo: emailOk(fwd) ? fwd : "", postalAddress: str(b.postalAddress, 200),
     topics: list(b.topics, 8), brandTerms: list(b.brandTerms, 5),
     dailyCap: num(b.dailyCap, 8, 1, 30), followupDays: num(b.followupDays, 5, 3, 14), minTraffic: num(b.minTraffic, 100, 0, 1_000_000),
-    prospecting: b.prospecting !== false, community: b.community !== false, social: b.social !== false, socialDailyCap: num(b.socialDailyCap, 2, 1, 6),
+    prospecting: b.prospecting !== false, community: b.community !== false, social: b.social !== false, socialDailyCap: num(b.socialDailyCap, 2, 1, 6), pinterestFresh: b.pinterestFresh !== false,
     nap: { name: str(n.name, 100), address: str(n.address, 200), phone: str(n.phone, 40), city: str(n.city, 60) }
   };
 }
@@ -92,7 +93,14 @@ export async function findProspectsCore(env: Env, siteId: number, actor: string)
   const idx = state.topicIdx || 0;
   const topics = [settings.topics[idx % settings.topics.length]!, settings.topics[(idx + 1) % settings.topics.length]!].filter((v, i, a) => a.indexOf(v) === i);
   const queries: { q: string; kind: string }[] = [];
-  for (const t of topics) { queries.push({ q: `${t} "write for us"`, kind: "guest_post" }, { q: `${t} intitle:resources`, kind: "resource" }); }
+  // Mỗi lượt xoay một bộ dấu hiệu tìm kiếm (footprint) để không lặp và tốn ít lượt SERP
+  const FP = [
+    [(t: string) => `${t} "write for us"`, "guest_post"], [(t: string) => `${t} "become a contributor"`, "guest_post"], [(t: string) => `${t} "submit a guest post"`, "guest_post"],
+    [(t: string) => `${t} intitle:resources`, "resource"], [(t: string) => `${t} "useful links"`, "resource"], [(t: string) => `${t} inurl:resources`, "resource"],
+    [(t: string) => `best ${t} blogs`, "roundup"], [(t: string) => `${t} "best blogs" OR "top blogs"`, "roundup"]
+  ] as const;
+  const pickFp = (kind: string, n: number) => FP.filter((f) => f[1] === kind)[n % FP.filter((f) => f[1] === kind).length]!;
+  for (const t of topics) for (const kind of ["guest_post", "resource", "roundup"]) { const f = pickFp(kind, idx); queries.push({ q: f[0](t), kind: f[1] }); }
   const brand = settings.brandTerms[0];
   if (brand && brand.length >= 4) queries.push({ q: `"${brand}" -site:${s.domain}`, kind: "mention" });
   const own = s.domain.replace(/^www\./, "");
@@ -131,14 +139,15 @@ export async function findProspectsCore(env: Env, siteId: number, actor: string)
         const r = await fetchText(u, 2000, 6000);
         if (!r || r.status === 404 || r.status === 410) { kind = "broken_link"; dead = u; why = `Link chết trên trang tài nguyên: ${u}`; break; }
       }
-    } else why = "Trang \"Write for us\" công khai, cùng chủ đề";
+    } else if (kind === "roundup") why = "Bài tổng hợp các trang/blog hay cùng chủ đề";
+    else why = "Trang \"Write for us\" công khai, cùng chủ đề";
     if (status === "new" && !emails.length && contact) {
       const cp = await fetchText(contact, 300_000, 8000);
       if (cp && cp.status < 400) emails = emailsIn(cp.text);
     }
     const sameDomain = emails.filter((e) => e.endsWith(c.domain));
     const email = sameDomain[0] || emails[0] || null;
-    const score = Math.min(100, ({ mention: 40, broken_link: 38, resource: 25, guest_post: 22 } as Record<string, number>)[kind]! + (t ? Math.min(30, Math.round(Math.log10(t + 1) * 8)) : 8) + (email ? 20 : 0) + Math.min(10, overlap(c.title, topics.join(" ")) * 4));
+    const score = Math.min(100, ({ mention: 40, broken_link: 38, resource: 25, roundup: 24, guest_post: 22 } as Record<string, number>)[kind]! + (t ? Math.min(30, Math.round(Math.log10(t + 1) * 8)) : 8) + (email ? 20 : 0) + Math.min(10, overlap(c.title, topics.join(" ")) * 4));
     const r = await env.DB.prepare("INSERT OR IGNORE INTO op_prospects (site_id, kind, url, domain, title, snippet, contact_email, contact_page, dead_url, traffic, score, why, query, status, found_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
       .bind(siteId, kind, c.url, c.domain, c.title.slice(0, 200), c.snippet, email, contact, dead, t, score, why, c.query, status, now(), now()).first();
     if (r) { if (status === "new") found++; else skipped++; }
@@ -431,7 +440,7 @@ export async function runOffpage(env: Env, deadline: number): Promise<void> {
     const A = "agent:offpage";
     const due = (at: number | undefined, every: number) => !at || now() - at > every;
     try {
-      if (settings.social && due(state.socialAt, 2 * 3600000)) { await socialRun(env, s.id, settings, "agent:social"); await setState(env, s.id, { socialAt: now() }); }
+      if (due(state.socialAt, 2 * 3600000)) { await socialRun(env, s.id, settings, "agent:social"); await setState(env, s.id, { socialAt: now() }); }
       if (Date.now() > deadline) return;
       if (settings.prospecting && hasDfs && !germanSite(s) && due(state.prospectAt, 7 * DAY)) await findProspectsCore(env, s.id, "agent:prospector");
       else if (settings.outreachEmail && settings.senderName && !germanSite(s) && due(state.draftAt, DAY)) {
@@ -474,12 +483,12 @@ export async function apiOffpageView(env: Env, siteId: number): Promise<Response
     q<Record<string, unknown>>("SELECT * FROM op_threads WHERE site_id = ? ORDER BY status = 'drafted' DESC, id DESC LIMIT 40", siteId),
     q<Record<string, unknown>>("SELECT * FROM op_links WHERE site_id = ? ORDER BY id DESC LIMIT 200", siteId),
     q<Record<string, unknown>>("SELECT * FROM op_citations WHERE site_id = ? ORDER BY status = 'live', directory", siteId),
-    q<Record<string, unknown>>("SELECT id, network, handle, profile_url, target_id, target_name, status, error, expires_at, connected_at FROM social_accounts WHERE site_id = ? ORDER BY network", siteId),
+    q<Record<string, unknown>>("SELECT id, network, handle, profile_url, target_id, target_name, status, error, expires_at, connected_at, via FROM social_accounts WHERE site_id = ? ORDER BY network", siteId),
     q<Record<string, unknown>>("SELECT * FROM social_posts WHERE site_id = ? ORDER BY id DESC LIMIT 60", siteId)
   ]);
   const parse = (v: unknown) => { try { return v ? JSON.parse(String(v)) : null; } catch { return null; } };
   return json({
-    site: s, german: germanSite(s), settings, state, emailBinding: !!env.EMAIL, workerName: WORKER_NAME, entity: await entityLd(env, siteId, settings.brand), apps: await siteApps(env, siteId),
+    site: s, german: germanSite(s), settings, state, emailBinding: !!env.EMAIL, workerName: WORKER_NAME, entity: await entityLd(env, siteId, settings.brand), apps: await siteApps(env, siteId), indexnow: await indexnowView(env, siteId), postiz: !!(await env.DB.prepare("SELECT 1 FROM secrets WHERE key = ?").bind(`postiz:${siteId}`).first()),
     prospects, messages: messages.map((m) => ({ ...m, review: parse(m.review) })), inbox, threads: threads.map((t) => ({ ...t, factors: parse(t.factors) || [] })),
     links, citations, accounts, posts: posts.map((p) => ({ ...p, gate: parse(p.gate) }))
   });

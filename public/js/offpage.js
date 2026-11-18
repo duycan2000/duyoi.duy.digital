@@ -9,7 +9,8 @@ const MST = { needs_fix: ["Cần sửa", "err"], ready: ["Chờ anh duyệt", "w
 const SST = { connected: ["Đang đăng", "ok"], choose_target: ["Chọn trang để đăng", "warn"], expired: ["Hết hạn", "err"], profile: ["Chỉ sameAs", ""] };
 const POST = { queued: ["Chờ đăng", "info"], posted: ["Đã đăng", "ok"], failed: ["Lỗi", "err"], blocked: ["Gác cổng chặn", "err"], skipped: ["Bỏ", ""] };
 const LST = { live: ["Còn link", "ok"], nofollow: ["Nofollow", "warn"], missing: ["Mất link", "err"], error: ["Không mở được", "warn"], unchecked: ["Chưa kiểm tra", ""] };
-const NET = { pinterest: "Pinterest", facebook: "Facebook Page", linkedin: "LinkedIn Page", x: "X (Twitter)", bluesky: "Bluesky", youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok", crunchbase: "Crunchbase", other: "Profile khác" };
+const NET = { pinterest: "Pinterest", facebook: "Facebook Page", linkedin: "LinkedIn Page", x: "X (Twitter)", bluesky: "Bluesky", threads: "Threads", instagram: "Instagram", mastodon: "Mastodon", gmb: "Google Business Profile", youtube: "YouTube", tiktok: "TikTok", crunchbase: "Crunchbase", other: "Profile khác" };
+const VIA_POSTIZ = ["threads", "instagram", "mastodon", "gmb"];
 const OAUTH = ["pinterest", "facebook", "linkedin", "x"];
 const tag = (x) => (x ? `<span class="tag ${x[1]}">${esc(x[0])}</span>` : "");
 const probs = (list) => (list || []).map((p) => `<span class="tag ${p.level === "block" ? "err" : "warn"}">${esc(p.message)}</span>`).join(" ");
@@ -32,6 +33,13 @@ function settingsHtml(d, canEdit) {
     <button type="button" data-run="threads">Tìm thread cộng đồng</button><button type="button" data-run="social">Đăng social ngay</button><button type="button" data-run="links">Kiểm tra backlink</button>
     ${d.german ? "" : `<button type="button" data-run="send">Gửi thư đã duyệt</button>`}
   </div>` : ""}
+  <div class="op-index">
+    <b>IndexNow</b> ${d.indexnow.verifiedAt ? tag(["Đang chạy", "ok"]) : tag(["Chưa có file khoá", "warn"])}
+    <small>Báo Bing, Yandex, Seznam, Naver (và Copilot) ngay khi site có bài mới hoặc app vừa sửa trang. Google không dùng IndexNow. File khoá: <code>https://${esc(d.site.domain)}/${esc(d.indexnow.key)}.txt</code>${d.indexnow.mode ? ` (${d.indexnow.mode === "wordpress" ? "plugin WordPress" : "Worker bộ đo"})` : ""}</small>
+    ${d.indexnow.lastError ? `<small class="err">${esc(d.indexnow.lastError)}</small>` : ""}
+    ${canEdit ? `<button type="button" id="op-indexnow">Kiểm tra IndexNow</button>` : ""}
+    ${d.indexnow.log.length ? `<details><summary>${d.indexnow.log.length} lần gửi gần nhất</summary><ul>${d.indexnow.log.map((l) => `<li>${esc(l.url)} · ${esc(l.reason || "")} · ${l.status || "lỗi"} · ${esc(ago(l.at))}</li>`).join("")}</ul></details>` : ""}
+  </div>
   <form id="op-settings" class="op-form" novalidate>
     <fieldset><legend>Người gửi</legend>
       <label>Tên thương hiệu<input name="brand" value="${esc(s.brand)}"${dis}></label>
@@ -51,6 +59,7 @@ function settingsHtml(d, canEdit) {
         <label class="check"><input type="checkbox" name="prospecting"${s.prospecting ? " checked" : ""}${dis}> Tự tìm nơi xin link và soạn email</label>
         <label class="check"><input type="checkbox" name="social"${s.social ? " checked" : ""}${dis}> Tự đăng bài mới lên mạng xã hội</label>
         <label class="check"><input type="checkbox" name="community"${s.community ? " checked" : ""}${dis}> Tự tìm thread cộng đồng</label>
+        <label class="check"><input type="checkbox" name="pinterestFresh"${s.pinterestFresh ? " checked" : ""}${dis}> Pinterest: thêm Pin mới cho bài cũ (ảnh khác, cách 7 ngày)</label>
       </div>
     </fieldset>
     ${d.site.site_type === "service" ? `<fieldset><legend>NAP thật (cho citations)</legend>
@@ -116,14 +125,22 @@ function socialHtml(d, canEdit, origin, K_ADMIN) {
   return `
   <p class="msg warn">Mỗi site một tài khoản riêng cho từng mạng. Trước khi bấm Kết nối, đăng nhập đúng tài khoản của <b>${esc(d.site.domain)}</b> trên trình duyệt (nên dùng một profile Chrome riêng cho mỗi site). App chặn nếu tài khoản, trang hoặc link profile đã gắn với site khác.</p>
   <div class="tablewrap boxed"><table><thead><tr><th>Mạng</th><th>Tài khoản</th><th>Trạng thái</th><th></th></tr></thead><tbody>
-    ${Object.entries(NET).filter(([n]) => n !== "other" || has(n)).map(([n, label]) => { const a = has(n); return `<tr>
-      <td><b>${esc(label)}</b>${OAUTH.includes(n) ? `<small>${d.apps?.[n] ? "App developer riêng của site" : "Đang dùng app chung"}</small>` : n === "bluesky" ? "" : "<small>Chỉ ghi profile (sameAs)</small>"}</td>
+    ${Object.entries(NET).filter(([n]) => (n !== "other" || has(n)) && (n !== "gmb" || d.site.site_type === "service")).map(([n, label]) => { const a = has(n); return `<tr>
+      <td><b>${esc(label)}</b>${a?.via === "postiz" ? "<small>Đăng qua Postiz</small>" : OAUTH.includes(n) ? `<small>${d.apps?.[n] ? "App developer riêng của site" : "Đang dùng app chung"}</small>` : VIA_POSTIZ.includes(n) ? "<small>Kết nối qua Postiz</small>" : n === "bluesky" ? "" : "<small>Chỉ ghi profile (sameAs)</small>"}</td>
       <td>${a ? `${a.profile_url ? `<a href="${esc(a.profile_url)}" target="_blank" rel="noopener">${esc(a.handle || a.target_name || a.profile_url)}</a>` : esc(a.handle || "")}${a.target_name ? `<small>Đăng vào: ${esc(a.target_name)}</small>` : ""}${a.error ? `<small>${esc(a.error)}</small>` : ""}` : "—"}</td>
       <td>${a ? tag(SST[a.status] || [a.status, ""]) : ""}</td>
-      <td class="op-actions">${canEdit ? `${OAUTH.includes(n) ? `<a class="btn" href="/api/social/oauth/${n}/start?site=${d.site.id}">${a && a.status !== "profile" ? "Kết nối lại" : "Kết nối"}</a>` : ""}${a && a.status === "choose_target" || (a && OAUTH.includes(n) && a.status === "connected" && n !== "x") ? `<button type="button" data-targets="${a.id}">${a.target_id ? "Đổi trang" : "Chọn trang"}</button>` : ""}${a ? `<button type="button" class="danger" data-acc-del="${a.id}">Gỡ</button>` : ""}` : ""}</td>
+      <td class="op-actions">${canEdit ? `${OAUTH.includes(n) && a?.via !== "postiz" ? `<a class="btn" href="/api/social/oauth/${n}/start?site=${d.site.id}">${a && a.status !== "profile" ? "Kết nối lại" : "Kết nối"}</a>` : ""}${a && a.via !== "postiz" && (a.status === "choose_target" || (OAUTH.includes(n) && a.status === "connected" && n !== "x")) ? `<button type="button" data-targets="${a.id}">${a.target_id ? "Đổi trang" : "Chọn trang"}</button>` : ""}${a ? `<button type="button" class="danger" data-acc-del="${a.id}">Gỡ</button>` : ""}` : ""}</td>
     </tr>`; }).join("")}
   </tbody></table></div>
   <div id="op-targets"></div>
+  <details class="op-help"${d.postiz ? " open" : ""}><summary>Postiz (tuỳ chọn): đăng thêm Threads, Instagram, Mastodon${d.site.site_type === "service" ? ", Google Business Profile" : ""} và dùng app đã được các mạng duyệt</summary>
+    <p class="note">Postiz là phần mềm lên lịch mạng xã hội mã nguồn mở: dùng Postiz Cloud (trả phí theo số kênh) hoặc tự cài. Anh kết nối tài khoản của site trong Postiz (nên mỗi site một workspace hoặc một "customer"), dán API key vào đây rồi gắn kênh. Agent vẫn soạn bài, Gác cổng vẫn kiểm; Postiz chỉ đăng. Không gắn Reddit, diễn đàn hay kênh chat.</p>
+    ${K_ADMIN ? `<form id="op-postiz" class="op-form" novalidate><fieldset><legend>${d.postiz ? "Đã có API key, nhập lại để đổi" : "Kết nối Postiz cho site này"}</legend>
+      <label>Địa chỉ API<input name="base" value="https://api.postiz.com/public/v1"></label>
+      <label>API key<input name="key" type="password" autocomplete="off"></label>
+      <div class="toolbar"><button type="submit">Lưu</button>${d.postiz ? `<button type="button" id="op-postiz-del">Gỡ Postiz</button>` : ""}</div></fieldset></form>` : ""}
+    ${d.postiz && canEdit ? `<button type="button" id="op-postiz-list">Tải kênh từ Postiz</button><div id="op-postiz-items"></div>` : ""}
+  </details>
   ${canEdit ? `<div class="op-two">
     <form id="op-bsky" class="op-form" novalidate><fieldset><legend>Bluesky (App Password)</legend>
       <label>Handle<input name="handle" placeholder="tensite.bsky.social"></label>
@@ -152,7 +169,7 @@ function socialHtml(d, canEdit, origin, K_ADMIN) {
   </details>
   <h3 class="sub">Bài đã và sẽ đăng</h3>
   ${d.posts.length ? d.posts.map((p) => `<div class="op-post">
-    <div>${tag(POST[p.status])} <b>${esc(NET[p.network] || p.network)}</b> · <a href="${esc(p.source_url)}" target="_blank" rel="noopener">${esc(p.source_title || p.source_url)}</a>${p.remote_url ? ` · <a href="${esc(p.remote_url)}" target="_blank" rel="noopener">Xem bài</a>` : ""} <small>${esc(ago(p.posted_at || p.created_at))}</small></div>
+    <div>${tag(POST[p.status])} <b>${esc(NET[p.network] || p.network)}${p.variant ? ` · Pin #${p.variant + 1}` : ""}</b> · <a href="${esc(p.source_url)}" target="_blank" rel="noopener">${esc(p.source_title || p.source_url)}</a>${p.remote_url ? ` · <a href="${esc(p.remote_url)}" target="_blank" rel="noopener">Xem bài</a>` : ""} <small>${esc(ago(p.posted_at || p.created_at))}</small></div>
     ${probs(p.gate?.problems)}${p.error ? `<p class="note err">${esc(p.error)}</p>` : ""}
     ${p.status === "posted" || !canEdit ? `<p>${esc(p.text || "")}</p>` : `<textarea data-post-text="${p.id}" rows="3">${esc(p.text || "")}</textarea><div class="toolbar"><button type="button" data-post-save="${p.id}">Lưu và xếp đăng</button>${["failed", "blocked"].includes(p.status) ? `<button type="button" data-post-retry="${p.id}">Thử lại</button>` : ""}<button type="button" data-post-skip="${p.id}">Bỏ</button></div>`}
   </div>`).join("") : `<p class="note">Chưa có. Khi site có bài mới trên sitemap, Social Entity soạn và tự đăng (bài cũ lúc kết nối không đăng lại).</p>`}
@@ -238,7 +255,7 @@ export async function viewOffpage(main, args, K) {
     ev.preventDefault();
     const f = formData(ev.target);
     const el = ev.target.elements;
-    const body = { brand: f.brand, senderName: f.senderName, outreachEmail: f.outreachEmail, forwardTo: f.forwardTo, postalAddress: f.postalAddress, topics: f.topics, brandTerms: f.brandTerms, minTraffic: f.minTraffic, dailyCap: f.dailyCap, followupDays: f.followupDays, socialDailyCap: f.socialDailyCap, prospecting: el.prospecting.checked, social: el.social.checked, community: el.community.checked, nap: { name: f["nap.name"], phone: f["nap.phone"], address: f["nap.address"], city: f["nap.city"] } };
+    const body = { brand: f.brand, senderName: f.senderName, outreachEmail: f.outreachEmail, forwardTo: f.forwardTo, postalAddress: f.postalAddress, topics: f.topics, brandTerms: f.brandTerms, minTraffic: f.minTraffic, dailyCap: f.dailyCap, followupDays: f.followupDays, socialDailyCap: f.socialDailyCap, prospecting: el.prospecting.checked, social: el.social.checked, community: el.community.checked, pinterestFresh: el.pinterestFresh.checked, nap: { name: f["nap.name"], phone: f["nap.phone"], address: f["nap.address"], city: f["nap.city"] } };
     await busy($("#op-save", main), "Đang lưu…", async () => { await put(`/api/offpage/${siteId}/settings`, body, "Đã lưu."); });
   });
   $("#op-mailbox", main)?.addEventListener("click", (ev) => busy(ev.currentTarget, "Đang dựng…", async () => {
@@ -279,6 +296,17 @@ export async function viewOffpage(main, args, K) {
   })));
   $$("[data-acc-del]", main).forEach((b) => b.addEventListener("click", async () => { try { await api(`/api/social/accounts/${b.dataset.accDel}`, { method: "DELETE" }); await reload(); } catch (e) { msg(e); } }));
   $("#op-bsky", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/accounts`, { method: "POST", body: { network: "bluesky", handle: f.handle, app_password: f.app_password } }); await reload(); msg(null, "Đã kết nối Bluesky."); } catch (e) { msg(e); } });
+  $("#op-indexnow", main)?.addEventListener("click", (ev) => busy(ev.currentTarget, "Đang kiểm tra…", async () => { try { const r = await api(`/api/offpage/${siteId}/indexnow`, { method: "POST" }); await reload(); msg(r.ok ? null : { message: r.message }, r.ok ? r.message : ""); } catch (e) { msg(e); } }));
+  $("#op-postiz", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/postiz`, { method: "PUT", body: { base: f.base, key: f.key } }); K.state.tabs.op = "social"; await reload(); msg(null, "Đã lưu Postiz. Bấm Tải kênh từ Postiz để gắn kênh."); } catch (e) { msg(e); } });
+  $("#op-postiz-del", main)?.addEventListener("click", async () => { try { await api(`/api/social/${siteId}/postiz`, { method: "PUT", body: { key: null } }); await reload(); } catch (e) { msg(e); } });
+  $("#op-postiz-list", main)?.addEventListener("click", (ev) => busy(ev.currentTarget, "Đang tải…", async () => {
+    try {
+      const r = await api(`/api/social/${siteId}/postiz/integrations`);
+      const box = $("#op-postiz-items", main);
+      box.innerHTML = r.items.length ? `<div class="tablewrap boxed"><table><thead><tr><th>Kênh</th><th>Mạng</th><th></th></tr></thead><tbody>${r.items.map((i, k) => `<tr><td>${esc(i.name)}${i.customer ? `<small>Customer: ${esc(i.customer)}</small>` : ""}${i.linkedSite && i.linkedSite !== siteId ? `<small class="err">Đang gắn với site khác</small>` : ""}</td><td>${esc(NET[i.network] || i.identifier)}</td><td>${i.allowed ? `${i.network === "pinterest" ? `<input data-pz-board="${k}" placeholder="ID board Pinterest">` : ""}<button type="button" data-pz="${k}">Gắn vào site</button>` : `<small>Không dùng (không tự đăng kênh này)</small>`}</td></tr>`).join("")}</tbody></table></div>` : `<p class="note">Workspace Postiz chưa có kênh nào.</p>`;
+      $$("[data-pz]", box).forEach((b) => b.addEventListener("click", async () => { const i = r.items[Number(b.dataset.pz)]; try { await api(`/api/social/${siteId}/postiz/link`, { method: "POST", body: { integration_id: i.id, identifier: i.identifier, name: i.name, board: box.querySelector(`[data-pz-board="${b.dataset.pz}"]`)?.value } }); K.state.tabs.op = "social"; await reload(); msg(null, `Đã gắn ${i.name}.`); } catch (e) { msg(e); } }));
+    } catch (e) { msg(e); }
+  }));
   $("#op-app", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/app`, { method: "PUT", body: { network: f.network, client_id: f.client_id, client_secret: f.client_secret } }); K.state.tabs.op = "social"; await reload(); msg(null, "Đã lưu app riêng cho site."); } catch (e) { msg(e); } });
   $("#op-app-del", main)?.addEventListener("click", async () => { try { await api(`/api/social/${siteId}/app`, { method: "PUT", body: { network: $("#op-app", main).elements.network.value, client_id: null, client_secret: null } }); await reload(); msg(null, "Đã xoá app riêng: site dùng app chung."); } catch (e) { msg(e); } });
   $("#op-profile", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/accounts`, { method: "POST", body: { network: f.network, profile_url: f.profile_url } }); await reload(); msg(null, "Đã lưu profile."); } catch (e) { msg(e); } });

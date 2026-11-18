@@ -175,7 +175,8 @@ export function fakeSite(opts = {}) {
     } else if (/helpful answer that the owner will review/.test(sys)) {
       content = { answer: `A 9 ft ceiling works for most golfers if you swing carefully. See also https://evil.example/spam for more.`, include_link: true, why: "Câu hỏi đúng bài." };
     } else if (/social posts that share ONE article/.test(sys)) {
-      content = { posts: user.networks.map((n) => ({ network: n, text: n === "x" ? "We tested it: 40% faster setup for your garage sim." : `New guide: ${user.title}. What to check before you buy.`, title: user.title, alt_text: user.title })) };
+      const v = user.avoid_titles?.length || 0;
+      content = { posts: user.networks.map((n) => ({ network: n, text: n === "x" ? "We tested it: 40% faster setup for your garage sim." : `${v ? "Another angle" : "New guide"}: ${user.title}. What to check before you buy.`, title: v ? `${user.title}: checklist ${String.fromCharCode(65 + v)}` : user.title, alt_text: user.title })) };
     } else if (user.sections) {
       const bad = /Kosten/.test(user.page_title || "");
       content = { answers: user.sections.slice(0, 2).map((s) => ({ heading: s.heading, answer: bad ? "Mit uns arbeiten Sie 40% schneller und sparen Zeit bei jedem Projekt." : `Kurz gesagt: Bei ${s.heading} kommt es auf eine saubere und abgestimmte Planung an. Wir prüfen alle Unterlagen gründlich, bevor sie an Sie gehen.` })), faq_title: "Häufige Fragen", faq: [1, 2, 3].map((i) => ({ q: `Wie läuft die Zusammenarbeit ab (Frage ${String.fromCharCode(64 + i)})?`, a: "Sie senden uns Ihre Unterlagen, wir stimmen die Anforderungen ab und liefern geprüfte Zeichnungen." })) };
@@ -263,6 +264,14 @@ export function fakeSite(opts = {}) {
     if (u.hostname === "api.github.com") return github(u, init);
     if (u.hostname === "api.cloudflare.com") return cloudflare(u, init);
     if (opts.web && u.href in opts.web) { const w = opts.web[u.href]; const r = typeof w === "number" ? new Response("gone", { status: w }) : new Response(w, { status: 200, headers: { "content-type": "text/html" } }); Object.defineProperty(r, "url", { value: u.href }); return r; }
+    if (u.hostname === "api.indexnow.org") { const so = opts.social || (opts.social = { posts: [] }); (so.indexnow ||= []).push(JSON.parse(init.body)); return new Response(null, { status: 200 }); }
+    if (u.hostname === "api.postiz.com") {
+      const so = opts.social || (opts.social = { posts: [] });
+      if (new Headers(init?.headers).get("Authorization") !== "pz-key") return jsonRes({ message: "Unauthorized" }, 401);
+      if (u.pathname === "/public/v1/integrations") return jsonRes([{ id: "pz-pin", name: "Golfdemo Pins", identifier: "pinterest" }, { id: "pz-threads", name: "golfdemo", identifier: "threads" }, { id: "pz-reddit", name: "u/golfdemo", identifier: "reddit" }]);
+      if (u.pathname === "/public/v1/upload-from-url") { const b = JSON.parse(init.body); return jsonRes({ id: `up-${b.url.split("/").pop()}`, path: `https://uploads.postiz.com/${b.url.split("/").pop()}` }); }
+      if (u.pathname === "/public/v1/posts") { const b = JSON.parse(init.body); so.posts.push({ net: `postiz:${b.posts[0].settings.__type}`, ...b }); return jsonRes([{ postId: `pp${so.posts.length}`, integration: b.posts[0].integration.id }]); }
+    }
     if (u.hostname === "bsky.social") {
       const b = init?.body ? JSON.parse(init.body) : {};
       const so = opts.social || (opts.social = { posts: [] });

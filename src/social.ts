@@ -11,6 +11,7 @@ import { extractNumbers } from "./recovery-extract";
 import { readRules } from "./recovery-rules";
 import { readSecret, type SecretKey } from "./settings";
 import { fetchText, pageInfo, sitemapUrls } from "./web";
+import { submitUrls } from "./indexnow";
 import type { Env, User } from "./types";
 
 export const NETWORKS = {
@@ -19,13 +20,20 @@ export const NETWORKS = {
   linkedin: { label: "LinkedIn Page", oauth: true, posts: true },
   x: { label: "X (Twitter)", oauth: true, posts: true },
   bluesky: { label: "Bluesky", oauth: false, posts: true },
+  threads: { label: "Threads", oauth: false, posts: true },
+  instagram: { label: "Instagram", oauth: false, posts: true },
+  mastodon: { label: "Mastodon", oauth: false, posts: true },
+  gmb: { label: "Google Business Profile", oauth: false, posts: true },
   youtube: { label: "YouTube", oauth: false, posts: false },
-  instagram: { label: "Instagram", oauth: false, posts: false },
   tiktok: { label: "TikTok", oauth: false, posts: false },
   crunchbase: { label: "Crunchbase", oauth: false, posts: false },
   other: { label: "Profile khác", oauth: false, posts: false }
 } as const;
 export type Network = keyof typeof NETWORKS;
+// Đăng trực tiếp được (app tự gọi API); các mạng khác đăng qua Postiz
+export const DIRECT = new Set<Network>(["pinterest", "facebook", "linkedin", "x", "bluesky"]);
+// Kênh Postiz được phép gắn (không Reddit/Lemmy/diễn đàn: luật không tự đăng cộng đồng)
+const POSTIZ_MAP: Record<string, Network> = { x: "x", linkedin: "linkedin", "linkedin-page": "linkedin", facebook: "facebook", instagram: "instagram", "instagram-standalone": "instagram", threads: "threads", bluesky: "bluesky", mastodon: "mastodon", pinterest: "pinterest", gmb: "gmb" };
 const FB = "v24.0";
 const DAY = 86400000;
 // LinkedIn yêu cầu header phiên bản YYYYMM và chỉ giữ các phiên bản khoảng 1 năm: dùng tháng cách đây 2 tháng
@@ -41,7 +49,7 @@ const OAUTH: Record<"pinterest" | "facebook" | "linkedin" | "x", OAuthCfg> = {
 export const redirectUri = (req: Request) => `${new URL(req.url).origin}/api/social/oauth/callback`;
 
 interface Tok { access_token?: string; refresh_token?: string; expires_at?: number; page_token?: string; app_password?: string; identifier?: string }
-interface Acc { id: number; site_id: number; network: Network; handle: string | null; profile_url: string | null; target_id: string | null; target_name: string | null; status: string; expires_at: number | null }
+interface Acc { id: number; site_id: number; network: Network; handle: string | null; profile_url: string | null; target_id: string | null; target_name: string | null; status: string; expires_at: number | null; via?: string; extra?: string | null }
 
 const canEdit = (u: User) => { if (u.role === "viewer") throw new HttpError(403, "Tài khoản chỉ xem.", "forbidden"); };
 const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -308,7 +316,7 @@ async function freshTok(env: Env, a: Acc): Promise<Tok> {
 
 // ---------------- Gác cổng bài social ----------------
 
-const LIMIT: Partial<Record<Network, number>> = { x: 255, bluesky: 280, pinterest: 500, linkedin: 2800, facebook: 2000 };
+const LIMIT: Partial<Record<Network, number>> = { x: 255, bluesky: 280, pinterest: 500, linkedin: 2800, facebook: 2000, threads: 470, mastodon: 470, instagram: 2100, gmb: 1400 };
 export function gateSocial(network: Network, text: string, title: string, ctx: { excerpt: string; blocklist: string[] }): { ok: boolean; problems: { rule: string; level: string; message: string }[] } {
   const p: { rule: string; level: string; message: string }[] = [];
   const all = `${title} ${text}`;
@@ -328,6 +336,7 @@ export function gateSocial(network: Network, text: string, title: string, ctx: {
 // ---------------- Đăng ----------------
 
 async function publish(env: Env, a: Acc, post: { text: string; title: string | null; image_url: string | null; source_url: string; source_title: string | null }): Promise<{ id: string; url: string }> {
+  if (a.via === "postiz") return postizPublish(env, a, post);
   const t = await freshTok(env, a);
   const H = { Authorization: `Bearer ${t.access_token}` };
   if (a.network === "x") {
@@ -368,12 +377,126 @@ async function publish(env: Env, a: Acc, post: { text: string; title: string | n
   throw new Error("Mạng này chưa đăng tự động.");
 }
 
+// ---------------- Postiz (tuỳ chọn): đăng qua app đã được các mạng duyệt, thêm Threads, Instagram, Mastodon, Google Business Profile ----------------
+
+async function postizCfg(env: Env, siteId: number): Promise<{ base: string; key: string } | null> {
+  const k = `postiz:${siteId}`;
+  const r = await env.DB.prepare("SELECT iv, ciphertext FROM secrets WHERE key = ?").bind(k).first<{ iv: string; ciphertext: string }>();
+  if (!r) return null;
+  try { return JSON.parse(await decryptText(env.ENCRYPTION_KEY, r.iv, r.ciphertext, k)); } catch { return null; }
+}
+async function postiz(env: Env, siteId: number, path: string, init: RequestInit & { json?: unknown } = {}) {
+  const cfg = await postizCfg(env, siteId);
+  if (!cfg) throw new Error("Site chưa nhập Postiz API key.");
+  const r = await call(`${cfg.base.replace(/\/+$/, "")}${path}`, { ...init, headers: { ...(init.headers || {}), Authorization: cfg.key } });
+  if (r.status >= 400) throw new Error(`Postiz: ${errOf(r.data)} (${r.status})`);
+  return r;
+}
+
+// PUT /api/social/:siteId/postiz { base?, key } — key rỗng để gỡ. Mỗi site có thể dùng workspace Postiz riêng.
+export async function apiSavePostiz(env: Env, req: Request, user: User, siteId: number): Promise<Response> {
+  if (user.role !== "admin") throw new HttpError(403, "Chỉ admin.", "forbidden");
+  const b = await readJson<{ base?: string; key?: string | null }>(req);
+  const k = `postiz:${siteId}`;
+  if (!b.key) { await env.DB.batch([env.DB.prepare("DELETE FROM secrets WHERE key = ?").bind(k), env.DB.prepare("UPDATE social_accounts SET status = 'expired', error = 'Đã gỡ Postiz' WHERE site_id = ? AND via = 'postiz'").bind(siteId)]); return json({ ok: true, removed: true }); }
+  let base = String(b.base || "https://api.postiz.com/public/v1").trim();
+  try { const u = new URL(base); if (u.protocol !== "https:") throw new Error(); base = u.href.replace(/\/+$/, ""); } catch { throw new HttpError(400, "Địa chỉ Postiz phải là https.", "validation"); }
+  if (!encryptionReady(env.ENCRYPTION_KEY)) throw new HttpError(503, "Worker chưa có ENCRYPTION_KEY.", "encryption_missing");
+  const { iv, ciphertext } = await encryptText(env.ENCRYPTION_KEY, JSON.stringify({ base, key: String(b.key).trim().slice(0, 300) }), k);
+  await env.DB.prepare("INSERT INTO secrets (key, iv, ciphertext, hint, updated_at) VALUES (?, ?, ?, '', ?) ON CONFLICT(key) DO UPDATE SET iv = excluded.iv, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at").bind(k, iv, ciphertext, now()).run();
+  return json({ ok: true });
+}
+
+// GET /api/social/:siteId/postiz/integrations — các kênh trong Postiz có thể gắn cho site
+export async function apiPostizIntegrations(env: Env, user: User, siteId: number): Promise<Response> {
+  if (user.role === "viewer") throw new HttpError(403, "Tài khoản chỉ xem.", "forbidden");
+  let r;
+  try { r = await postiz(env, siteId, "/integrations"); } catch (e) { throw new HttpError(502, (e as Error).message, "postiz"); }
+  const list = (Array.isArray(r.data) ? r.data : (r.data.integrations as unknown[]) || []) as { id: string; name?: string; identifier?: string; providerIdentifier?: string; picture?: string; disabled?: boolean; profile?: string; customer?: { name?: string } }[];
+  const linked = new Map((await env.DB.prepare("SELECT target_id, site_id FROM social_accounts WHERE via = 'postiz'").all<{ target_id: string; site_id: number }>()).results.map((x) => [x.target_id, x.site_id]));
+  return json({ items: list.map((i) => { const ident = String(i.identifier || i.providerIdentifier || ""); return { id: i.id, name: i.name || i.profile || i.id, identifier: ident, network: POSTIZ_MAP[ident] || null, allowed: !!POSTIZ_MAP[ident] && !i.disabled, customer: i.customer?.name || null, linkedSite: linked.get(i.id) ?? null }; }) });
+}
+
+// POST /api/social/:siteId/postiz/link { integration_id, identifier, name, board? }
+export async function apiPostizLink(env: Env, req: Request, user: User, siteId: number): Promise<Response> {
+  if (user.role === "viewer") throw new HttpError(403, "Tài khoản chỉ xem.", "forbidden");
+  const b = await readJson<{ integration_id?: string; identifier?: string; name?: string; board?: string; profile_url?: string }>(req);
+  const network = POSTIZ_MAP[String(b.identifier)];
+  if (!network || !b.integration_id) throw new HttpError(400, "Kênh Postiz này không dùng được (Reddit, diễn đàn và kênh chat không tự đăng).", "validation");
+  if (network === "pinterest" && !String(b.board || "").trim()) throw new HttpError(400, "Pinterest qua Postiz cần ID board.", "validation");
+  const dup = await usedElsewhere(env, siteId, network, { target: String(b.integration_id) });
+  if (dup) throw new HttpError(409, dup, "account_in_use");
+  if (network === "gmb") {
+    const s = await env.DB.prepare("SELECT site_type FROM sites WHERE id = ?").bind(siteId).first<{ site_type: string }>();
+    if (s?.site_type !== "service") throw new HttpError(409, "Google Business Profile chỉ cho site dịch vụ có doanh nghiệp thật.", "not_service");
+  }
+  await env.DB.prepare(`INSERT INTO social_accounts (site_id, network, handle, profile_url, target_id, target_name, status, via, extra, connected_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'connected', 'postiz', ?7, ?8, ?8)
+    ON CONFLICT(site_id, network) DO UPDATE SET handle = ?3, profile_url = COALESCE(?4, profile_url), target_id = ?5, target_name = ?6, status = 'connected', error = NULL, via = 'postiz', extra = ?7, connected_at = ?8, updated_at = ?8`)
+    .bind(siteId, network, String(b.name || "").slice(0, 100) || null, b.profile_url ? String(b.profile_url).slice(0, 300) : null, String(b.integration_id), String(b.name || "").slice(0, 120), JSON.stringify({ identifier: b.identifier, board: String(b.board || "").trim() || undefined }), now()).run();
+  await logActivity(env, `user:${user.id}`, "social.postiz", `Gắn kênh Postiz ${NETWORKS[network].label} "${b.name || ""}"`, siteId);
+  return json({ ok: true, network });
+}
+
+async function postizPublish(env: Env, a: Acc, post: { text: string; title: string | null; image_url: string | null; source_url: string; source_title: string | null }): Promise<{ id: string; url: string }> {
+  const ex = (() => { try { return a.extra ? JSON.parse(a.extra) as { identifier?: string; board?: string } : {}; } catch { return {}; } })();
+  const ident = ex.identifier || a.network;
+  const needsImage = a.network === "pinterest" || a.network === "instagram";
+  let image: { id: string; path: string; alt?: string }[] = [];
+  if (post.image_url) {
+    const up = await postiz(env, a.site_id, "/upload-from-url", { method: "POST", json: { url: post.image_url } });
+    if (up.data.path) image = [{ id: String(up.data.id || up.data.path), path: String(up.data.path), alt: (post.source_title || "").slice(0, 200) }];
+  }
+  if (needsImage && !image.length) throw new Error(`${NETWORKS[a.network].label} cần ảnh: bài không có ảnh dùng được.`);
+  // Mạng có ô link riêng thì không chèn link vào chữ; Instagram không bấm được link nên bỏ link
+  const withLink = !["pinterest", "facebook", "gmb", "instagram"].includes(a.network);
+  const settings: Record<string, unknown> = { __type: ident };
+  if (a.network === "x") settings.who_can_reply_post = "everyone";
+  if (a.network === "linkedin") settings.post_as_images_carousel = false;
+  if (a.network === "facebook") settings.url = post.source_url;
+  if (a.network === "pinterest") Object.assign(settings, { board: ex.board, title: (post.title || post.source_title || "").slice(0, 100), link: post.source_url });
+  if (a.network === "instagram") Object.assign(settings, { post_type: "post", collaborators: [] });
+  if (a.network === "gmb") Object.assign(settings, { topicType: "STANDARD", callToActionType: "LEARN_MORE", callToActionUrl: post.source_url });
+  const r = await postiz(env, a.site_id, "/posts", { method: "POST", json: { type: "now", date: new Date().toISOString(), shortLink: false, tags: [], posts: [{ integration: { id: a.target_id }, value: [{ content: withLink ? `${post.text}\n\n${post.source_url}` : post.text, image }], settings }] } });
+  const d = r.data as unknown;
+  const first = (Array.isArray(d) ? d[0] : undefined) as { postId?: string } | undefined;
+  return { id: String(first?.postId || ""), url: "" };
+}
+
+// ---------------- Pinterest: nhiều Pin mới cho cùng một bài ----------------
+// Mỗi bài tối đa 3 Pin thêm, cách nhau ít nhất 7 ngày, mỗi Pin một ảnh thật khác trong bài và tiêu đề khác (Pinterest ưu tiên Pin mới).
+async function freshPins(env: Env, siteId: number, lang: string, rules: { blocklist: string[]; language?: string }, actor: string): Promise<number> {
+  const acc = await env.DB.prepare("SELECT * FROM social_accounts WHERE site_id = ? AND network = 'pinterest' AND status = 'connected'").bind(siteId).first<Acc>();
+  if (!acc) return 0;
+  const rows = (await env.DB.prepare(`SELECT source_url, MAX(variant) AS v, MAX(posted_at) AS last, MAX(CASE WHEN variant = 0 THEN images END) AS images, MAX(source_title) AS title,
+      SUM(CASE WHEN status IN ('queued') THEN 1 ELSE 0 END) AS pending, GROUP_CONCAT(image_url, '\n') AS used, GROUP_CONCAT(title, '\n') AS titles
+    FROM social_posts WHERE site_id = ? AND network = 'pinterest' GROUP BY source_url HAVING SUM(CASE WHEN status = 'posted' THEN 1 ELSE 0 END) > 0 ORDER BY last LIMIT 20`).bind(siteId).all<{ source_url: string; v: number; last: number; images: string | null; title: string | null; pending: number; used: string | null; titles: string | null }>()).results;
+  for (const r of rows) {
+    if (r.pending || r.v >= 3 || now() - r.last < 7 * DAY) continue;
+    const imgs = (() => { try { return r.images ? JSON.parse(r.images) as string[] : []; } catch { return []; } })();
+    const used = new Set((r.used || "").split("\n"));
+    const img = imgs.find((x) => !used.has(x));
+    if (!img) continue;
+    const page = await fetchText(r.source_url, 600_000, 12000);
+    if (!page || page.status >= 400) continue;
+    const info = pageInfo(page.text, r.source_url);
+    const out = await aiJson<{ posts?: { network: string; text: string; title?: string }[] }>(env, { template: "social_caption", task: "social.fresh_pin", siteId, rules: writingRules(rules.language || lang, extractNumbers(`${info.title} ${info.description} ${info.excerpt}`), rules.blocklist), input: { title: info.title, description: info.description, excerpt: info.excerpt, language: rules.language || lang, networks: ["pinterest"], avoid_titles: (r.titles || "").split("\n").filter(Boolean) } });
+    const p = (out.posts || [])[0];
+    const text = String(p?.text || "").trim(), title = String(p?.title || "").trim().slice(0, 100);
+    const gate = gateSocial("pinterest", text, title, { excerpt: `${info.title} ${info.description} ${info.excerpt}`, blocklist: rules.blocklist });
+    if ((r.titles || "").split("\n").some((t) => t.trim().toLowerCase() === title.toLowerCase())) gate.problems.push({ rule: "duplicate", level: "block", message: "Tiêu đề trùng Pin trước." });
+    const ok = !gate.problems.some((x) => x.level === "block");
+    await env.DB.prepare("INSERT OR IGNORE INTO social_posts (site_id, network, source_url, variant, source_title, text, title, image_url, status, gate, created_at, updated_at) VALUES (?, 'pinterest', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(siteId, r.source_url, r.v + 1, r.title, text, title, img, ok ? "queued" : "blocked", JSON.stringify({ ok, problems: gate.problems }), now(), now()).run();
+    await logActivity(env, actor, "social.fresh_pin", `Soạn Pin mới #${r.v + 1} cho ${r.title || r.source_url}`, siteId);
+    return 1; // mỗi lượt một Pin mới
+  }
+  return 0;
+}
+
 // Phát hiện bài mới, soạn và đăng (giãn lịch: tối đa socialDailyCap bài/mạng/ngày, cách nhau ít nhất 2 giờ)
-export async function socialRun(env: Env, siteId: number, settings: OpSettings, actor: string, force = false): Promise<{ newUrls: number; queued: number; posted: number; failed: number; note?: string }> {
-  const s = await env.DB.prepare("SELECT id, domain, language FROM sites WHERE id = ?").bind(siteId).first<{ id: number; domain: string; language: string }>();
+export async function socialRun(env: Env, siteId: number, settings: OpSettings, actor: string, force = false): Promise<{ newUrls: number; queued: number; posted: number; failed: number; indexnow?: number; freshPins?: number; note?: string }> {
+  const s = await env.DB.prepare("SELECT id, domain, language, site_type FROM sites WHERE id = ?").bind(siteId).first<{ id: number; domain: string; language: string; site_type: string }>();
   if (!s) throw new HttpError(404, "Không tìm thấy site.", "not_found");
-  const accounts = (await env.DB.prepare("SELECT * FROM social_accounts WHERE site_id = ? AND status = 'connected'").bind(siteId).all<Acc>()).results.filter((a) => NETWORKS[a.network]?.posts);
-  if (!accounts.length) return { newUrls: 0, queued: 0, posted: 0, failed: 0, note: "Chưa kết nối mạng xã hội nào để đăng." };
   const rules = readRules((await env.DB.prepare("SELECT rules FROM recovery_cases WHERE site_id = ? AND status != 'archived' ORDER BY id DESC LIMIT 1").bind(siteId).first<{ rules: string }>())?.rules || "{}");
   // 1. Bài mới trên sitemap (lần đầu: ghi nhận bài cũ, không đăng lại)
   const urls = await sitemapUrls(s.domain.replace(/^www\./, ""));
@@ -381,6 +504,12 @@ export async function socialRun(env: Env, siteId: number, settings: OpSettings, 
   const fresh = urls.filter((u) => !known.has(u));
   const firstRun = known.size === 0;
   for (let i = 0; i < fresh.length; i += 50) await env.DB.batch(fresh.slice(i, i + 50).map((u) => env.DB.prepare("INSERT OR IGNORE INTO social_seen (site_id, url, first_seen) VALUES (?, ?, ?)").bind(siteId, u, now())));
+  // 2. Báo IndexNow cho bài mới (Bing, Yandex, Seznam, Naver)
+  let indexnow = 0;
+  if (!firstRun && fresh.length) { const r = await submitUrls(env, siteId, fresh, "bài mới").catch(() => ({ sent: 0 })); indexnow = r.sent; }
+  if (!settings.social) return { newUrls: firstRun ? 0 : fresh.length, queued: 0, posted: 0, failed: 0, indexnow, note: "Tự đăng mạng xã hội đang tắt." };
+  const accounts = (await env.DB.prepare("SELECT * FROM social_accounts WHERE site_id = ? AND status = 'connected'").bind(siteId).all<Acc>()).results.filter((a) => NETWORKS[a.network]?.posts && (a.via === "postiz" || DIRECT.has(a.network)) && (a.network !== "gmb" || s.site_type === "service"));
+  if (!accounts.length) return { newUrls: firstRun ? 0 : fresh.length, queued: 0, posted: 0, failed: 0, indexnow, note: firstRun ? `Lần đầu: ghi nhận ${fresh.length} bài có sẵn.` : "Chưa kết nối mạng xã hội nào để đăng." };
   let queued = 0;
   if (!firstRun) {
     for (const u of fresh.slice(0, 3)) {
@@ -400,15 +529,19 @@ export async function socialRun(env: Env, siteId: number, settings: OpSettings, 
         const text = String(p?.text || "").trim();
         const title = String(p?.title || info.title || "").trim().slice(0, 100);
         const gate = gateSocial(a.network, text, a.network === "pinterest" ? title : "", { excerpt: `${info.title} ${info.description} ${info.excerpt}`, blocklist: rules.blocklist });
-        if (a.network === "pinterest" && !info.image) gate.problems.push({ rule: "image", level: "block", message: "Bài không có ảnh đại diện (og:image): Pinterest cần ảnh." });
+        const img = info.image || info.images[0] || null;
+        if ((a.network === "pinterest" || a.network === "instagram") && !img) gate.problems.push({ rule: "image", level: "block", message: `Bài không có ảnh: ${NETWORKS[a.network].label} cần ảnh.` });
         const ok = !gate.problems.some((x) => x.level === "block");
-        await env.DB.prepare("INSERT OR IGNORE INTO social_posts (site_id, network, source_url, source_title, text, title, image_url, status, gate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-          .bind(siteId, a.network, u, info.title, text, title, info.image || null, ok ? "queued" : "blocked", JSON.stringify({ ok, problems: gate.problems }), now(), now()).run();
+        await env.DB.prepare("INSERT OR IGNORE INTO social_posts (site_id, network, source_url, variant, source_title, text, title, image_url, images, status, gate, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          .bind(siteId, a.network, u, info.title, text, title, img, JSON.stringify([...new Set([info.image, ...info.images].filter(Boolean))].slice(0, 8)), ok ? "queued" : "blocked", JSON.stringify({ ok, problems: gate.problems }), now(), now()).run();
         if (ok) queued++;
       }
     }
   }
-  // 2. Đăng bài đang chờ, giãn lịch
+  // 3. Pinterest: Pin mới cho bài cũ (ảnh khác, tiêu đề khác, cách 7 ngày)
+  let freshPinsN = 0;
+  if (settings.pinterestFresh) { try { freshPinsN = await freshPins(env, siteId, s.language, rules, actor); } catch (e) { console.error("fresh pins", (e as Error).message); } }
+  // 4. Đăng bài đang chờ, giãn lịch
   let posted = 0, failed = 0;
   for (const a of accounts) {
     const today = await env.DB.prepare("SELECT COUNT(*) AS n, MAX(posted_at) AS last FROM social_posts WHERE site_id = ? AND network = ? AND status = 'posted' AND posted_at > ?").bind(siteId, a.network, now() - DAY).first<{ n: number; last: number | null }>();
@@ -426,7 +559,7 @@ export async function socialRun(env: Env, siteId: number, settings: OpSettings, 
       await env.DB.prepare("UPDATE social_posts SET status = 'failed', error = ?, updated_at = ? WHERE id = ?").bind((e as Error).message.slice(0, 300), now(), p.id).run();
     }
   }
-  return { newUrls: firstRun ? 0 : fresh.length, queued, posted, failed, note: firstRun ? `Lần đầu: ghi nhận ${fresh.length} bài có sẵn, chỉ đăng bài mới từ giờ.` : undefined };
+  return { newUrls: firstRun ? 0 : fresh.length, queued, posted, failed, indexnow, freshPins: freshPinsN, note: firstRun ? `Lần đầu: ghi nhận ${fresh.length} bài có sẵn, chỉ đăng bài mới từ giờ.` : undefined };
 }
 
 // JSON-LD Organization với sameAs từ các profile (dán vào layout Astro / thay schema Rank Math)
