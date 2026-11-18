@@ -175,8 +175,21 @@ export function fakeSite(opts = {}) {
     if ((r = p.match(/^\/accounts\/[a-f0-9]{32}\/workers\/scripts\/([a-z0-9-]+)$/)) && m === "PUT") {
       const meta = JSON.parse(await init.body.get("metadata").text());
       const code = await init.body.get("worker.js").text();
-      cfs.workers[r[1]] = { bucket: meta.bindings.find((x) => x.type === "r2_bucket").bucket_name, code };
+      cfs.workers[r[1]] = { bucket: meta.bindings.find((x) => x.type === "r2_bucket")?.bucket_name, ae: meta.bindings.find((x) => x.type === "analytics_engine")?.dataset, code };
       return jsonRes({ success: true, result: { id: r[1] } });
+    }
+    if (/^\/accounts\/[a-f0-9]{32}\/analytics_engine\/sql$/.test(p) && m === "POST") {
+      // Gộp như câu SQL của app (mỗi điểm _sample_interval = 1)
+      const g = new Map();
+      for (const pt of cfs.ae || []) {
+        const d = Math.floor(pt.ts / 86400000), [t, path, u, x, dev] = pt.blobs, [d1, d2, d3, d4] = pt.doubles;
+        const k = [pt.indexes[0], d, t, path, u, x].join("\t");
+        const a = g.get(k) || { domain: pt.indexes[0], d, t, p: path, u, x, n: 0, s: 0, sc: 0, l: 0, ln: 0, mo: 0 };
+        a.n += d1; a.s += d2; a.sc += d3 * d1; a.l += d4 * d1; a.ln += d4 > 0 ? d1 : 0; a.mo += dev === "m" ? d1 : 0;
+        g.set(k, a);
+      }
+      cfs.aeQueries = (cfs.aeQueries || 0) + 1;
+      return jsonRes({ meta: [], data: [...g.values()], rows: g.size });
     }
     if (p === "/zones" && m === "GET") return jsonRes({ success: true, result: u.searchParams.get("name") === host ? [{ id: "zone1", name: host }] : [] });
     if (p === "/zones/zone1/workers/routes" && m === "GET") return jsonRes({ success: true, result: cfs.routes });
@@ -224,6 +237,15 @@ export function fakeSite(opts = {}) {
     }
     if (u.hostname === "api.github.com") return github(u, init);
     if (u.hostname === "api.cloudflare.com") return cloudflare(u, init);
+    const stRoute = u.hostname.replace(/^www\./, "") === host && cfs.routes.find((r) => /\/_[0-9a-f]{8}\/\*$/.test(r.pattern) && u.pathname.startsWith(r.pattern.slice(r.pattern.indexOf("/"), -1)));
+    if (stRoute) {
+      const w = cfs.workers[stRoute.script];
+      w.mod = w.mod || (await import(`data:text/javascript,${encodeURIComponent(w.code)}`)).default;
+      cfs.ae = cfs.ae || [];
+      const env = { AE: { writeDataPoint: (pt) => cfs.ae.push({ ...pt, ts: Date.now() }) } };
+      const req = new Request(u.href, { method: init?.method || "GET", headers: init?.headers || {}, body: init?.body });
+      return w.mod.fetch(req, env, {});
+    }
     if (u.hostname === host && u.pathname.startsWith("/images/") && cfs.routes.some((r) => r.pattern === `${host}/images/*`)) {
       const w = cfs.workers[cfs.routes.find((r) => r.pattern === `${host}/images/*`).script];
       const o = cfs.buckets[w.bucket]?.[decodeURIComponent(u.pathname.slice(8))];

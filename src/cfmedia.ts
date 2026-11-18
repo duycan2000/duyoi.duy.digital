@@ -38,14 +38,14 @@ export const IMAGE_WORKER = `export default {
 };
 `;
 
-async function creds(env: Env): Promise<{ token: string; account: string }> {
+export async function creds(env: Env): Promise<{ token: string; account: string }> {
   const token = await readSecret(env, "cloudflare_api_token");
   const account = String((await getSettingsMap(env)).cloudflare_account_id || "");
   if (!token || !/^[a-f0-9]{32}$/.test(account)) throw new HttpError(400, "Chưa có Cloudflare API token hoặc Account ID trong Cài đặt.", "no_cloudflare");
   return { token, account };
 }
 
-async function cf<T>(env: Env, path: string, init: { method?: string; body?: BodyInit; json?: unknown; headers?: Record<string, string> } = {}, ok404 = false): Promise<T | null> {
+export async function cf<T>(env: Env, path: string, init: { method?: string; body?: BodyInit; json?: unknown; headers?: Record<string, string> } = {}, ok404 = false): Promise<T | null> {
   const { token } = await creds(env);
   const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...(init.headers || {}) };
   if (init.json !== undefined) headers["Content-Type"] = "application/json";

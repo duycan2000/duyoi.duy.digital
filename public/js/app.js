@@ -5,6 +5,7 @@ import { MENU, ITEMS, PHASES } from "./menu.js";
 import { viewRecovery } from "./recovery.js";
 import { viewHq } from "./hq.js";
 import { viewStudio } from "./studio.js";
+import { viewStats } from "./stats.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
 const app = $("#app");
@@ -210,7 +211,7 @@ const ICON = {
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { analytics: "chart", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -393,7 +394,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }
@@ -695,7 +696,7 @@ const SECRET_HELP = {
   dataforseo_login: "app.dataforseo.com › API Access",
   dataforseo_password: "Mật khẩu API (khác mật khẩu đăng nhập web)",
   groq_api_key: "console.groq.com › API Keys (model free riêng tư)",
-  cloudflare_api_token: "Quyền: Account › Workers R2 Storage Edit + Workers Scripts Edit (kho ảnh site Astro); Zone › Zone Read + Workers Routes Edit + DNS Edit, chỉ các zone của site. Điền Account ID ở tab Model AI & chi phí.",
+  cloudflare_api_token: "Quyền: Account › Workers R2 Storage Edit + Workers Scripts Edit (kho ảnh, bộ đo site Astro) + Account Analytics Read (đọc số liệu); Zone › Zone Read + Workers Routes Edit + DNS Edit, chỉ các zone của site. Điền Account ID ở tab Model AI & chi phí.",
   google_api_key: "Knowledge Graph Search API (cho tab Entity)",
   github_token: "github.com › Settings › Developer settings › Fine-grained tokens. Chỉ chọn repo các site; quyền Contents: Read and write, Pull requests: Read and write.",
   google_service_account: "Google Cloud › IAM › Service accounts › Keys › JSON. Bật Search Console API và Google Analytics Data API, rồi thêm email service account vào property GSC (Restricted) và GA4 (Viewer)."

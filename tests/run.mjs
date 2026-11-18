@@ -1106,6 +1106,71 @@ await test("link affiliate trên site Astro: rà file Markdown trong repo, mở 
   }
 });
 
+await test("bộ đo riêng: thêm tên miền khi site chưa có, tự dựng Worker + route trên tên miền, đếm lượt xem/thời gian đọc/click affiliate, bỏ bot, gộp vào D1, báo cáo", async () => {
+  const envS = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const cS = client(envS);
+  await cS("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const cfState = { token: "cf-token", buckets: {}, workers: {}, routes: [] };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ cf: cfState });
+  try {
+    // Chưa có Cloudflare: vẫn thêm được, lấy script dán trước
+    let r = await cS("POST", "/api/stats/domains", { domain: "https://www.neu-site.de/abc" });
+    assert.equal(r.status, 201);
+    assert.equal(r.data.status, "pending");
+    assert.match(r.data.snippet, /^<script is:inline defer src="\/_[0-9a-f]{8}\/s\.js"><\/script>$/);
+    assert.equal((await cS("POST", "/api/stats/domains", { domain: "kein domain" })).status, 400);
+    await cS("PUT", "/api/settings", { values: { cloudflare_account_id: "0123456789abcdef0123456789abcdef" }, secrets: { cloudflare_api_token: "cf-token" } });
+    // Tên miền chưa có trong tài khoản Cloudflare: chờ, không lỗi
+    const neu = (await cS("GET", "/api/stats")).data.domains.find((x) => x.domain === "neu-site.de");
+    r = await cS("POST", `/api/stats/domains/${neu.id}/install`);
+    assert.equal(r.data.status, "pending");
+    assert.match(r.data.message, /chưa có trong tài khoản Cloudflare/);
+    // Tên miền có trong Cloudflare: dựng Worker riêng + route + kiểm tra
+    r = await cS("POST", "/api/stats/domains", { domain: "caddemo.de" });
+    assert.equal(r.data.status, "verified", r.data.message);
+    const path = r.data.snippet.match(/src="(\/_[0-9a-f]{8})\/s\.js"/)[1];
+    assert.ok(cfState.workers["duyoi-st-caddemo-de"], "Worker riêng cho tên miền");
+    assert.equal(cfState.workers["duyoi-st-caddemo-de"].ae, "duyoi_events");
+    assert.deepEqual(cfState.routes.map((x) => x.pattern).sort(), [`caddemo.de${path}/*`, `www.caddemo.de${path}/*`]);
+    const js = await (await globalThis.fetch(`https://caddemo.de${path}/s.js`)).text();
+    assert.match(js, /sponsored/);
+    assert.doesNotMatch(js, /cookie|localStorage/i, "không cookie");
+    // Trình duyệt gửi sự kiện
+    const UA = { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", Origin: "https://caddemo.de" };
+    const send = (o, h = UA) => globalThis.fetch(`https://www.caddemo.de${path}/e`, { method: "POST", headers: h, body: JSON.stringify(o) });
+    for (let i = 0; i < 3; i++) assert.equal((await send({ t: "pv", p: "/best-akkuschrauber/", r: i ? "google.com" : "" })).status, 204);
+    await send({ t: "leave", p: "/best-akkuschrauber/", s: 40, d: 80, l: 1200, f: 1 });
+    await send({ t: "leave", p: "/best-akkuschrauber/", s: 20, d: 90, l: 1200, f: 0 });
+    await send({ t: "aff", p: "/best-akkuschrauber/", u: "amzn.to/abc", x: "Bosch PSR 18" });
+    await send({ t: "pv", p: "/best-akkuschrauber/" }, { "User-Agent": "Googlebot/2.1", Origin: "https://caddemo.de" });
+    await send({ t: "pv", p: "/best-akkuschrauber/" }, { "User-Agent": "Mozilla/5.0", Origin: "https://evil.example" });
+    await send({ t: "hack", p: "/" });
+    assert.equal(cfState.ae.length, 6, "bỏ bot, sai Origin, loại sự kiện lạ");
+    assert.ok(cfState.ae.every((p) => p.indexes[0] === "caddemo.de" && !JSON.stringify(p).includes("evil")));
+    // Gộp vào D1 rồi xem báo cáo
+    assert.equal((await cS("POST", "/api/stats/refresh")).status, 200);
+    const rep = (await cS("GET", "/api/stats/report?domain=caddemo.de&days=7")).data;
+    assert.equal(rep.totals.views, 3);
+    assert.equal(rep.totals.aff, 1);
+    assert.equal(rep.totals.avgSec, 60, "thời gian đọc cộng cả lần quay lại tab, chia cho 1 lượt");
+    assert.equal(rep.pages[0].scroll, 80);
+    assert.equal(rep.pages[0].mobile, 100);
+    assert.equal(rep.pages[0].lcp, 1200);
+    assert.equal(rep.totals.affRate, 33.3);
+    assert.deepEqual(rep.clicks[0], { kind: "aff", target: "amzn.to/abc", label: "Bosch PSR 18", n: 1, pages: 1 });
+    assert.deepEqual(rep.sources.map((x) => [x.source, x.views]), [["google.com", 2], ["(trực tiếp)", 1]]);
+    // Gộp lại không bị cộng dồn
+    await cS("POST", "/api/stats/refresh");
+    assert.equal((await cS("GET", "/api/stats/report?domain=caddemo.de&days=7")).data.totals.views, 3);
+    const list = (await cS("GET", "/api/stats")).data;
+    assert.ok(list.cfReady);
+    assert.equal(list.domains.find((x) => x.domain === "caddemo.de").status, "verified");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 await test("đường dẫn không phải /api trả giao diện (SPA)", async () => {
   const res = await worker.fetch(new Request(BASE + "/sites/12"), env);
   assert.equal(res.status, 200);

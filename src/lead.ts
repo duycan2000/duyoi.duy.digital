@@ -2,6 +2,7 @@
 // (chỉ các việc agent sẵn có làm được). Anh chọn việc và bấm Giao việc → vào hàng việc agent_jobs.
 // Việc nhẹ (nghiên cứu từ khoá, tạo chủ đề) chạy ngay; việc nặng (dàn ý, viết, chấm, quét lại) chạy bằng cron hoặc nút Chạy ngay.
 
+import { statsForLead } from "./stats";
 import { aiJson } from "./ai";
 import { logActivity } from "./activity";
 import { approveIdeaCore, briefCore, createIdeaCore, draftCore, researchCore, reviewCore, waitingInterview } from "./content";
@@ -46,6 +47,7 @@ export async function leadState(env: Env) {
       monthly_article_limit: rules.maxNewArticlesPerMonth, used_this_month: used?.n || 0, autopilot: rules.autopilot,
       service_pages: hubs.map((h) => ({ path: h.path, title: h.title })),
       documents: docs?.n || 0,
+      analytics: await statsForLead(env, s.domain).catch(() => null),
       profile: { summary: profile.summary, services: profile.services.slice(0, 10), products: profile.products.slice(0, 10).map((p) => p.name), facts: profile.facts.length, ideas_from_documents: profile.ideas.slice(0, 10) },
       ideas: ideas.map((i) => {
         const f = formatOf(String(i.format));

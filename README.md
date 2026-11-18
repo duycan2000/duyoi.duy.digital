@@ -168,6 +168,17 @@ Cần plugin Duy Ơi Connector **1.2.0** trở lên (thêm chế độ `wrap_lin
 
 Tab **Đội agent** trong Agent HQ có thêm **Văn phòng 3D**: mỗi agent một bàn trong 4 phòng; đang làm thì chuyển động, có việc chờ hiện dấu "!", bị chặn hiện đỏ, rảnh thì mờ. Bấm bàn để xem chi tiết; nút **Dạng thẻ** quay lại kiểu cũ (điện thoại mặc định dạng thẻ).
 
+### Số liệu site (bộ đo riêng cho site Astro)
+
+Menu **Số liệu site**. Site tĩnh không tự biết khách làm gì, nên app dựng một bộ đo nhỏ trên chính tên miền của site:
+
+- Mỗi tên miền một đường dẫn ngẫu nhiên (`/_xxxxxxxx/`) và một Worker riêng `duyoi-st-…` gắn route trên tên miền đó. Không có tên miền đo dùng chung, nên các site không lộ liên hệ với nhau.
+- Script khoảng 1,3 KB, không cookie, không lưu IP. Đo: lượt xem, nguồn khách (tên miền giới thiệu, `utm_source`), thời gian đọc thật (chỉ tính lúc tab đang mở), độ cuộn, LCP, click link affiliate (`rel="sponsored"` hoặc `data-dy-aff`), link ra ngoài, CTA (vùng `data-dy-cta`). Bot và Origin lạ bị bỏ.
+- **Site chưa có vẫn làm trước được**: nhập tên miền, lấy dòng script dán vào `<head>` layout Astro (`<script is:inline defer src="/_xxxxxxxx/s.js"></script>`). Khi tên miền vào tài khoản Cloudflare, cron tự dựng Worker và route (thử lại mỗi giờ). Trước đó script chỉ báo 404, không ảnh hưởng site. Site đã thêm vào app thì tên miền tự có trong danh sách.
+- Dữ liệu thô nằm ở Workers Analytics Engine (dataset `duyoi_events`, giữ 3 tháng); cron gộp theo ngày vào D1 mỗi giờ để giữ lâu. Báo cáo theo trang: lượt xem, đọc trung bình, cuộn, click affiliate và tỉ lệ, CTA, LCP, % mobile; trang có từ 50 lượt xem mà dưới 1% click affiliate được đánh dấu.
+- Trưởng nhóm đọc số liệu 28 ngày của từng site (trang nhiều người đọc, tỉ lệ click affiliate) khi lập kế hoạch.
+- Token Cloudflare cần thêm **Account › Account Analytics Read** (đọc số liệu) bên cạnh Workers Scripts Edit, Zone Read, Workers Routes Edit. Mỗi lượt xem tốn khoảng 2–3 request Worker; gói Workers Free có 100.000 request/ngày cho cả tài khoản.
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.
@@ -211,6 +222,7 @@ src/
   dashboard.ts   tổng quan, tạm dừng, cron
   activity.ts    nhật ký
   http.ts        JSON, cookie, chặn CSRF, kiểm tra dữ liệu
+  stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request
 migrations/      schema D1
 public/          giao diện (static assets, không tính request Worker)

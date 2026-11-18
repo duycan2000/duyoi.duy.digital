@@ -16,6 +16,7 @@ import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from ".
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
+import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
 import { apiApply as affApply, apiDecide as affDecide, apiDeleteLink as affDelete, apiLinks as affLinks, apiRollback as affRollback, apiSaveLink as affSave, apiScan as affScan } from "./affiliate";
 import { runAutopilot } from "./autopilot";
 import type { CronEvent, Env, ExecCtx } from "./types";
@@ -81,6 +82,13 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
 
   // Agent HQ và cấp Quản lý
   if (path === "/api/hq" && m === "GET") return hqView(env);
+  if (path === "/api/stats" && m === "GET") return apiStats(env);
+  if (path === "/api/stats/report" && m === "GET") return apiStatsReport(env, url);
+  if (path === "/api/stats/domains" && m === "POST") return apiAddStatsDomain(env, req, user);
+  if (path === "/api/stats/refresh" && m === "POST") return apiRefreshStats(env, user);
+  const stMatch = path.match(/^\/api\/stats\/domains\/(\d+)(\/install)?$/);
+  if (stMatch && m === "POST" && stMatch[2]) return apiInstallStats(env, user, Number(stMatch[1]));
+  if (stMatch && m === "DELETE" && !stMatch[2]) return apiDeleteStats(env, user, Number(stMatch[1]));
   if (path === "/api/manager/prompts" && m === "GET") return listPrompts(env);
   const prMatch = path.match(/^\/api\/manager\/prompts\/([a-z_]+)$/);
   if (prMatch && m === "PUT") return reviewPrompt(env, req, user, prMatch[1]!);
@@ -193,6 +201,6 @@ export default {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
     // Một lượt cron tối đa ~10 phút việc nặng: hàng việc của Trưởng nhóm trước, chế độ tự động dùng phần thời gian còn lại
     const started = Date.now();
-    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
+    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).then(() => processStats(env, started + 11 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
   }
 };

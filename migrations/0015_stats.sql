@@ -1,0 +1,6 @@
+-- Bộ đo riêng cho site (Astro/Cloudflare): mỗi tên miền một đường dẫn ngẫu nhiên, dữ liệu thô ở Workers Analytics Engine (giữ 3 tháng),
+-- cron gộp theo ngày vào D1 để giữ lâu và cho agent đọc.
+CREATE TABLE IF NOT EXISTS stats_domains (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'pending', message TEXT, last_try INTEGER, verified_at INTEGER, last_event_at INTEGER, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS stats_daily (domain TEXT NOT NULL, day TEXT NOT NULL, path TEXT NOT NULL, views REAL NOT NULL DEFAULT 0, visits REAL NOT NULL DEFAULT 0, engaged REAL NOT NULL DEFAULT 0, scroll REAL NOT NULL DEFAULT 0, aff REAL NOT NULL DEFAULT 0, outbound REAL NOT NULL DEFAULT 0, cta REAL NOT NULL DEFAULT 0, lcp REAL NOT NULL DEFAULT 0, lcp_n REAL NOT NULL DEFAULT 0, mobile REAL NOT NULL DEFAULT 0, PRIMARY KEY (domain, day, path));
+CREATE TABLE IF NOT EXISTS stats_clicks (domain TEXT NOT NULL, day TEXT NOT NULL, path TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', n REAL NOT NULL DEFAULT 0, PRIMARY KEY (domain, day, path, kind, target));
+CREATE TABLE IF NOT EXISTS stats_sources (domain TEXT NOT NULL, day TEXT NOT NULL, source TEXT NOT NULL, views REAL NOT NULL DEFAULT 0, PRIMARY KEY (domain, day, source));
