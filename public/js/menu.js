@@ -1,4 +1,5 @@
-// Menu giữ nguyên cấu trúc bản demo đã duyệt. live: true là màn đã chạy thật; còn lại hiện kế hoạch theo giai đoạn.
+// Menu theo bản demo đã duyệt. live: true là màn đã chạy thật. Mục chưa làm (có phase) không hiện ở menu, chỉ ở trang Lộ trình.
+// hidden: true là đường dẫn phụ trỏ vào một màn khác (ví dụ các tab của Off-page), vẫn mở được nhưng không chiếm chỗ trên menu.
 
 export const PHASES = {
   1: "Giai đoạn 1 · Nền tảng",
@@ -22,7 +23,7 @@ export const MENU = [
     { id: "sites", label: "Site", live: true },
     { id: "context", label: "Project context", phase: 3, plan: ["Giọng văn, tác giả, đối tượng đọc của từng site", "Luật riêng: site Đức không email lạnh, bài review cần ảnh test thật"] },
     { id: "topical", label: "Topical & Semantic", live: true },
-    { id: "entity", label: "Entity & social", live: true }
+    { id: "entity", label: "Entity & social", live: true, hidden: true }
   ]},
   { group: "Nội dung", key: "content", items: [
     { id: "keywords", label: "Keyword Hub", phase: 2, plan: ["Từ khoá theo cụm, intent, volume, KD", "Câu hỏi thật: PAA (mở 4 lớp), autocomplete, diễn đàn"] },
@@ -33,14 +34,13 @@ export const MENU = [
   { group: "Kỹ thuật & an toàn", key: "tech", items: [
     { id: "audit", label: "Site audit", phase: 2, plan: ["DataForSEO On-Page: lỗi theo mức Critical / Warning / Notice, URL bị ảnh hưởng", "Sửa theo nền tảng: agent tự sửa nội dung, WordPress qua plugin, Astro gom thành prompt"] },
     { id: "tech", label: "Kiểm tra kỹ thuật", phase: 2, plan: ["Core Web Vitals (CrUX), index, sitemap, robots, schema"] },
-    { id: "penalty", label: "Penalty & cập nhật", phase: 5, plan: ["Đối chiếu tụt traffic với lịch Google update", "Soạn disavow khi có link spam"] }
   ]},
   { group: "Off-page", key: "off", items: [
-    { id: "offpage", label: "Off-page team", live: true },
-    { id: "prospects", label: "Prospects", live: true },
-    { id: "mail", label: "Email outreach", live: true },
-    { id: "backlinks", label: "Backlink", live: true },
-    { id: "citations", label: "Citations", live: true }
+    { id: "offpage", label: "Off-page", live: true },
+    { id: "prospects", label: "Prospects", live: true, hidden: true },
+    { id: "mail", label: "Email outreach", live: true, hidden: true },
+    { id: "backlinks", label: "Backlink", live: true, hidden: true },
+    { id: "citations", label: "Citations", live: true, hidden: true }
   ]},
   { group: "AI & tăng trưởng", key: "ai", items: [
     { id: "aivis", label: "AI visibility", phase: 5, plan: ["Theo dõi site có được ChatGPT, AI Overview, AI Mode, Perplexity nhắc tới không"] },
@@ -50,6 +50,7 @@ export const MENU = [
     { id: "schedule", label: "Lịch chạy", phase: 2, plan: ["Mỗi site lệch phút cố định, hàng đợi theo loại việc, hạn mức từng nhà cung cấp"] },
     { id: "prompts", label: "Prompt & token", phase: 5, plan: ["Prompt Optimizer: cache phần tĩnh, rút ngữ cảnh, gom lô; thử A/B trước khi áp dụng"] },
     { id: "members", label: "Thành viên", live: true, admin: true },
+    { id: "roadmap", label: "Lộ trình", live: true },
     { id: "activity", label: "Nhật ký", live: true },
     { id: "settings", label: "Cài đặt", live: true },
     { id: "account", label: "Tài khoản", live: true }

@@ -250,6 +250,8 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   throw new HttpError(404, "Không có API này.", "not_found");
 }
 
+const CRON_A = "*/15 * * * *", CRON_B = "5-59/15 * * * *", CRON_C = "10-59/15 * * * *";
+
 export default {
   async fetch(req: Request, env: Env, ctx?: ExecCtx): Promise<Response> {
     const url = new URL(req.url);
@@ -269,10 +271,28 @@ export default {
     await handleInbound(message, env);
   },
 
-  async scheduled(_event: CronEvent, env: Env, ctx: ExecCtx): Promise<void> {
-    ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
-    // Một lượt cron tối đa ~10 phút việc nặng: hàng việc của Trưởng nhóm trước, chế độ tự động dùng phần thời gian còn lại
+  async scheduled(event: CronEvent, env: Env, ctx: ExecCtx): Promise<void> {
+    // Ba lịch cron lệch nhau 5 phút, mỗi lịch là một lần chạy riêng với hạn mức riêng (D1: 1000 truy vấn mỗi lần chạy trên gói trả phí).
+    // Mỗi bước có catch riêng để một bước lỗi không chặn các bước sau.
     const started = Date.now();
-    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).then(() => processStats(env, started + 11 * 60000)).then(() => runOffpage(env, started + 13 * 60000)).then(() => runMonitor(env, started + 14 * 60000)).then(() => runSemantic(env, started + 14 * 60000 + 30000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
+    const step = async (name: string, fn: () => Promise<unknown>) => { try { await fn(); } catch (e) { console.error(`cron ${name} failed`, (e as Error).message); } };
+    const group = event.cron === CRON_B ? "b" : event.cron === CRON_C ? "c" : event.cron === CRON_A ? "a" : "all";
+    ctx.waitUntil((async () => {
+      if (group === "a" || group === "all") {
+        await step("heartbeat", () => runCron(env));
+        await step("recovery", () => processRecoveryQueue(env));
+        await step("jobs", () => processJobs(env, 2, started + 5 * 60000));
+        await step("autopilot", () => runAutopilot(env, 3, started + 9 * 60000));
+        await step("prs", () => syncOpenPrs(env));
+      }
+      if (group === "b" || group === "all") {
+        await step("stats", () => processStats(env, started + 2 * 60000));
+        await step("offpage", () => runOffpage(env, started + 8 * 60000));
+      }
+      if (group === "c" || group === "all") {
+        await step("monitor", () => runMonitor(env, started + 5 * 60000));
+        await step("semantic", () => runSemantic(env, started + 9 * 60000));
+      }
+    })());
   }
 };

@@ -33,7 +33,7 @@
   "send_email": [{ "name": "EMAIL" }],
 
   // Cron 15 phút: chỉ ghi nhịp và (từ giai đoạn 2) đẩy việc đến hạn vào hàng đợi.
-  "triggers": { "crons": ["*/15 * * * *"] },
+  "triggers": { "crons": ["*/15 * * * *", "5-59/15 * * * *", "10-59/15 * * * *"] },
 
   // Tên miền riêng. Zone duy.digital phải nằm trong cùng tài khoản Cloudflare.
   "routes": [{ "pattern": "duyoi.duy.digital", "custom_domain": true }],

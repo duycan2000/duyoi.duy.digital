@@ -411,7 +411,7 @@ export async function apiSavePostiz(env: Env, req: Request, user: User, siteId: 
 export async function apiPostizIntegrations(env: Env, user: User, siteId: number): Promise<Response> {
   if (user.role === "viewer") throw new HttpError(403, "Tài khoản chỉ xem.", "forbidden");
   let r;
-  try { r = await postiz(env, siteId, "/integrations"); } catch (e) { throw new HttpError(502, (e as Error).message, "postiz"); }
+  try { r = await postiz(env, siteId, "/integrations"); } catch (e) { const m = (e as Error).message; throw new HttpError(/chưa nhập/.test(m) ? 400 : 502, m, "postiz"); }
   const list = (Array.isArray(r.data) ? r.data : (r.data.integrations as unknown[]) || []) as { id: string; name?: string; identifier?: string; providerIdentifier?: string; picture?: string; disabled?: boolean; profile?: string; customer?: { name?: string } }[];
   const linked = new Map((await env.DB.prepare("SELECT target_id, site_id FROM social_accounts WHERE via = 'postiz'").all<{ target_id: string; site_id: number }>()).results.map((x) => [x.target_id, x.site_id]));
   return json({ items: list.map((i) => { const ident = String(i.identifier || i.providerIdentifier || ""); return { id: i.id, name: i.name || i.profile || i.id, identifier: ident, network: POSTIZ_MAP[ident] || null, allowed: !!POSTIZ_MAP[ident] && !i.disabled, customer: i.customer?.name || null, linkedSite: linked.get(i.id) ?? null }; }) });

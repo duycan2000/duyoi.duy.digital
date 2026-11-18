@@ -4,7 +4,7 @@ Nền tảng AI agent làm SEO, AEO và GEO cho nhiều site. Chạy hoàn toàn
 
 App **không dựng site**. Anh dựng site bằng Claude, rồi khai báo site ở đây để các agent nghiên cứu, viết bài, theo dõi thứ hạng, làm off-page.
 
-> Bản này là **giai đoạn 1 (nền tảng)**: màn tạo admin, đăng nhập, quản lý site, cài đặt API key được mã hoá, tạm dừng hệ thống, nhật ký, cron.
+> Các màn đang chạy nằm trên menu; màn chưa làm nằm ở trang **Lộ trình** (không hiện trên menu).
 > Menu đã có đủ các mục như bản demo. Mục nào chưa làm thì hiện nội dung sẽ có và thuộc giai đoạn nào. Xem [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Deploy lần đầu
@@ -258,7 +258,7 @@ node tests/serve.mjs   # http://localhost:8788, SETUP_TOKEN=local-setup-token
 
 ```bash
 npm run typecheck
-npm test               # 20 test cho tạo admin, đăng nhập, khoá khi sai nhiều lần, site, key mã hoá, tạm dừng, cron
+npm test               # test API (node:sqlite, fake site/API ngoài) + test plugin WordPress (PHP)
 ```
 
 Test chạy Worker ngay trong Node, dùng `node:sqlite` thay cho D1, nên cần Node 22.5 trở lên.
@@ -267,7 +267,7 @@ Test chạy Worker ngay trong Node, dùng `node:sqlite` thay cho D1, nên cần 
 
 ```
 src/
-  index.ts       định tuyến /api/* và cron
+  index.ts       định tuyến /api/* và cron (3 lịch lệch 5 phút: A việc nội dung/phục hồi, B số liệu + off-page, C theo dõi + semantic; mỗi lịch một lần chạy riêng để giữ dưới hạn mức 1000 truy vấn D1)
   auth.ts        tạo admin, đăng nhập, phiên, đổi mật khẩu
   crypto.ts      PBKDF2 cho mật khẩu, AES-GCM cho API key
   sites.ts       quản lý site

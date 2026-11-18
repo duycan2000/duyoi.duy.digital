@@ -214,7 +214,7 @@ const ICON = {
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { analytics: "chart", rankings: "trend", offpage: "users", prospects: "search", mail: "pen", backlinks: "link", citations: "list", entity: "globe", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { roadmap: "queue", topical: "grid", recovery: "shield", analytics: "chart", rankings: "trend", offpage: "users", prospects: "search", mail: "pen", backlinks: "link", citations: "list", entity: "globe", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -255,7 +255,7 @@ function renderShell() {
       <button type="button" class="icon-btn" id="side-mini" aria-label="Thu gọn menu" title="Thu gọn menu">${icon(ICON.dot)}</button>
       <button type="button" class="icon-btn" id="side-close" aria-label="Đóng menu">${icon(ICON.close)}</button></div>
       <div class="side-nav">
-        ${MENU.map((g) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${g.items.filter(canSee).map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}" title="${esc(i.label)}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span>${i.live ? "" : `<span class="soon" title="${esc(PHASES[i.phase] || "")}">Sắp có</span>`}</a>`).join("")}</div>`).join("")}
+        ${MENU.map((g) => [g, g.items.filter((i) => canSee(i) && i.live && !i.hidden)]).filter(([, items]) => items.length).map(([g, items]) => `<div class="group g-${g.key}"><p><span>${esc(g.group)}</span></p>${items.map((i) => `<a class="item" href="#/${i.id}" data-view="${i.id}" title="${esc(i.label)}">${icon(itemIcon(i.id))}<span>${esc(i.label)}</span></a>`).join("")}</div>`).join("")}
       </div>
     </nav>
     <main class="main" id="main" tabindex="-1"></main>
@@ -397,7 +397,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), topical: (m, a) => viewSemantic(m, a, { state, icon, ICON }), rankings: (m, a) => viewRankings(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), ...Object.fromEntries(["offpage", "prospects", "mail", "backlinks", "citations", "entity"].map((id) => [id, (m, a) => viewOffpage(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs, item: ITEMS[id] })])), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { roadmap: (m) => viewRoadmap(m), recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), topical: (m, a) => viewSemantic(m, a, { state, icon, ICON }), rankings: (m, a) => viewRankings(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), ...Object.fromEntries(["offpage", "prospects", "mail", "backlinks", "citations", "entity"].map((id) => [id, (m, a) => viewOffpage(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs, item: ITEMS[id] })])), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }
@@ -463,6 +463,9 @@ function actIcon(a) {
   if (k.startsWith("recovery.")) return ["t-warn", "trend"];
   if (k.startsWith("content.") || k.startsWith("docs.")) return ["t-ok", "pen"];
   if (k.startsWith("lead.")) return ["", "bolt"];
+  if (k === "monitor.alert") return ["t-err", "trend"];
+  if (k.startsWith("monitor.") || k.startsWith("semantic.") || k.startsWith("stats.")) return ["t-info", "chart"];
+  if (/^(offpage|outreach|social|prospect|manual|citation|links?|indexnow)\./.test(k)) return ["t-ok", "link"];
   if (k.startsWith("settings.") || k.startsWith("auth.") || k.startsWith("user.")) return ["t-info", "shield"];
   return ["", "list"];
 }
@@ -543,6 +546,12 @@ function actText(a) {
 function actLink(a) {
   const admin = state.user?.role === "admin";
   if (a.action.startsWith("recovery.")) return "#/recovery";
+  if (a.action.startsWith("monitor.")) return a.siteId ? `#/rankings/${a.siteId}` : "#/rankings";
+  if (a.action.startsWith("semantic.")) return a.siteId ? `#/topical/${a.siteId}` : "#/topical";
+  if (a.action.startsWith("stats.")) return "#/analytics";
+  if (/^(offpage|outreach|social|prospect|manual|citation|links?|indexnow)\./.test(a.action)) return "#/offpage";
+  if (a.action.startsWith("affiliate.")) return "#/content";
+  if (a.action.startsWith("content.") || a.action.startsWith("docs.")) return "#/content";
   if (a.siteId) return `#/sites/${a.siteId}`;
   if (a.action.startsWith("settings.")) return /_key|_login|_password|_token/.test(a.detail || "") ? "#/settings/keys" : "#/settings/models";
   if (a.action.startsWith("user.")) return admin ? "#/members" : "#/activity";
@@ -1022,6 +1031,20 @@ async function viewActivity(main) {
   <div class="page">
     <div class="page-head"><div><h2>Nhật ký</h2><p>Việc người và agent đã làm. Giá trị API key không bao giờ được ghi vào đây.</p></div></div>
     <div class="card">${activity.length ? `<div class="activity">${activity.map(actRow).join("")}</div>` : `<p class="note">Chưa có hoạt động.</p>`}</div>
+  </div>`;
+}
+
+// ---------------- Lộ trình: các màn chưa làm ----------------
+
+function viewRoadmap(main) {
+  const items = MENU.flatMap((g) => g.items.filter((i) => !i.live).map((i) => ({ ...i, group: g.group })));
+  const byPhase = {};
+  for (const i of items) (byPhase[i.phase] ||= []).push(i);
+  main.innerHTML = `
+  <div class="page">
+    <div class="page-head"><div><h2>Lộ trình</h2><p>Các màn chưa làm. Không hiện trên menu để menu gọn; khi làm xong sẽ lên menu.</p></div></div>
+    ${Object.keys(byPhase).sort().map((ph) => `<div class="card soon-card"><span class="phase">${esc(PHASES[ph] || "")}</span>
+      ${byPhase[ph].map((i) => `<h3>${esc(i.label)} <small class="note">${esc(i.group)}</small></h3><ul>${(i.plan || []).map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`).join("")}</div>`).join("")}
   </div>`;
 }
 

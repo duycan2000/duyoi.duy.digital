@@ -395,39 +395,43 @@ export async function runMonitor(env: Env, deadline: number): Promise<void> {
   await syncGoogleUpdates(env).catch((e) => console.error("google updates", (e as Error).message));
   const google = await hasGoogle(env);
   const dfs = !!(await readSecret(env, "dataforseo_login"));
-  const sites = (await env.DB.prepare("SELECT id, name, domain, platform, market, language, status FROM sites WHERE status = 'active' ORDER BY id").all<SiteRow>()).results;
-  let gscRuns = 0;
+  // Site lâu chưa xử lý nhất đi trước; mỗi lượt tối đa 4 site có việc (giữ số truy vấn D1 mỗi lần chạy dưới hạn mức)
+  const sites = (await env.DB.prepare("SELECT s.id, s.name, s.domain, s.platform, s.market, s.language, s.status FROM sites s LEFT JOIN mon_state m ON m.site_id = s.id WHERE s.status = 'active' ORDER BY COALESCE(m.updated_at, 0), s.id").all<SiteRow>()).results;
+  let gscRuns = 0, worked = 0;
   for (const s of sites) {
-    if (Date.now() > deadline) return;
+    if (Date.now() > deadline || worked >= 4) return;
     const { settings, state } = await readMon(env, s);
     const due = (at: number | undefined, every: number) => !at || now() - at > every;
+    const patch: Partial<MonState> = {};
     let changed = false;
     try {
-      // Tối đa 3 site đọc Search Console mỗi lượt cron (giới hạn số câu lệnh D1 mỗi lần chạy)
-      if (google && gscRuns < 3 && due(state.gscAt, 20 * 3600000)) {
+      // Tối đa 2 site đọc Search Console mỗi lượt
+      if (google && gscRuns < 2 && due(state.gscAt, 20 * 3600000)) {
         gscRuns++;
-        try { const g = await syncGsc(env, s, settings); await setState(env, s.id, { gscAt: now(), gscError: null, source: "gsc" }); await logActivity(env, "agent:rank_tracker", "monitor.gsc", `${s.domain}: Search Console ${g.days} ngày, ${g.pages} trang, ${g.queries} truy vấn`, s.id); }
-        catch (e) { await setState(env, s.id, { gscAt: now(), gscError: (e as Error).message.slice(0, 200) }); }
+        try { const g = await syncGsc(env, s, settings); Object.assign(patch, { gscAt: now(), gscError: null, source: "gsc" }); await logActivity(env, "agent:rank_tracker", "monitor.gsc", `${s.domain}: Search Console ${g.days} ngày, ${g.pages} trang, ${g.queries} truy vấn`, s.id); }
+        catch (e) { Object.assign(patch, { gscAt: now(), gscError: (e as Error).message.slice(0, 200) }); }
         changed = true;
       }
-      if (Date.now() > deadline) return;
-      if (dfs) {
+      if (dfs && Date.now() < deadline) {
         await seedFromContent(env, s, settings);
         const n = await rankRun(env, s, settings, deadline);
-        if (n) { await setState(env, s.id, { rankAt: now() }); await logActivity(env, "agent:rank_tracker", "monitor.rank", `${s.domain}: kiểm vị trí ${n} từ khoá`, s.id); changed = true; }
-        if (settings.backlinks && due(state.blAt, 7 * DAY) && Date.now() < deadline) { await backlinkRun(env, s, "agent:backlink_watch"); await setState(env, s.id, { blAt: now() }); changed = true; }
+        if (n) { patch.rankAt = now(); await logActivity(env, "agent:rank_tracker", "monitor.rank", `${s.domain}: kiểm vị trí ${n} từ khoá`, s.id); changed = true; }
+        if (settings.backlinks && due(state.blAt, 7 * DAY) && Date.now() < deadline) { await backlinkRun(env, s, "agent:backlink_watch"); patch.blAt = now(); changed = true; }
       }
       const recheck = await env.DB.prepare("SELECT id FROM mon_alerts WHERE site_id = ? AND status IN ('open', 'watching') AND recheck_at < ? LIMIT 1").bind(s.id, now()).first();
       if ((changed || recheck || due(state.detectAt, DAY)) && Date.now() < deadline) {
         await handleAlerts(env, s, settings, await detect(env, s), "agent:drop_doctor");
-        await setState(env, s.id, { detectAt: now() });
+        patch.detectAt = now(); changed = true;
       }
-      if (state.lastError) await setState(env, s.id, { lastError: null });
+      if (state.lastError) patch.lastError = null;
     } catch (e) {
       const msg = (e as Error).message.slice(0, 300);
       if (state.lastError !== msg) await logActivity(env, "agent:monitor", "monitor.error", `${s.domain}: ${msg}`, s.id);
-      await setState(env, s.id, { lastError: msg, blAt: state.blAt && !due(state.blAt, 7 * DAY) ? state.blAt : now(), rankAt: now() });
+      // Lỗi thì lùi việc nặng lại một tuần (backlink) để không gọi lỗi liên tục
+      Object.assign(patch, { lastError: msg, blAt: state.blAt && !due(state.blAt, 7 * DAY) ? state.blAt : now(), detectAt: now() });
+      changed = true;
     }
+    if (changed) { worked++; await setState(env, s.id, patch); }
   }
 }
 

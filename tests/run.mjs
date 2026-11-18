@@ -1508,8 +1508,14 @@ await test("theo dõi thứ hạng: Search Console, vị trí từ khoá, backli
     assert.equal((await cM("POST", `/api/monitor/${site.id}/keywords`, { keywords: "noch ein keyword" })).status, 400);
     // Cron chạy được với mọi thứ đã cấu hình
     const waits = [];
+    // Lịch C (theo dõi + semantic) là một lần chạy riêng; lịch A không chạy phần theo dõi
+    await envM.DB.prepare("UPDATE mon_state SET state = '{}', updated_at = 0").run();
     await worker.scheduled({ cron: "*/15 * * * *", scheduledTime: Date.now() }, envM, { waitUntil: (pr) => waits.push(pr) });
+    await Promise.all(waits.splice(0));
+    assert.equal(JSON.parse((await envM.DB.prepare("SELECT state FROM mon_state WHERE site_id = ?").bind(site.id).first()).state).detectAt, undefined);
+    await worker.scheduled({ cron: "10-59/15 * * * *", scheduledTime: Date.now() }, envM, { waitUntil: (pr) => waits.push(pr) });
     await Promise.all(waits);
+    assert.ok(JSON.parse((await envM.DB.prepare("SELECT state FROM mon_state WHERE site_id = ?").bind(site.id).first()).state).detectAt > 0);
   } finally { globalThis.fetch = realFetch; }
 });
 
