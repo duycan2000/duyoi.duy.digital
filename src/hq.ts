@@ -33,6 +33,7 @@ const OFFPAGE_AGENTS = [
 const MONITOR_AGENTS = [
   { id: "rank_tracker", name: "Rank Tracker", icon: "chart", role: "Mỗi ngày đọc Search Console (click, hiển thị, vị trí theo trang và truy vấn); vài ngày một lần kiểm vị trí từ khoá theo dõi qua DataForSEO SERP, kèm AI Overview và 3 site đứng đầu." },
   { id: "backlink_watch", name: "Backlink Watch", icon: "link", role: "Mỗi tuần đo số domain trỏ về, tìm backlink mới và mất. Link dofollow mới vào Link Monitor; link mất mà trang đích 404 thành việc chuyển hướng 301 cho anh." },
+  { id: "semantic", name: "Semantic SEO", icon: "layers", role: "Mỗi tuần chấm từng trang theo Topical Authority: 4 câu đầu nói rõ chủ đề, khối nội dung rõ (heading, bảng, danh sách), giá trị cụ thể và nguồn; bản đồ Core/Outer (bài kiến thức phải link về trang kiếm tiền); truy vấn mở rộng chưa có chỗ trả lời; loại site Google đang cho lên top; thực thể web (sameAs, mạng xã hội)." },
   { id: "drop_doctor", name: "Drop Doctor", icon: "shield", role: "Phát hiện tụt đột ngột (traffic −30% so với 4 tuần trước, từ khoá rơi khỏi top 10, trang mất hiển thị), kiểm lỗi kỹ thuật, đối chiếu bản cập nhật Google, mất backlink, rồi mở phương án: sửa lỗi, chờ rollout xong, hoặc mở ca Phục hồi." }
 ];
 
@@ -119,9 +120,11 @@ export async function hqView(env: Env): Promise<Response> {
   });
   const mon = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM mon_keywords WHERE active = 1) AS kws, (SELECT COUNT(*) FROM mon_keywords WHERE active = 1 AND pos <= 10) AS top10, (SELECT COUNT(*) FROM mon_alerts WHERE status = 'open') AS open,
     (SELECT COUNT(*) FROM mon_alerts WHERE status = 'watching') AS watching, (SELECT COUNT(*) FROM mon_bl_changes WHERE kind = 'lost' AND seen_at > ?1) AS lost7, (SELECT COUNT(*) FROM mon_bl_changes WHERE kind = 'new' AND seen_at > ?1) AS new7`).bind(Date.now() - 7 * 86400000).first<Record<string, number>>() || {} as Record<string, number>;
+  const sem = await env.DB.prepare("SELECT COUNT(*) AS n, AVG(score) AS avg FROM sem_audits a WHERE id = (SELECT MAX(id) FROM sem_audits WHERE site_id = a.site_id)").first<{ n: number; avg: number | null }>();
   const monDetail: Record<string, string> = {
     rank_tracker: `${mon.kws || 0} từ khoá theo dõi · ${mon.top10 || 0} trong top 10`,
     backlink_watch: `${mon.new7 || 0} link mới · ${mon.lost7 || 0} mất (7 ngày)`,
+    semantic: sem?.n ? `${sem.n} site đã chấm · điểm TB ${Math.round(sem.avg || 0)}/100` : "Chưa chấm site nào",
     drop_doctor: `${mon.open || 0} cảnh báo mở${mon.watching ? ` · ${mon.watching} đang theo dõi` : ""}`
   };
   const monitor = MONITOR_AGENTS.map((a) => ({ ...a, zone: "monitor", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt: false, state: agentState(a.id, { waiting: a.id === "drop_doctor" ? mon.open || 0 : 0 }), waiting: a.id === "drop_doctor" ? mon.open || 0 : 0, detail: monDetail[a.id] || "" }));

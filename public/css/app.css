@@ -773,7 +773,7 @@ tr.st-low td { background: rgba(255, 180, 0, .08); }
 .r-offpage .room-desks { grid-template-columns: repeat(4, 1fr); }
 .zone.z-offpage { grid-column: 1 / -1; }
 .r-monitor { background-color: #eef7ff; grid-column: 1 / -1; }
-.r-monitor .room-desks { grid-template-columns: repeat(3, 1fr); }
+.r-monitor .room-desks { grid-template-columns: repeat(4, 1fr); }
 .zone.z-monitor { grid-column: 1 / -1; }
 
 /* Off-page team */
@@ -849,3 +849,12 @@ details.mk > summary { cursor: pointer; display: flex; gap: 8px; align-items: ce
 .rk-plan li.rk-done { color: var(--muted); }
 .rk-list { padding-left: 20px; margin: 0; font-size: .88rem; }
 .rk-list li { word-break: break-word; }
+
+/* Topical & Semantic */
+.sm-block { margin-top: 16px; }
+.sm-pages td small { display: block; color: var(--muted); }
+.sm-pages td:nth-child(3) { min-width: 320px; }
+.sm-bars { display: grid; gap: 6px; margin: 8px 0 12px; max-width: 520px; }
+.sm-bars div { display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 8px; background: var(--grad-soft); }
+tr.sm-on td { background: rgba(145, 85, 253, .06); }
+.sm-title { margin: 0; flex: 1; }

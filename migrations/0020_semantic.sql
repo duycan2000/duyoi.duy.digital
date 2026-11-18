@@ -1,0 +1,4 @@
+-- Semantic SEO (Topical Authority): điểm từng trang, bản đồ Core/Outer, truy vấn mở rộng, Source Context, Web Entity
+CREATE TABLE IF NOT EXISTS sem_audits (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE, score INTEGER NOT NULL, data TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_sem_audits ON sem_audits(site_id, id);
+CREATE TABLE IF NOT EXISTS sem_pages (site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE, url TEXT NOT NULL, role TEXT NOT NULL, title TEXT, h1 TEXT, words INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0, checks TEXT NOT NULL DEFAULT '[]', headings TEXT NOT NULL DEFAULT '[]', links TEXT NOT NULL DEFAULT '[]', status INTEGER, checked_at INTEGER NOT NULL, PRIMARY KEY (site_id, url));

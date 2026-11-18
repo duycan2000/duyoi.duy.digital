@@ -5,6 +5,7 @@
 // Khung định dạng (spec) được ghép vào prompt qua {{FORMAT}} và tính vào phiên bản prompt: sửa khung là phải duyệt lại.
 
 import { extractNumbers } from "./recovery-extract";
+import { draftChecks } from "./semantic";
 import type { GateProblem } from "./recovery-gate";
 import type { SiteRules } from "./recovery-rules";
 
@@ -208,6 +209,7 @@ export function checkFormat(o: { format: FormatId; title: string; html: string; 
   if ((o.format === "how_to" || o.format === "guide") && o.slots.length && !o.slots.some((s) => s.image)) out.push({ rule: "images", level: "warn", message: "Chưa có ảnh thật nào cho bài này: nên thêm ảnh các bước quan trọng." });
   const amazon = items.some((p) => [p.url, ...p.links.map((l) => l.url)].some((u) => /amazon\.|amzn\.to/i.test(u)));
   if (amazon) out.push({ rule: "amazon", level: "warn", message: "Có link Amazon: site cần câu \"As an Amazon Associate I earn from qualifying purchases\" (trong bài hoặc chân trang); không tải ảnh từ Amazon lên site; không ghi giá cố định." });
+  out.push(...draftChecks(o.title, o.html, o.rules.language));
   return out;
 }
 

@@ -21,7 +21,7 @@ export const MENU = [
   { group: "Site", key: "site", items: [
     { id: "sites", label: "Site", live: true },
     { id: "context", label: "Project context", phase: 3, plan: ["Giọng văn, tác giả, đối tượng đọc của từng site", "Luật riêng: site Đức không email lạnh, bài review cần ảnh test thật"] },
-    { id: "topical", label: "Topical map", phase: 3, plan: ["Import PDF nghiên cứu từ khoá (Semrush, Keyword Planner) và topical map có sẵn", "Sơ đồ hub, money, support; bài đã đăng và sẽ đăng"] },
+    { id: "topical", label: "Topical & Semantic", live: true },
     { id: "entity", label: "Entity & social", live: true }
   ]},
   { group: "Nội dung", key: "content", items: [

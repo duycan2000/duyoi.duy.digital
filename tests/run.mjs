@@ -1485,7 +1485,7 @@ await test("theo dõi thứ hạng: Search Console, vị trí từ khoá, backli
     assert.equal(JSON.parse(cs.rules).gscProperty, "sc-domain:caddemo.de");
     // HQ có phòng Theo dõi và cảnh báo chờ anh
     const hq = (await cM("GET", "/api/hq")).data;
-    assert.deepEqual(hq.zones.monitor.map((a) => a.id), ["rank_tracker", "backlink_watch", "drop_doctor"]);
+    assert.deepEqual(hq.zones.monitor.map((a) => a.id), ["rank_tracker", "backlink_watch", "semantic", "drop_doctor"]);
     assert.ok(hq.monitorAsks.some((a) => a.siteId === site.id));
     const list = (await cM("GET", "/api/monitor")).data;
     assert.equal(list.sites.find((s) => s.id === site.id).alerts, 1);
@@ -1510,6 +1510,42 @@ await test("theo dõi thứ hạng: Search Console, vị trí từ khoá, backli
     const waits = [];
     await worker.scheduled({ cron: "*/15 * * * *", scheduledTime: Date.now() }, envM, { waitUntil: (pr) => waits.push(pr) });
     await Promise.all(waits);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+await test("Semantic SEO: chấm trang (4 câu đầu, khối nội dung), bản đồ Core/Outer, truy vấn mở rộng, Source Context, thực thể web; Gác cổng nhắc bản nháp", async () => {
+  const envS = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const cS = client(envS);
+  await cS("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const site = (await cS("POST", "/api/sites", { name: "CAD Demo", domain: "caddemo.de", platform: "wordpress", siteType: "service", market: "de", language: "de" })).data.site;
+  const t = Date.now();
+  await envS.DB.prepare("INSERT INTO mon_queries (site_id, query, page, clicks7, clicks_prev, impr7, pos7, pos_prev, updated_at) VALUES (?, 'cad symbole elektro liste', 'https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/', 1, 1, 80, 9, 9, ?), (?, 'stundensatz freelancer zeichner', 'https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/', 0, 0, 120, 30, 30, ?)").bind(site.id, t, site.id, t).run();
+  await envS.DB.prepare("INSERT INTO mon_keywords (site_id, keyword, source, pos, features, checked_at, created_at) VALUES (?, 'cad symbole', 'gsc', 5, ?, ?, ?)").bind(site.id, JSON.stringify({ top: ["www.reddit.com", "de.wikipedia.org", "cad-forum.example"], features: [] }), t, t).run();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({});
+  try {
+    assert.equal((await cS("GET", `/api/semantic/${site.id}`)).data.audit, null);
+    const r = await cS("POST", `/api/semantic/${site.id}/run`);
+    assert.equal(r.status, 200);
+    assert.ok(r.data.pages >= 5);
+    const v = (await cS("GET", `/api/semantic/${site.id}`)).data;
+    assert.ok(v.audit.coverage.core >= 1 && v.audit.coverage.outer >= 1);
+    const roles = Object.fromEntries(v.pages.map((p) => [new URL(p.url).pathname, p.role]));
+    assert.equal(roles["/cad-dienstleistung-tga/"], "core");
+    assert.equal(roles["/12-wichtige-cad-symbole-fur-architektur/"], "outer");
+    assert.ok(v.pages.every((p) => p.score >= 0 && p.score <= 100));
+    assert.ok(v.pages.some((p) => p.checks.some((c) => ["outer_to_core", "orphan", "core_support"].includes(c.code))));
+    // Truy vấn mở rộng: gần chủ đề → heading; lệch chủ đề, nhiều hiển thị → trang riêng
+    const fo = Object.fromEntries(v.audit.fanout.map((q) => [q.query, q.action]));
+    assert.equal(fo["cad symbole elektro liste"], "heading");
+    assert.equal(fo["stundensatz freelancer zeichner"], "page");
+    // Source Context: top là diễn đàn/bách khoa, không có site doanh nghiệp
+    assert.equal(v.audit.sourceContext.mine, "business");
+    assert.deepEqual(v.audit.sourceContext.mismatch, ["cad symbole"]);
+    assert.ok(v.audit.entity.tasks.some((x) => /Organization|mạng xã hội/.test(x)));
+    const list = (await cS("GET", "/api/semantic")).data.sites;
+    assert.equal(list.find((x) => x.id === site.id).score, v.audit.score);
+    assert.ok((await cS("GET", "/api/hq")).data.zones.monitor.some((a) => a.id === "semantic"));
   } finally { globalThis.fetch = realFetch; }
 });
 

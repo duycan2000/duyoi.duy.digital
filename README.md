@@ -212,6 +212,17 @@ Menu **Số liệu site**. Site tĩnh không tự biết khách làm gì, nên a
 - Trưởng nhóm đọc số liệu 28 ngày của từng site (trang nhiều người đọc, tỉ lệ click affiliate) khi lập kế hoạch.
 - Token Cloudflare cần thêm **Account › Account Analytics Read** (đọc số liệu) bên cạnh Workers Scripts Edit, Zone Read, Workers Routes Edit. Mỗi lượt xem tốn khoảng 2–3 request Worker; gói Workers Free có 100.000 request/ngày cho cả tài khoản.
 
+### Topical & Semantic SEO
+
+Menu **Topical & Semantic**. Khung kiểm tra dựa trên cách Koray Gübür mô tả Topical Authority (độ bao phủ chủ đề × dữ liệu lịch sử / chi phí truy xuất; mô hình của ông, không phải công thức Google công bố). Agent **Semantic SEO** chấm mỗi site 7 ngày một lần (tối đa 40 trang, ưu tiên trang có traffic), không tốn lệnh AI hay DataForSEO:
+
+- Chi phí truy xuất: 4 câu đầu phải nói rõ chủ đề của H1, 2 mục đầu gắn với chủ đề, đúng một H1, heading không nhảy cấp, không có đoạn văn trên 120 từ, bài dài phải có bảng/danh sách, mục lục cho bài dài, giá trị cụ thể (số đo, thời gian, chi phí) và trích dẫn nguồn, bỏ câu sáo rỗng.
+- Bản đồ Core (trang kiếm tiền) / Outer (trang kiến thức): Outer phải link về Core, Core cần bài Outer hỗ trợ, trang mồ côi.
+- Truy vấn mở rộng (query fan-out) từ Search Console: truy vấn đã có hiển thị nhưng trang chưa có heading trả lời → gợi ý thêm heading, một đoạn, hay trang riêng.
+- Source Context: loại site đang đứng top 3 các từ khoá theo dõi (diễn đàn, sàn, giáo dục, site đánh giá, doanh nghiệp…), lấy từ Rank Tracker; báo từ khoá mà top không có loại site như của anh.
+- Thực thể web: schema Organization và sameAs trên trang chủ, kênh mạng xã hội còn đăng, citations.
+- Bản nháp trong Content Studio: Gác cổng nhắc (không chặn) khi mở bài chưa nói rõ chủ đề, tường chữ, thiếu cấu trúc. Sửa trang đã đăng đi qua ca Phục hồi.
+
 ### Thứ hạng & cảnh báo (theo dõi và phản ứng khi tụt)
 
 Menu **Thứ hạng & cảnh báo**, mỗi site một trang. Ba agent trong phòng "Theo dõi & cảnh báo" của Agent HQ:
@@ -270,6 +281,7 @@ src/
   manual.ts      link building làm tay: chuẩn bị nơi, đoạn văn, tìm ảnh, 404 còn backlink
   indexnow.ts    báo IndexNow khi có bài mới hoặc trang vừa sửa
   stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
+  semantic.ts    chấm semantic từng trang, Core/Outer, truy vấn mở rộng, Source Context, thực thể web
   monitor.ts     Search Console, vị trí từ khoá, backlink; phát hiện tụt, chẩn đoán, phương án
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request
 migrations/      schema D1
