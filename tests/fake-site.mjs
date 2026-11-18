@@ -86,6 +86,7 @@ export function fakeSite(opts = {}) {
   async function google(u, init) {
     if (u.hostname === "oauth2.googleapis.com") return jsonRes({ access_token: "tok", expires_in: 3600 });
     const body = init?.body ? JSON.parse(init.body) : {};
+    if (u.hostname === "www.googleapis.com" && /^\/webmasters\/v3\/sites\/[^/]+$/.test(u.pathname)) return opts.gscDeny ? jsonRes({ error: { code: 403, message: "User does not have sufficient permission" } }, 403) : jsonRes({ siteUrl: decodeURIComponent(u.pathname.split("/").pop()), permissionLevel: "siteRestrictedUser" });
     if (u.hostname === "www.googleapis.com" && opts.mon?.gsc) { const rows = opts.mon.gsc(body); if (rows) return jsonRes({ rows }); }
     if (u.hostname === "www.googleapis.com") {
       const rows = { "/12-wichtige-cad-symbole-fur-architektur/": 110, "/cad-software-vergleich-beste-programme/": 101, "/cad-dienstleistung-tga/": 4, "/": 20 };
@@ -155,7 +156,9 @@ export function fakeSite(opts = {}) {
     const sys = body.messages[0].content;
     seen.push({ template: sys.slice(0, 60), body });
     let content;
-    if (/read ONE document supplied by the website owner/.test(sys)) {
+    if (/rewrite the SEO title tag and meta description of ONE existing page/.test(sys)) {
+      content = opts.qwBad ? { title: "Wir haben getestet: beste CAD Symbole", description: "Kurz.", reason: "x" } : { title: `${user.queries?.[0]?.query ? user.queries[0].query.replace(/^./, (c) => c.toUpperCase()) : "CAD Symbole"}: Übersicht für Architektur und TGA`, description: "Die wichtigsten CAD-Symbole für Grundrisse, Elektro und TGA auf einen Blick, mit Erklärung zu Bedeutung und Einsatz im Plan. Jetzt nachschlagen.", reason: "Đưa truy vấn chính lên đầu title, description nói rõ người đọc được gì." };
+    } else if (/read ONE document supplied by the website owner/.test(sys)) {
       content = { doc_type: "company_profile", title: "Firmenprofil", summary_vi: "Hồ sơ công ty CAD tại Đức.", audience: "TGA-Planer", tone: "sachlich", services: ["CAD-Dienstleistung TGA", "BIM-Modellierung"], products: [{ name: "Revit-Vorlagenpaket", specs: "Revit 2025", notes: "" }], facts: [{ text: "Seit 2009 über 1200 Projekte abgeschlossen", page: 2 }, { text: "Team aus 18 Zeichnern", page: 3 }], banned: ["Billiganbieter"], ideas: [{ title: "CAD Layer Vorlagen anlegen", keyword: "cad layer vorlagen", format: "how_to", why_vi: "Tài liệu mô tả quy trình." }] };
     } else if (/extract facts for ONE article from the texts of pages/.test(sys)) {
       content = { facts: [{ text: "Die HOAI gliedert die Planung in die Leistungsphasen 1 bis 9.", source_url: user.sources[0].url, source_title: "TGA-Ratgeber" }, { text: "Erfundene Quelle", source_url: "https://fake.example/x", source_title: "x" }] };
@@ -218,6 +221,7 @@ export function fakeSite(opts = {}) {
     const p = u.pathname.replace("/client/v4", "");
     const m = init?.method || "GET";
     let r;
+    if (/^(\/accounts\/[a-f0-9]{32})?\/(user\/)?tokens\/verify$/.test(p)) return jsonRes({ success: true, result: { status: "active" } });
     if ((r = p.match(/^\/accounts\/[a-f0-9]{32}\/r2\/buckets\/([a-z0-9-]+)$/)) && m === "GET") return cfs.buckets[r[1]] ? jsonRes({ success: true, result: { name: r[1] } }) : jsonRes({ success: false, errors: [{ code: 10006, message: "bucket not found" }] }, 404);
     if (/^\/accounts\/[a-f0-9]{32}\/r2\/buckets$/.test(p) && m === "POST") { const name = JSON.parse(init.body).name; cfs.buckets[name] = {}; return jsonRes({ success: true, result: { name } }); }
     if ((r = p.match(/^\/accounts\/[a-f0-9]{32}\/r2\/buckets\/([a-z0-9-]+)\/objects\/(.+)$/)) && m === "PUT") {
@@ -259,7 +263,8 @@ export function fakeSite(opts = {}) {
     const R = `/repos/${gh.repo}`;
     const p = decodeURIComponent(u.pathname);
     const ref = u.searchParams.get("ref") || "main";
-    if (p === R && m === "GET") return jsonRes({ default_branch: "main", full_name: gh.repo });
+    if (p === "/user") return jsonRes({ login: "duy" });
+    if (p === R && m === "GET") return jsonRes({ default_branch: "main", full_name: gh.repo, permissions: { push: true } });
     let r;
     if ((r = p.match(new RegExp(`^${R}/git/trees/(.+)$`)))) return jsonRes({ tree: Object.keys(gh.branches[r[1]] || {}).map((path) => ({ path, type: "blob" })) });
     if ((r = p.match(new RegExp(`^${R}/git/ref/heads/(.+)$`)))) return gh.branches[r[1]] ? jsonRes({ object: { sha: `sha-${r[1]}` } }) : jsonRes({ message: "Not Found" }, 404);
@@ -326,7 +331,9 @@ export function fakeSite(opts = {}) {
       const o = cfs.buckets[w.bucket]?.[decodeURIComponent(u.pathname.slice(8))];
       return o ? new Response(o.bytes, { status: 200, headers: { "content-type": o.type } }) : new Response("Not found", { status: 404 });
     }
+    if (u.hostname === "openrouter.ai" && u.pathname === "/api/v1/key") return (init?.headers?.Authorization || "").length > 10 ? jsonRes({ data: { usage: 1.25, limit: null, limit_remaining: null } }) : jsonRes({ error: "no" }, 401);
     if (u.hostname === "openrouter.ai") return openrouter(init);
+    if (u.hostname === "api.dataforseo.com" && u.pathname === "/v3/appendix/user_data") return jsonRes({ status_code: 20000, tasks: [{ result: [{ money: { balance: opts.dfsBalance ?? 12.5 } }] }] });
     if (u.hostname === "api.dataforseo.com") return dataforseo(u, init);
     const g = await google(u, init);
     if (g) return g;

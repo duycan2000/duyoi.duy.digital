@@ -8,6 +8,7 @@ import { gpost, hasGoogle } from "./google";
 import { kindOf, mergeUpdates, type GoogleUpdate } from "./google-updates";
 import { HttpError, json, now, readJson } from "./http";
 import { submitUrls } from "./indexnow";
+import { findQuickWins } from "./quickwins";
 import { reclaimCore } from "./manual";
 import { parseRules, readRules } from "./recovery-rules";
 import { getSettingsMap, readSecret } from "./settings";
@@ -408,7 +409,7 @@ export async function runMonitor(env: Env, deadline: number): Promise<void> {
       // Tối đa 2 site đọc Search Console mỗi lượt
       if (google && gscRuns < 2 && due(state.gscAt, 20 * 3600000)) {
         gscRuns++;
-        try { const g = await syncGsc(env, s, settings); Object.assign(patch, { gscAt: now(), gscError: null, source: "gsc" }); await logActivity(env, "agent:rank_tracker", "monitor.gsc", `${s.domain}: Search Console ${g.days} ngày, ${g.pages} trang, ${g.queries} truy vấn`, s.id); }
+        try { const g = await syncGsc(env, s, settings); Object.assign(patch, { gscAt: now(), gscError: null, source: "gsc" }); await findQuickWins(env, s.id).catch(() => null); await logActivity(env, "agent:rank_tracker", "monitor.gsc", `${s.domain}: Search Console ${g.days} ngày, ${g.pages} trang, ${g.queries} truy vấn`, s.id); }
         catch (e) { Object.assign(patch, { gscAt: now(), gscError: (e as Error).message.slice(0, 200) }); }
         changed = true;
       }
@@ -538,7 +539,7 @@ export async function apiMonitorRun(env: Env, req: Request, user: User, siteId: 
   const actor = `user:${user.id}`;
   if (what === "gsc") {
     if (!(await hasGoogle(env))) throw new HttpError(400, "Chưa có Google service account trong Cài đặt.", "no_google");
-    try { const r = await syncGsc(env, s, settings); await setState(env, s.id, { gscAt: now(), gscError: null, source: "gsc" }); return json(r); }
+    try { const r = await syncGsc(env, s, settings); await setState(env, s.id, { gscAt: now(), gscError: null, source: "gsc" }); await findQuickWins(env, s.id).catch(() => null); return json(r); }
     catch (e) { await setState(env, s.id, { gscError: (e as Error).message.slice(0, 200) }); throw new HttpError(502, `Search Console (${settings.gscProperty}): ${(e as Error).message}. Thêm email service account vào property với quyền xem.`, "gsc_error"); }
   }
   if (what === "rank") { await seedFromContent(env, s, settings); const n = await rankRun(env, s, settings, Date.now() + 25000, 15); await setState(env, s.id, { rankAt: now() }); return json({ checked: n }); }

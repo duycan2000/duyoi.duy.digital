@@ -572,3 +572,13 @@ export async function entityLd(env: Env, siteId: number, brand: string): Promise
     { "@type": "WebSite", "@id": `${d}/#website`, url: `${d}/`, name: brand, publisher: { "@id": `${d}/#organization` } }
   ] };
 }
+
+// Cho trang Kiểm tra kết nối: Postiz có cấu hình không, gọi được không
+export async function postizCheck(env: Env, siteId: number): Promise<{ configured: boolean; count?: number; error?: string }> {
+  if (!(await postizCfg(env, siteId))) return { configured: false };
+  try {
+    const r = await postiz(env, siteId, "/integrations");
+    const list = (Array.isArray(r.data) ? r.data : ((r.data as { integrations?: unknown[] }).integrations || [])) as unknown[];
+    return { configured: true, count: list.length };
+  } catch (e) { return { configured: true, error: (e as Error).message.slice(0, 200) }; }
+}

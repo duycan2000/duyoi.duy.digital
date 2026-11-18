@@ -8,6 +8,9 @@ import { viewStudio } from "./studio.js";
 import { viewStats } from "./stats.js";
 import { viewRankings } from "./rankings.js";
 import { viewSemantic } from "./semantic.js";
+import { viewHealth } from "./health.js";
+import { viewQuickWins } from "./quickwins.js";
+import { mountReport } from "./report.js";
 import { viewOffpage } from "./offpage.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
@@ -214,7 +217,7 @@ const ICON = {
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { roadmap: "queue", topical: "grid", recovery: "shield", analytics: "chart", rankings: "trend", offpage: "users", prospects: "search", mail: "pen", backlinks: "link", citations: "list", entity: "globe", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { health: "bolt", wins: "spark", roadmap: "queue", topical: "grid", recovery: "shield", analytics: "chart", rankings: "trend", offpage: "users", prospects: "search", mail: "pen", backlinks: "link", citations: "list", entity: "globe", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -397,7 +400,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { roadmap: (m) => viewRoadmap(m), recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), topical: (m, a) => viewSemantic(m, a, { state, icon, ICON }), rankings: (m, a) => viewRankings(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), ...Object.fromEntries(["offpage", "prospects", "mail", "backlinks", "citations", "entity"].map((id) => [id, (m, a) => viewOffpage(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs, item: ITEMS[id] })])), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { health: (m, a) => viewHealth(m, a, { state }), wins: (m, a) => viewQuickWins(m, a, { state }), roadmap: (m) => viewRoadmap(m), recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), topical: (m, a) => viewSemantic(m, a, { state, icon, ICON }), rankings: (m, a) => viewRankings(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), ...Object.fromEntries(["offpage", "prospects", "mail", "backlinks", "citations", "entity"].map((id) => [id, (m, a) => viewOffpage(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs, item: ITEMS[id] })])), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }
@@ -715,7 +718,7 @@ const SECRET_HELP = {
 };
 
 async function viewSettings(main, args = []) {
-  if (args[0] === "keys" || args[0] === "models") state.tabs.settings = args[0];
+  if (args[0] === "keys" || args[0] === "models" || args[0] === "report") state.tabs.settings = args[0];
   const s = await api("/api/settings");
   const admin = state.user.role === "admin";
   const v = s.values;
@@ -727,7 +730,7 @@ async function viewSettings(main, args = []) {
       : `Worker chưa có secret <code>ENCRYPTION_KEY</code> nên chưa lưu được API key.`}
       Cách đặt: Cloudflare › Workers &amp; Pages › duyoi › Settings › Variables and Secrets › Add, chọn Type <b>Secret</b>, tên <code>ENCRYPTION_KEY</code>. Lưu xong tải lại trang này.</div>`}
     <div class="card tabbed">
-      ${tabsNav("settings", [["keys", "API key", "shield"], ["models", "Model AI & chi phí", "sliders"]], "keys")}
+      ${tabsNav("settings", [["keys", "API key", "shield"], ["models", "Model AI & chi phí", "sliders"], ["report", "Báo cáo tuần", "clock"]], "keys")}
       <div class="tab-body" ${panelAttr("settings", "keys", "keys")}>
       ${Object.entries(s.secrets).map(([k, info]) => `
         <div class="secret-row">
@@ -752,9 +755,11 @@ async function viewSettings(main, args = []) {
       <div class="msg" id="values-msg" hidden></div>
       ${admin ? `<div class="toolbar"><button class="primary" type="submit">Lưu cài đặt</button></div>` : ""}
     </form>
+    <div class="tab-body" id="report-pane" ${panelAttr("settings", "report", "keys")}><p class="note">Đang tải…</p></div>
     </div>
   </div>`;
   bindTabs(main, "settings");
+  mountReport($("#report-pane", main), admin);
   // Mở từ Tổng quan: đưa con trỏ vào đúng ô key cần nhập
   const want = args[1] && $(`[data-secret="${CSS.escape(args[1])}"]`, main);
   if (want && !want.disabled) { want.scrollIntoView({ block: "center" }); want.focus({ preventScroll: true }); want.closest(".secret-row").classList.add("hl"); }

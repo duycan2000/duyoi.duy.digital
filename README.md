@@ -212,6 +212,12 @@ Menu **Số liệu site**. Site tĩnh không tự biết khách làm gì, nên a
 - Trưởng nhóm đọc số liệu 28 ngày của từng site (trang nhiều người đọc, tỉ lệ click affiliate) khi lập kế hoạch.
 - Token Cloudflare cần thêm **Account › Account Analytics Read** (đọc số liệu) bên cạnh Workers Scripts Edit, Zone Read, Workers Routes Edit. Mỗi lượt xem tốn khoảng 2–3 request Worker; gói Workers Free có 100.000 request/ngày cho cả tài khoản.
 
+### Kiểm tra kết nối, Quick wins, báo cáo tuần
+
+- **Kiểm tra kết nối** (menu Hệ thống): gọi thật từng dịch vụ, chỉ đọc. Chung: ENCRYPTION_KEY, cron, OpenRouter (key, đã dùng), DataForSEO (số dư), Google service account, Cloudflare token, GitHub token, binding EMAIL. Từng site: trang chủ mở được, quyền Search Console với property, plugin WordPress (phiên bản, Rank Math), repo GitHub ghi được, file khoá IndexNow, bộ đo riêng còn nhận dữ liệu, Email Routing của hộp thư outreach, token mạng xã hội còn hạn, Postiz. Tự chạy mỗi ngày; lỗi mới vào Nhật ký và báo cáo tuần.
+- **Quick wins** (menu Nội dung): trang vị trí 4–15, từ 50 hiển thị/tuần, CTR thấp hơn 60% trung vị CTR của các trang cùng nhóm vị trí trên chính site (không dùng bảng CTR ngoài). Tự tìm lại sau mỗi lần đọc Search Console. Agent viết title/meta mới (prompt `quickwin_meta`, cần duyệt ở Agent HQ › Quản lý), Gác cổng kiểm (blocklist, số liệu không nguồn, lời hứa "đã test/số 1", emoji, độ dài, có truy vấn chính), anh sửa tay được, duyệt từng trang. WordPress ghi qua plugin vào Rank Math (sao lưu, hoàn tác được); Astro mở pull request sửa frontmatter. Sau 7 ngày hiện CTR và vị trí trước/sau. Trang vị trí 8–15 có CTR bình thường được gợi ý đẩy bằng nội dung và link nội bộ.
+- **Báo cáo tuần** (Cài đặt › Báo cáo tuần): mặc định tắt. Anh nhập người nhận và địa chỉ gửi (tên miền đã bật ở Cloudflare Email Service › Sending), chọn thứ và giờ. Mỗi site: click 7 ngày so với tuần trước, từ khoá lên/xuống, backlink mới/mất, cảnh báo, việc chờ duyệt, quick wins, điểm semantic; kèm lỗi kết nối. Có Xem trước và Gửi ngay.
+
 ### Topical & Semantic SEO
 
 Menu **Topical & Semantic**. Khung kiểm tra dựa trên cách Koray Gübür mô tả Topical Authority (độ bao phủ chủ đề × dữ liệu lịch sử / chi phí truy xuất; mô hình của ông, không phải công thức Google công bố). Agent **Semantic SEO** chấm mỗi site 7 ngày một lần (tối đa 40 trang, ưu tiên trang có traffic), không tốn lệnh AI hay DataForSEO:
@@ -281,6 +287,9 @@ src/
   manual.ts      link building làm tay: chuẩn bị nơi, đoạn văn, tìm ảnh, 404 còn backlink
   indexnow.ts    báo IndexNow khi có bài mới hoặc trang vừa sửa
   stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
+  health.ts      kiểm tra kết nối (chỉ đọc)
+  quickwins.ts   quick wins từ Search Console: title/meta mới qua Gác cổng
+  report.ts      báo cáo tuần qua email
   semantic.ts    chấm semantic từng trang, Core/Outer, truy vấn mở rộng, Source Context, thực thể web
   monitor.ts     Search Console, vị trí từ khoá, backlink; phát hiện tụt, chẩn đoán, phương án
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request

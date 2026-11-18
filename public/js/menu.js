@@ -28,7 +28,7 @@ export const MENU = [
   { group: "Nội dung", key: "content", items: [
     { id: "keywords", label: "Keyword Hub", phase: 2, plan: ["Từ khoá theo cụm, intent, volume, KD", "Câu hỏi thật: PAA (mở 4 lớp), autocomplete, diễn đàn"] },
     { id: "content", label: "Content Studio", live: true },
-    { id: "wins", label: "Quick wins", phase: 3, plan: ["Trang vị trí 8–20, CTR thấp, bài tụt hạng", "Đề xuất title/meta, làm mới bài"] },
+    { id: "wins", label: "Quick wins", live: true },
     { id: "pages", label: "So sánh & free tool", phase: 3, plan: ["Trang so sánh, alternative, công cụ tính miễn phí để lấy link"] }
   ]},
   { group: "Kỹ thuật & an toàn", key: "tech", items: [
@@ -50,6 +50,7 @@ export const MENU = [
     { id: "schedule", label: "Lịch chạy", phase: 2, plan: ["Mỗi site lệch phút cố định, hàng đợi theo loại việc, hạn mức từng nhà cung cấp"] },
     { id: "prompts", label: "Prompt & token", phase: 5, plan: ["Prompt Optimizer: cache phần tĩnh, rút ngữ cảnh, gom lô; thử A/B trước khi áp dụng"] },
     { id: "members", label: "Thành viên", live: true, admin: true },
+    { id: "health", label: "Kiểm tra kết nối", live: true },
     { id: "roadmap", label: "Lộ trình", live: true },
     { id: "activity", label: "Nhật ký", live: true },
     { id: "settings", label: "Cài đặt", live: true },

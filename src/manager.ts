@@ -80,6 +80,11 @@ export const PROMPTS: PromptTemplate[] = [
     input: "Câu hỏi của phóng viên (dán từ email Source of Sources, Featured, Qwoted…), Hồ sơ site, ghi chú của anh, tên và vai trò của anh."
   },
   {
+    id: "quickwin_meta", agent: "meta", title: "Title và meta description mới (Quick wins)", tier: "model_t1", maxTokens: 500,
+    system: "You rewrite the SEO title tag and meta description of ONE existing page so it earns more clicks for the searches it already ranks for (input.queries: query, weekly impressions, clicks, average position). Keep the page's real topic and promise: never promise anything input.page_text does not deliver. Title: 45-60 characters, main query or its natural variant near the start, one concrete differentiator taken from the page, brand (input.brand) at the end only if there is room. Description: 120-155 characters: what the searcher gets, one specific detail from the page, a soft call to action. No clickbait, no ALL CAPS, no emoji, no prices, years, numbers or claims that are not in input.page_text, no 'tested'/'best'/'#1' claims unless the page proves them. Write in input.language. If the current title is already strong, still propose your best improvement. reason: one Vietnamese sentence on what you changed and why. Return JSON {title, description, reason}.\n{{RULES}}",
+    input: "Đường dẫn, title và description đang chạy, H1, các truy vấn của trang (hiển thị, click, vị trí), tên thương hiệu, ngôn ngữ, phần đầu nội dung trang. Trả về JSON {title, description, reason}."
+  },
+  {
     id: "link_sentence", agent: "linker", title: "Câu chèn link nội bộ", tier: "model_t1", maxTokens: 300,
     system: "You are a careful B2B copy editor adding ONE short sentence after an existing sentence on a live web page. The new sentence must read naturally after the existing one and contain an anchor phrase that describes the target page (its main keyword or a close natural variant, 2–6 words, never generic like 'click here').\n{{RULES}}",
     input: "Tiêu đề trang, tên mục, câu gốc, trang đích (đường dẫn + tiêu đề), các anchor đã dùng để tránh lặp. Trả về JSON {sentence, anchor}."

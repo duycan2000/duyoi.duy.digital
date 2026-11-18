@@ -20,6 +20,9 @@ import { apiIndexnowCheck } from "./indexnow";
 import { apiManualItem, apiManualPrepare, apiManualView, apiPrAnswer, apiReclaim } from "./manual";
 import { apiAddLink as opAddLink, apiCitation, apiDeleteLink as opDeleteLink, apiInboxRead, apiMessage, apiOffpageList, apiOffpageRun, apiOffpageView, apiProspect, apiSaveOpSettings, apiSetupMailbox, apiTestEmail, apiThread, handleInbound, runOffpage } from "./offpage";
 import { apiDeleteAccount, apiPostizIntegrations, apiPostizLink, apiSavePostiz, apiSaveApp, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
+import { apiHealth, apiRunHealth, runHealth } from "./health";
+import { apiFindQuickWins, apiQuickWinAction, apiQuickWins } from "./quickwins";
+import { apiReport, apiReportPreview, apiSaveReport, apiSendReport, runReport } from "./report";
 import { apiSemanticList, apiSemanticRun, apiSemanticView, runSemantic } from "./semantic";
 import { apiMonitorAlert, apiMonitorKeyword, apiMonitorKeywords, apiMonitorList, apiMonitorRun, apiMonitorSettings, apiMonitorView, runMonitor } from "./monitor";
 import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
@@ -134,6 +137,19 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (soItem[1] === "accounts" && !soItem[3] && m === "DELETE") return apiDeleteAccount(env, user, id);
     if (soItem[1] === "posts" && m === "PUT") return socialPost(env, req, user, id);
   }
+  if (path === "/api/connections" && m === "GET") return apiHealth(env);
+  const hRun = path.match(/^\/api\/connections\/run(?:\/(\d+))?$/);
+  if (hRun && m === "POST") return apiRunHealth(env, user, hRun[1] ? Number(hRun[1]) : null);
+  const qw = path.match(/^\/api\/quickwins(?:\/(\d+))?$/);
+  if (qw && m === "GET") return apiQuickWins(env, qw[1] ? Number(qw[1]) : null);
+  const qwFind = path.match(/^\/api\/quickwins\/(\d+)\/find$/);
+  if (qwFind && m === "POST") return apiFindQuickWins(env, user, Number(qwFind[1]));
+  const qwItem = path.match(/^\/api\/quickwins\/items\/(\d+)\/(draft|approve|reject|apply|rollback|edit)$/);
+  if (qwItem && m === "POST") return apiQuickWinAction(env, req, user, Number(qwItem[1]), qwItem[2]!);
+  if (path === "/api/report" && m === "GET") return apiReport(env);
+  if (path === "/api/report" && m === "PUT") return apiSaveReport(env, req, user);
+  if (path === "/api/report/preview" && m === "GET") return apiReportPreview(env);
+  if (path === "/api/report/send" && m === "POST") return apiSendReport(env, user);
   if (path === "/api/semantic" && m === "GET") return apiSemanticList(env);
   const semSite = path.match(/^\/api\/semantic\/(\d+)(\/run)?$/);
   if (semSite && !semSite[2] && m === "GET") return apiSemanticView(env, Number(semSite[1]));
@@ -288,6 +304,8 @@ export default {
       if (group === "b" || group === "all") {
         await step("stats", () => processStats(env, started + 2 * 60000));
         await step("offpage", () => runOffpage(env, started + 8 * 60000));
+        await step("health", () => runHealth(env));
+        await step("report", () => runReport(env));
       }
       if (group === "c" || group === "all") {
         await step("monitor", () => runMonitor(env, started + 5 * 60000));

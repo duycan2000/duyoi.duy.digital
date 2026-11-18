@@ -20,7 +20,7 @@ export async function indexKey(env: Env, siteId: number): Promise<Row> {
   return (await env.DB.prepare("SELECT * FROM indexnow WHERE site_id = ?").bind(siteId).first<Row>())!;
 }
 
-async function keyServed(domain: string, key: string): Promise<boolean> {
+export async function keyServed(domain: string, key: string): Promise<boolean> {
   const r = await fetchText(`https://${domain}/${key}.txt`, 2000, 8000);
   return !!r && r.status === 200 && r.text.trim() === key;
 }

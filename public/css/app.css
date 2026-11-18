@@ -858,3 +858,35 @@ details.mk > summary { cursor: pointer; display: flex; gap: 8px; align-items: ce
 .sm-bars div { display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 8px; background: var(--grad-soft); }
 tr.sm-on td { background: rgba(145, 85, 253, .06); }
 .sm-title { margin: 0; flex: 1; }
+
+/* Kiểm tra kết nối */
+.hc-card { margin-bottom: 14px; }
+.hc-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.hc-title h3 { margin: 0; flex: 1 1 auto; }
+.hc-title small { color: var(--muted); }
+.hc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hc-list li { padding: 10px 12px; border-radius: 10px; background: var(--bg); border-left: 4px solid #c9c9d1; }
+.hc-list li.hc-ok { border-left-color: #2e9e5b; }
+.hc-list li.hc-warn { border-left-color: #e2a400; }
+.hc-list li.hc-fail { border-left-color: #d64545; }
+.hc-list p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.hc-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Quick wins */
+.qw-sites { flex-wrap: wrap; margin-bottom: 12px; }
+.qw-item { margin-bottom: 12px; }
+.qw-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qw-head a { overflow-wrap: anywhere; }
+.qw-metrics { color: var(--muted); font-size: .9rem; margin: 6px 0 10px; }
+.qw-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.qw-diff small { color: var(--muted); text-transform: uppercase; font-size: .72rem; letter-spacing: .04em; }
+.qw-diff label { display: block; margin-top: 6px; }
+.qw-diff input, .qw-diff textarea { width: 100%; }
+.qw-old { color: var(--muted); }
+.qw-gate { margin-top: 10px; }
+.qw-after { color: #2e9e5b; }
+@media (max-width: 720px) { .qw-diff { grid-template-columns: 1fr; } }
+
+/* Báo cáo tuần */
+.rp-preview { margin-top: 12px; }
+.rp-text { white-space: pre-wrap; font-size: 13px; background: var(--bg); padding: 12px; border-radius: 8px; overflow-wrap: anywhere; }

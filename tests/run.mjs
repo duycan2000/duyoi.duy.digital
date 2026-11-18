@@ -537,7 +537,7 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     // Agent HQ
     const hq = await c4("GET", "/api/hq");
     assert.equal(hq.status, 200);
-    assert.equal(hq.data.manager.promptsPending, 12, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm + 6 prompt off-page");
+    assert.equal(hq.data.manager.promptsPending, 13, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm + 6 prompt off-page + quick wins");
     assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 6);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
@@ -1552,6 +1552,134 @@ await test("Semantic SEO: chấm trang (4 câu đầu, khối nội dung), bản
     const list = (await cS("GET", "/api/semantic")).data.sites;
     assert.equal(list.find((x) => x.id === site.id).score, v.audit.score);
     assert.ok((await cS("GET", "/api/hq")).data.zones.monitor.some((a) => a.id === "semantic"));
+  } finally { globalThis.fetch = realFetch; }
+});
+
+await test("Kiểm tra kết nối, Quick wins (title/meta qua Gác cổng, duyệt, ghi, hoàn tác) và báo cáo tuần qua email", async () => {
+  const envQ = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const sent = [];
+  envQ.EMAIL = { send: async (m) => { sent.push(m); return { messageId: "<r1@cf>" }; } };
+  const cQ = client(envQ);
+  await cQ("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const site = (await cQ("POST", "/api/sites", { name: "CAD Demo", domain: "caddemo.de", platform: "wordpress", siteType: "service", market: "de", language: "de" })).data.site;
+  const wp = { user: "duyoi-bot", pass: "abcd efgh ijkl mnop" };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ wp, gscDeny: true });
+  try {
+    // Chưa nhập gì: báo lỗi đúng chỗ, không văng lỗi máy chủ
+    let h = await cQ("POST", "/api/connections/run");
+    assert.equal(h.status, 200);
+    const g = Object.fromEntries(h.data.global.checks.map((c) => [c.key, c]));
+    assert.equal(g.openrouter.status, "fail"); assert.equal(g.dataforseo.status, "fail"); assert.equal(g.google.status, "warn"); assert.equal(g.github.status, "skip");
+    let sc = Object.fromEntries(h.data.sites[0].checks.map((c) => [c.key, c]));
+    assert.equal(sc.reach.status, "ok"); assert.equal(sc.wordpress.status, "fail"); assert.equal(sc.gsc.status, "skip");
+    assert.ok((await envQ.DB.prepare("SELECT 1 FROM activity WHERE action = 'health.fail'").first()));
+    // Nhập key, WordPress, service account: lỗi còn lại là quyền Search Console
+    const kp = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+    const der = Buffer.from(await crypto.subtle.exportKey("pkcs8", kp.privateKey)).toString("base64");
+    const sa = JSON.stringify({ type: "service_account", client_email: "duyoi@proj.iam.gserviceaccount.com", private_key: `-----BEGIN PRIVATE KEY-----\n${der.match(/.{1,64}/g).join("\n")}\n-----END PRIVATE KEY-----\n`, token_uri: "https://oauth2.googleapis.com/token" });
+    await cQ("PUT", "/api/settings", { secrets: { google_service_account: sa, openrouter_api_key: "sk-or-test-123456", dataforseo_login: "a@b.de", dataforseo_password: "pw-123456" } });
+    await cQ("PUT", `/api/sites/${site.id}/wp`, { wpUser: wp.user, appPassword: wp.pass });
+    h = await cQ("POST", `/api/connections/run/${site.id}`);
+    sc = Object.fromEntries(h.data.sites[0].checks.map((c) => [c.key, c]));
+    assert.equal(sc.wordpress.status, "warn"); assert.match(sc.wordpress.message, /1\.0\.0/);
+    assert.equal(sc.gsc.status, "fail"); assert.match(sc.gsc.fix, /service account/);
+    h = await cQ("POST", "/api/connections/run/0");
+    const g2 = Object.fromEntries(h.data.global.checks.map((c) => [c.key, c]));
+    assert.equal(g2.openrouter.status, "ok"); assert.match(g2.dataforseo.message, /12\.50/); assert.equal(g2.google.status, "ok"); assert.equal(g2.email.status, "ok");
+
+    // Quick wins: trang vị trí 4–15, CTR thấp hơn hẳn các trang cùng nhóm vị trí của site
+    const A = "https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/", B = "https://caddemo.de/cad-software-vergleich-beste-programme/";
+    const t = Date.now();
+    const rows = [[A, 2, 800, 6.2], [B, 40, 1000, 5.1], ["https://caddemo.de/x1/", 30, 600, 5.5], ["https://caddemo.de/x2/", 25, 500, 6], ["https://caddemo.de/x3/", 8, 300, 11], ["https://caddemo.de/inventor-vs-solidworks/", 14, 400, 12]];
+    for (const [page, c, i, pos] of rows) await envQ.DB.prepare("INSERT INTO mon_pages (site_id, page, clicks7, clicks_prev, impr7, impr_prev, pos7, pos_prev, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(site.id, page, c, c, i, i, pos, pos, t).run();
+    await envQ.DB.prepare("INSERT INTO mon_queries (site_id, query, page, clicks7, clicks_prev, impr7, pos7, pos_prev, updated_at) VALUES (?, 'cad symbole architektur', ?, 2, 2, 700, 6, 6, ?)").bind(site.id, A, t).run();
+    const f = await cQ("POST", `/api/quickwins/${site.id}/find`);
+    assert.equal(f.status, 200);
+    let q = (await cQ("GET", `/api/quickwins/${site.id}`)).data;
+    const itA = q.items.find((i) => i.page === A);
+    assert.equal(itA.kind, "ctr"); assert.equal(itA.query, "cad symbole architektur");
+    assert.ok(!q.items.some((i) => i.page === B), "trang CTR tốt không vào danh sách");
+    assert.ok(q.items.some((i) => i.kind === "push" && i.page.endsWith("/inventor-vs-solidworks/")));
+    // Prompt chưa duyệt thì không viết được
+    assert.equal((await cQ("POST", `/api/quickwins/items/${itA.id}/draft`)).status, 403);
+    await cQ("PUT", "/api/manager/prompts/quickwin_meta", { status: "approved" });
+    let r = await cQ("POST", `/api/quickwins/items/${itA.id}/draft`);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.item.status, "drafted");
+    let gate = JSON.parse(r.data.item.gate);
+    assert.ok(gate.ok, JSON.stringify(gate));
+    assert.match(r.data.item.new_title, /^Cad symbole architektur/);
+    // Anh sửa tay thành câu "đã test": Gác cổng chặn, không duyệt được
+    r = await cQ("POST", `/api/quickwins/items/${itA.id}/edit`, { new_title: "Wir haben getestet: 12 CAD Symbole", new_desc: "Kurz." });
+    assert.equal(JSON.parse(r.data.item.gate).ok, false);
+    assert.equal((await cQ("POST", `/api/quickwins/items/${itA.id}/approve`)).status, 409);
+    r = await cQ("POST", `/api/quickwins/items/${itA.id}/edit`, { new_title: "CAD Symbole Architektur: Übersicht mit Erklärung", new_desc: "Die wichtigsten CAD-Symbole für Grundrisse und TGA auf einen Blick, mit Bedeutung und Einsatz im Plan erklärt. Jetzt nachschlagen." });
+    assert.ok(JSON.parse(r.data.item.gate).ok);
+    assert.equal((await cQ("POST", `/api/quickwins/items/${itA.id}/approve`)).status, 200);
+    r = await cQ("POST", `/api/quickwins/items/${itA.id}/apply`);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.item.status, "applied");
+    const applyCall = wp.calls.filter((c) => c.route === "/apply" && !c.body.dry_run).pop();
+    assert.equal(applyCall.body.meta.rank_math_title, "CAD Symbole Architektur: Übersicht mit Erklärung");
+    assert.deepEqual(applyCall.body.edits, []);
+    // Hoàn tác trả lại meta cũ
+    r = await cQ("POST", `/api/quickwins/items/${itA.id}/rollback`);
+    assert.equal(r.data.item.status, "drafted");
+    const restore = wp.calls.filter((c) => c.route === "/restore").pop();
+    assert.equal(restore.body.content, null);
+    assert.notEqual(restore.body.meta.rank_math_title, "CAD Symbole Architektur: Übersicht mit Erklärung");
+
+    // Báo cáo tuần: mặc định tắt, cần địa chỉ gửi và người nhận; xem trước được; gửi qua Email Service
+    let rp = (await cQ("GET", "/api/report")).data;
+    assert.equal(rp.settings.enabled, false);
+    assert.equal((await cQ("PUT", "/api/report", { enabled: true, to: "", from: "" })).status, 400);
+    assert.equal((await cQ("PUT", "/api/report", { enabled: true, to: "khong-phai-email", from: "bao-cao@duy.digital" })).status, 400);
+    rp = (await cQ("PUT", "/api/report", { enabled: true, to: "chu@example.com", from: "bao-cao@duy.digital", weekday: 1, hour: 8 })).data;
+    assert.deepEqual(rp.settings.to, ["chu@example.com"]);
+    await envQ.DB.prepare("INSERT INTO mon_alerts (site_id, kind, severity, title, status, created_at, updated_at) VALUES (?, 'drop', 'high', 'caddemo.de: traffic -40%', 'open', ?, ?)").bind(site.id, t, t).run();
+    const pv = (await cQ("GET", "/api/report/preview")).data;
+    assert.match(pv.subject, /1 cảnh báo/);
+    assert.match(pv.text, /caddemo\.de/); assert.match(pv.text, /Lỗi kết nối/);
+    assert.match(pv.html, /traffic -40%/);
+    const sr = await cQ("POST", "/api/report/send");
+    assert.equal(sr.data.sent, 1);
+    assert.deepEqual(sent[0].to, [{ email: "chu@example.com" }]);
+    assert.equal(sent[0].from.email, "bao-cao@duy.digital");
+    assert.equal((await cQ("GET", "/api/report")).data.log[0].ok, 1);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+await test("Quick wins trên site Astro: sửa frontmatter title/description qua pull request", async () => {
+  const envA = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const cA = client(envA);
+  await cA("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await cA("PUT", "/api/settings", { secrets: { openrouter_api_key: "sk-or-test-123456", github_token: "gh-token" } });
+  await cA("PUT", "/api/manager/prompts/quickwin_meta", { status: "approved" });
+  const site = (await cA("POST", "/api/sites", { name: "CAD Demo", domain: "caddemo.de", platform: "astro", siteType: "service", market: "de", language: "de" })).data.site;
+  const gh = { token: "gh-token", repo: "duycan2000/caddemo", prs: [], commits: 0, checks: () => [], branches: { main: { "src/content/blog/12-wichtige-cad-symbole-fur-architektur.md": "---\ntitle: \"12 wichtige CAD Symbole\"\ndescription: Alte Beschreibung\npubDate: 2026-01-01\n---\n\nText.\n" } } };
+  await envA.DB.prepare("UPDATE sites SET repo = ?, publish_profile = ? WHERE id = ?").bind(gh.repo, JSON.stringify({ repo: gh.repo, branch: "main", collection: "blog", dir: "src/content/blog", ext: "md", naming: "file", fields: [], map: { title: "title", description: "description" }, values: {} }), site.id).run();
+  const A = "https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/";
+  const t = Date.now();
+  for (const [page, c, i, pos] of [[A, 1, 900, 7], ["https://caddemo.de/a/", 40, 900, 6], ["https://caddemo.de/b/", 35, 800, 8], ["https://caddemo.de/c/", 30, 700, 9]]) await envA.DB.prepare("INSERT INTO mon_pages (site_id, page, clicks7, clicks_prev, impr7, impr_prev, pos7, pos_prev, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(site.id, page, c, c, i, i, pos, pos, t).run();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ gh });
+  try {
+    await cA("POST", `/api/quickwins/${site.id}/find`);
+    const it = (await cA("GET", `/api/quickwins/${site.id}`)).data.items.find((i) => i.page === A);
+    let r = await cA("POST", `/api/quickwins/items/${it.id}/edit`, { new_title: "CAD Symbole: $& Übersicht für Architektur", new_desc: "Die wichtigsten CAD-Symbole für Grundrisse und TGA auf einen Blick, mit Bedeutung und Einsatz im Plan erklärt. Jetzt nachschlagen." });
+    assert.ok(JSON.parse(r.data.item.gate).ok, r.data.item.gate);
+    await cA("POST", `/api/quickwins/items/${it.id}/approve`);
+    r = await cA("POST", `/api/quickwins/items/${it.id}/apply`);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(gh.prs.length, 1);
+    const branch = gh.prs[0].head;
+    const file = gh.branches[branch]["src/content/blog/12-wichtige-cad-symbole-fur-architektur.md"];
+    assert.match(file, /^title: "CAD Symbole: \$& Übersicht für Architektur"$/m);
+    assert.match(file, /^description: "Die wichtigsten/m);
+    assert.match(file, /pubDate: 2026-01-01/);
+    assert.equal(gh.branches.main["src/content/blog/12-wichtige-cad-symbole-fur-architektur.md"].includes("Alte Beschreibung"), true);
+    assert.equal((await cA("POST", `/api/quickwins/items/${it.id}/rollback`)).status, 409);
   } finally { globalThis.fetch = realFetch; }
 });
 
