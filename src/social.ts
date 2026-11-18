@@ -80,6 +80,45 @@ const errOf = (d: Record<string, unknown>) => {
   return String((typeof e === "object" ? e?.message : e) || d.message || d.detail || d.error_description || d.title || JSON.stringify(d).slice(0, 200));
 };
 
+// ---------------- App developer: riêng từng site (khuyên dùng) hoặc dùng chung ----------------
+
+// Mỗi site một tài khoản riêng; app developer riêng cho từng site để các thương hiệu không chung một app
+async function clientCreds(env: Env, siteId: number, network: keyof typeof OAUTH): Promise<{ id: string; secret: string; own: boolean } | null> {
+  const key = `app:${siteId}:${network}`;
+  const r = await env.DB.prepare("SELECT iv, ciphertext FROM secrets WHERE key = ?").bind(key).first<{ iv: string; ciphertext: string }>();
+  if (r) { try { const v = JSON.parse(await decryptText(env.ENCRYPTION_KEY, r.iv, r.ciphertext, key)) as { id: string; secret: string }; if (v.id && v.secret) return { ...v, own: true }; } catch { /* dùng app chung */ } }
+  const id = await readSecret(env, OAUTH[network].id), secret = await readSecret(env, OAUTH[network].secret);
+  return id && secret ? { id, secret, own: false } : null;
+}
+
+export async function siteApps(env: Env, siteId: number): Promise<Record<string, boolean>> {
+  const rows = (await env.DB.prepare("SELECT key FROM secrets WHERE key LIKE ?").bind(`app:${siteId}:%`).all<{ key: string }>()).results;
+  return Object.fromEntries(rows.map((r) => [r.key.split(":")[2], true]));
+}
+
+// PUT /api/social/:siteId/app { network, client_id, client_secret } — null/rỗng để xoá
+export async function apiSaveApp(env: Env, req: Request, user: User, siteId: number): Promise<Response> {
+  if (user.role !== "admin") throw new HttpError(403, "Chỉ admin.", "forbidden");
+  const b = await readJson<{ network?: string; client_id?: string | null; client_secret?: string | null }>(req);
+  if (!(String(b.network) in OAUTH)) throw new HttpError(400, "Mạng không hợp lệ.", "validation");
+  const key = `app:${siteId}:${b.network}`;
+  if (!b.client_id || !b.client_secret) { await env.DB.prepare("DELETE FROM secrets WHERE key = ?").bind(key).run(); return json({ ok: true, removed: true }); }
+  if (!encryptionReady(env.ENCRYPTION_KEY)) throw new HttpError(503, "Worker chưa có ENCRYPTION_KEY.", "encryption_missing");
+  const id = String(b.client_id).trim().slice(0, 200), secret = String(b.client_secret).trim().slice(0, 300);
+  const { iv, ciphertext } = await encryptText(env.ENCRYPTION_KEY, JSON.stringify({ id, secret }), key);
+  await env.DB.prepare("INSERT INTO secrets (key, iv, ciphertext, hint, updated_at) VALUES (?, ?, ?, '', ?) ON CONFLICT(key) DO UPDATE SET iv = excluded.iv, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at").bind(key, iv, ciphertext, now()).run();
+  await logActivity(env, `user:${user.id}`, "social.app", `Lưu app developer ${NETWORKS[b.network as Network].label} riêng cho site`, siteId);
+  return json({ ok: true });
+}
+
+// Một tài khoản mạng xã hội chỉ thuộc một site: chặn khi handle / trang / link profile đã gắn với site khác
+async function usedElsewhere(env: Env, siteId: number, network: string, v: { handle?: string | null; target?: string | null; profile?: string | null }): Promise<string | null> {
+  const norm = (x: string | null | undefined) => (x || "").toLowerCase().replace(/^@/, "").replace(/\/+$/, "");
+  const rows = (await env.DB.prepare("SELECT a.handle, a.target_id, a.profile_url, s.domain FROM social_accounts a JOIN sites s ON s.id = a.site_id WHERE a.network = ? AND a.site_id != ?").bind(network, siteId).all<{ handle: string | null; target_id: string | null; profile_url: string | null; domain: string }>()).results;
+  const hit = rows.find((r) => (v.handle && norm(r.handle) === norm(v.handle)) || (v.target && r.target_id === v.target) || (v.profile && norm(r.profile_url) === norm(v.profile)));
+  return hit ? `Tài khoản này đang gắn với site ${hit.domain}. Mỗi site một tài khoản riêng: đăng nhập đúng tài khoản của site này rồi kết nối lại.` : null;
+}
+
 // ---------------- Kết nối ----------------
 
 // GET /api/social/oauth/:network/start?site=ID → chuyển tới trang đăng nhập của mạng
@@ -90,8 +129,9 @@ export async function apiOAuthStart(env: Env, req: Request, user: User, network:
   const siteId = Number(url.searchParams.get("site"));
   const s = await env.DB.prepare("SELECT id FROM sites WHERE id = ?").bind(siteId).first();
   if (!s) throw new HttpError(404, "Không tìm thấy site.", "not_found");
-  const clientId = await readSecret(env, cfg.id);
-  if (!clientId || !(await readSecret(env, cfg.secret))) throw new HttpError(409, `Chưa nhập ${cfg.id} và ${cfg.secret} ở Cài đặt › API key (tạo app developer của ${NETWORKS[network as Network].label}).`, "no_client");
+  const app = await clientCreds(env, siteId, network as keyof typeof OAUTH);
+  if (!app) throw new HttpError(409, `Chưa có app developer ${NETWORKS[network as Network].label}: nhập ở Off-page › Mạng xã hội (riêng cho site) hoặc Cài đặt › API key (dùng chung).`, "no_client");
+  const clientId = app.id;
   const state = rand(24), verifier = cfg.pkce ? rand(48) : null;
   await env.DB.prepare("DELETE FROM oauth_states WHERE created_at < ?").bind(now() - 3600000).run();
   await env.DB.prepare("INSERT INTO oauth_states (state, site_id, network, verifier, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(state, siteId, network, verifier, user.id, now()).run();
@@ -100,9 +140,11 @@ export async function apiOAuthStart(env: Env, req: Request, user: User, network:
   return Response.redirect(`${cfg.auth}?${q}`, 302);
 }
 
-async function exchange(env: Env, network: keyof typeof OAUTH, body: Record<string, string>): Promise<Tok> {
+async function exchange(env: Env, siteId: number, network: keyof typeof OAUTH, body: Record<string, string>): Promise<Tok> {
   const cfg = OAUTH[network];
-  const id = (await readSecret(env, cfg.id))!, secret = (await readSecret(env, cfg.secret))!;
+  const app = await clientCreds(env, siteId, network);
+  if (!app) throw new Error(`Chưa có app developer ${NETWORKS[network].label}.`);
+  const { id, secret } = app;
   const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded" };
   const form = new URLSearchParams(body);
   if (cfg.basic) headers.Authorization = `Basic ${btoa(`${id}:${secret}`)}`; else { form.set("client_id", id); form.set("client_secret", secret); }
@@ -123,15 +165,17 @@ export async function apiOAuthCallback(env: Env, req: Request, user: User, url: 
   try {
     const body: Record<string, string> = { grant_type: "authorization_code", code, redirect_uri: redirectUri(req) };
     if (st.verifier) body.code_verifier = st.verifier;
-    let tok = await exchange(env, st.network, body);
+    let tok = await exchange(env, st.site_id, st.network, body);
     let handle: string | null = null, profile: string | null = null;
     if (st.network === "facebook") {
-      const id = (await readSecret(env, "meta_app_id"))!, secret = (await readSecret(env, "meta_app_secret"))!;
+      const { id, secret } = (await clientCreds(env, st.site_id, "facebook"))!;
       const ll = await call(`https://graph.facebook.com/${FB}/oauth/access_token?${new URLSearchParams({ grant_type: "fb_exchange_token", client_id: id, client_secret: secret, fb_exchange_token: tok.access_token! })}`);
       if (ll.data.access_token) tok = { access_token: String(ll.data.access_token), expires_at: ll.data.expires_in ? now() + Number(ll.data.expires_in) * 1000 : undefined };
     }
     if (st.network === "x") { const me = await call("https://api.x.com/2/users/me", { headers: { Authorization: `Bearer ${tok.access_token}` } }); const u = (me.data.data || {}) as { username?: string }; if (u.username) { handle = `@${u.username}`; profile = `https://x.com/${u.username}`; } }
     if (st.network === "pinterest") { const me = await call("https://api.pinterest.com/v5/user_account", { headers: { Authorization: `Bearer ${tok.access_token}` } }); if (me.data.username) { handle = String(me.data.username); profile = `https://www.pinterest.com/${me.data.username}/`; } }
+    const dup = await usedElsewhere(env, st.site_id, st.network, { handle, profile });
+    if (dup) return back(st.site_id, dup);
     const needsTarget = ["facebook", "linkedin", "pinterest"].includes(st.network);
     const accId = await upsertAcc(env, st.site_id, st.network, { handle, profile_url: profile, status: needsTarget ? "choose_target" : "connected", error: null, connected_at: now(), expires_at: tok.expires_at ?? null });
     await saveTok(env, accId, tok);
@@ -155,11 +199,15 @@ export async function apiSaveAccount(env: Env, req: Request, user: User, siteId:
     if (!handle) throw new HttpError(400, "Nhập handle Bluesky (vd: tensite.bsky.social).", "validation");
     const sess = await call("https://bsky.social/xrpc/com.atproto.server.createSession", { method: "POST", json: { identifier: handle, password: String(b.app_password).trim() } });
     if (sess.status >= 400 || !sess.data.did) throw new HttpError(400, `Bluesky từ chối đăng nhập: ${errOf(sess.data)}. Dùng App Password (Settings › Privacy and security › App passwords).`, "bluesky_auth");
+    const dupB = await usedElsewhere(env, siteId, network, { handle, target: String(sess.data.did) });
+    if (dupB) throw new HttpError(409, dupB, "account_in_use");
     const id = await upsertAcc(env, siteId, network, { handle: `@${handle}`, profile_url: profile || `https://bsky.app/profile/${handle}`, target_id: String(sess.data.did), status: "connected", error: null, connected_at: now() });
     await saveTok(env, id, { identifier: handle, app_password: String(b.app_password).trim() });
     return json({ ok: true, id });
   }
   if (!profile) throw new HttpError(400, "Nhập link profile.", "validation");
+  const dupP = await usedElsewhere(env, siteId, network, { profile });
+  if (dupP) throw new HttpError(409, dupP, "account_in_use");
   if (NETWORKS[network].oauth) {
     await upsertAcc(env, siteId, network, { handle: handle ? `@${handle}` : null, profile_url: profile, status: (await env.DB.prepare("SELECT status FROM social_accounts WHERE site_id = ? AND network = ?").bind(siteId, network).first<{ status: string }>())?.status || "profile" });
   } else await upsertAcc(env, siteId, network, { handle: handle ? `@${handle}` : null, profile_url: profile, status: "profile" });
@@ -203,6 +251,8 @@ export async function apiSetTarget(env: Env, req: Request, user: User, accId: nu
   const b = await readJson<{ target_id?: string; target_name?: string; profile_url?: string }>(req);
   const target = String(b.target_id || "").trim();
   if (!target) throw new HttpError(400, "Chọn trang/board.", "validation");
+  const dupT = await usedElsewhere(env, a.site_id, a.network, { target: a.network === "pinterest" ? null : target });
+  if (dupT) throw new HttpError(409, dupT, "account_in_use");
   const t = await freshTok(env, a);
   if (a.network === "facebook") {
     const r = await call(`https://graph.facebook.com/${FB}/${encodeURIComponent(target)}?fields=access_token,name,link`, { headers: { Authorization: `Bearer ${t.access_token}` } });
@@ -247,7 +297,7 @@ async function freshTok(env: Env, a: Acc): Promise<Tok> {
       await env.DB.prepare("UPDATE social_accounts SET status = 'expired', error = 'Token hết hạn: anh bấm Kết nối lại', updated_at = ? WHERE id = ?").bind(now(), a.id).run();
       throw new Error(`${NETWORKS[a.network].label}: token hết hạn, anh kết nối lại.`);
     }
-    const n = await exchange(env, a.network as keyof typeof OAUTH, { grant_type: "refresh_token", refresh_token: t.refresh_token });
+    const n = await exchange(env, a.site_id, a.network as keyof typeof OAUTH, { grant_type: "refresh_token", refresh_token: t.refresh_token });
     const merged = { ...t, ...n, refresh_token: n.refresh_token || t.refresh_token };
     await saveTok(env, a.id, merged);
     await env.DB.prepare("UPDATE social_accounts SET expires_at = ?, updated_at = ? WHERE id = ?").bind(merged.expires_at ?? null, now(), a.id).run();

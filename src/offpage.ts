@@ -12,7 +12,7 @@ import { HttpError, json, now, readJson } from "./http";
 import { extractNumbers } from "./recovery-extract";
 import { readRules } from "./recovery-rules";
 import { getSettingsMap, readSecret } from "./settings";
-import { entityLd, socialRun } from "./social";
+import { entityLd, siteApps, socialRun } from "./social";
 import { emailsIn, fetchText, hostOf, linksIn, overlap, pageInfo } from "./web";
 import type { Env, InboundEmail, User } from "./types";
 
@@ -479,7 +479,7 @@ export async function apiOffpageView(env: Env, siteId: number): Promise<Response
   ]);
   const parse = (v: unknown) => { try { return v ? JSON.parse(String(v)) : null; } catch { return null; } };
   return json({
-    site: s, german: germanSite(s), settings, state, emailBinding: !!env.EMAIL, workerName: WORKER_NAME, entity: await entityLd(env, siteId, settings.brand),
+    site: s, german: germanSite(s), settings, state, emailBinding: !!env.EMAIL, workerName: WORKER_NAME, entity: await entityLd(env, siteId, settings.brand), apps: await siteApps(env, siteId),
     prospects, messages: messages.map((m) => ({ ...m, review: parse(m.review) })), inbox, threads: threads.map((t) => ({ ...t, factors: parse(t.factors) || [] })),
     links, citations, accounts, posts: posts.map((p) => ({ ...p, gate: parse(p.gate) }))
   });

@@ -17,7 +17,7 @@ import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, a
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { apiAddLink as opAddLink, apiCitation, apiDeleteLink as opDeleteLink, apiInboxRead, apiMessage, apiOffpageList, apiOffpageRun, apiOffpageView, apiProspect, apiSaveOpSettings, apiSetupMailbox, apiTestEmail, apiThread, handleInbound, runOffpage } from "./offpage";
-import { apiDeleteAccount, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
+import { apiDeleteAccount, apiSaveApp, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
 import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
 import { apiApply as affApply, apiDecide as affDecide, apiDeleteLink as affDelete, apiLinks as affLinks, apiRollback as affRollback, apiSaveLink as affSave, apiScan as affScan } from "./affiliate";
 import { runAutopilot } from "./autopilot";
@@ -108,6 +108,8 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   if (path === "/api/social/oauth/callback" && m === "GET") return apiOAuthCallback(env, req, user, url);
   const soStart = path.match(/^\/api\/social\/oauth\/(\w+)\/start$/);
   if (soStart && m === "GET") return apiOAuthStart(env, req, user, soStart[1]!, url);
+  const soApp = path.match(/^\/api\/social\/(\d+)\/app$/);
+  if (soApp && m === "PUT") return apiSaveApp(env, req, user, Number(soApp[1]));
   const soAcc = path.match(/^\/api\/social\/(\d+)\/accounts$/);
   if (soAcc && m === "POST") return apiSaveAccount(env, req, user, Number(soAcc[1]));
   const soItem = path.match(/^\/api\/social\/(accounts|posts)\/(\d+)(\/targets)?$/);

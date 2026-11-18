@@ -110,13 +110,14 @@ function mailHtml(d, canEdit) {
     ${d.inbox.length ? d.inbox.map((x) => `<div class="op-in${x.read ? "" : " unread"}"><b>${esc(x.from_email)}</b> · ${esc(x.subject || "(không tiêu đề)")} <small>${esc(ago(x.received_at))}${x.matched_id ? " · trả lời outreach, đã dừng follow-up" : ""}</small><p>${esc(x.snippet || "")}</p>${!x.read && canEdit ? `<button type="button" data-in-read="${x.id}">Đã đọc</button>` : ""}</div>`).join("") : `<p class="note">Chưa có thư đến. Thư trả lời về đây khi đã dựng hộp thư.</p>`}`;
 }
 
-function socialHtml(d, canEdit, origin) {
+function socialHtml(d, canEdit, origin, K_ADMIN) {
   const accs = d.accounts;
   const has = (n) => accs.find((a) => a.network === n);
   return `
+  <p class="msg warn">Mỗi site một tài khoản riêng cho từng mạng. Trước khi bấm Kết nối, đăng nhập đúng tài khoản của <b>${esc(d.site.domain)}</b> trên trình duyệt (nên dùng một profile Chrome riêng cho mỗi site). App chặn nếu tài khoản, trang hoặc link profile đã gắn với site khác.</p>
   <div class="tablewrap boxed"><table><thead><tr><th>Mạng</th><th>Tài khoản</th><th>Trạng thái</th><th></th></tr></thead><tbody>
     ${Object.entries(NET).filter(([n]) => n !== "other" || has(n)).map(([n, label]) => { const a = has(n); return `<tr>
-      <td><b>${esc(label)}</b>${OAUTH.includes(n) || n === "bluesky" ? "" : "<small>Chỉ ghi profile (sameAs)</small>"}</td>
+      <td><b>${esc(label)}</b>${OAUTH.includes(n) ? `<small>${d.apps?.[n] ? "App developer riêng của site" : "Đang dùng app chung"}</small>` : n === "bluesky" ? "" : "<small>Chỉ ghi profile (sameAs)</small>"}</td>
       <td>${a ? `${a.profile_url ? `<a href="${esc(a.profile_url)}" target="_blank" rel="noopener">${esc(a.handle || a.target_name || a.profile_url)}</a>` : esc(a.handle || "")}${a.target_name ? `<small>Đăng vào: ${esc(a.target_name)}</small>` : ""}${a.error ? `<small>${esc(a.error)}</small>` : ""}` : "—"}</td>
       <td>${a ? tag(SST[a.status] || [a.status, ""]) : ""}</td>
       <td class="op-actions">${canEdit ? `${OAUTH.includes(n) ? `<a class="btn" href="/api/social/oauth/${n}/start?site=${d.site.id}">${a && a.status !== "profile" ? "Kết nối lại" : "Kết nối"}</a>` : ""}${a && a.status === "choose_target" || (a && OAUTH.includes(n) && a.status === "connected" && n !== "x") ? `<button type="button" data-targets="${a.id}">${a.target_id ? "Đổi trang" : "Chọn trang"}</button>` : ""}${a ? `<button type="button" class="danger" data-acc-del="${a.id}">Gỡ</button>` : ""}` : ""}</td>
@@ -128,13 +129,19 @@ function socialHtml(d, canEdit, origin) {
       <label>Handle<input name="handle" placeholder="tensite.bsky.social"></label>
       <label>App Password<input name="app_password" type="password" autocomplete="off"></label>
       <div class="toolbar"><button type="submit">Kết nối Bluesky</button></div></fieldset></form>
+    ${K_ADMIN ? `<form id="op-app" class="op-form" novalidate><fieldset><legend>App developer riêng cho site này (khuyên dùng)</legend>
+      <label>Mạng<select name="network">${OAUTH.map((n) => `<option value="${n}">${esc(NET[n])}${d.apps?.[n] ? " (đã có)" : ""}</option>`).join("")}</select></label>
+      <label>Client ID / App ID<input name="client_id" autocomplete="off"></label>
+      <label>Client secret<input name="client_secret" type="password" autocomplete="off"></label>
+      <div class="toolbar"><button type="submit">Lưu app</button><button type="button" id="op-app-del">Xoá app riêng</button></div>
+      <p class="note wide">Tạo app bằng tài khoản developer của chính site đó, để các thương hiệu không chung một app. Không có app riêng thì dùng app chung ở Cài đặt › API key.</p></fieldset></form>` : ""}
     <form id="op-profile" class="op-form" novalidate><fieldset><legend>Profile chỉ để sameAs (YouTube, Instagram…)</legend>
       <label>Mạng<select name="network">${Object.entries(NET).filter(([n]) => !OAUTH.includes(n) && n !== "bluesky").map(([n, l]) => `<option value="${n}">${esc(l)}</option>`).join("")}</select></label>
       <label>Link profile<input name="profile_url" type="url" placeholder="https://www.youtube.com/@…"></label>
       <div class="toolbar"><button type="submit">Lưu profile</button></div></fieldset></form>
   </div>` : ""}
   <details class="op-help"><summary>Cách tạo app developer cho từng mạng</summary>
-    <p>Redirect URI cần khai báo ở mọi app: <code>${esc(origin)}/api/social/oauth/callback</code>. Nhập ID và secret ở Cài đặt › API key. Một app dùng chung cho mọi site; mỗi site đăng nhập trang riêng.</p>
+    <p>Redirect URI cần khai báo ở mọi app: <code>${esc(origin)}/api/social/oauth/callback</code>. Nên tạo app bằng tài khoản developer của từng site và nhập ở ô "App developer riêng" bên trên; app chung ở Cài đặt › API key chỉ là phương án dự phòng.</p>
     <ul>
       <li>Pinterest: developers.pinterest.com › My apps; quyền boards:read, pins:write. App mới ở chế độ Trial: Pin chỉ mình anh thấy cho tới khi Pinterest duyệt Standard access.</li>
       <li>Facebook Page: developers.facebook.com › tạo app Business, thêm Facebook Login; quyền pages_manage_posts. Anh là admin của Page thì đăng được ngay ở chế độ phát triển.</li>
@@ -207,7 +214,7 @@ export async function viewOffpage(main, args, K) {
       <div class="tab-body" ${K.panelAttr("op", "team", "team")}>${settingsHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "prospects", "team")}>${prospectsHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "mail", "team")}>${mailHtml(d, canEdit)}</div>
-      <div class="tab-body" ${K.panelAttr("op", "social", "team")}>${socialHtml(d, canEdit, location.origin)}</div>
+      <div class="tab-body" ${K.panelAttr("op", "social", "team")}>${socialHtml(d, canEdit, location.origin, K.state.user.role === "admin")}</div>
       <div class="tab-body" ${K.panelAttr("op", "community", "team")}>${communityHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "links", "team")}>${linksHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "citations", "team")}>${citationsHtml(d, canEdit)}</div>
@@ -272,6 +279,8 @@ export async function viewOffpage(main, args, K) {
   })));
   $$("[data-acc-del]", main).forEach((b) => b.addEventListener("click", async () => { try { await api(`/api/social/accounts/${b.dataset.accDel}`, { method: "DELETE" }); await reload(); } catch (e) { msg(e); } }));
   $("#op-bsky", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/accounts`, { method: "POST", body: { network: "bluesky", handle: f.handle, app_password: f.app_password } }); await reload(); msg(null, "Đã kết nối Bluesky."); } catch (e) { msg(e); } });
+  $("#op-app", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/app`, { method: "PUT", body: { network: f.network, client_id: f.client_id, client_secret: f.client_secret } }); K.state.tabs.op = "social"; await reload(); msg(null, "Đã lưu app riêng cho site."); } catch (e) { msg(e); } });
+  $("#op-app-del", main)?.addEventListener("click", async () => { try { await api(`/api/social/${siteId}/app`, { method: "PUT", body: { network: $("#op-app", main).elements.network.value, client_id: null, client_secret: null } }); await reload(); msg(null, "Đã xoá app riêng: site dùng app chung."); } catch (e) { msg(e); } });
   $("#op-profile", main)?.addEventListener("submit", async (ev) => { ev.preventDefault(); const f = formData(ev.target); try { await api(`/api/social/${siteId}/accounts`, { method: "POST", body: { network: f.network, profile_url: f.profile_url } }); await reload(); msg(null, "Đã lưu profile."); } catch (e) { msg(e); } });
   $$("[data-post-save]", main).forEach((b) => b.addEventListener("click", () => put(`/api/social/posts/${b.dataset.postSave}`, { text: main.querySelector(`[data-post-text="${b.dataset.postSave}"]`).value }, "Đã lưu.")));
   $$("[data-post-retry]", main).forEach((b) => b.addEventListener("click", () => put(`/api/social/posts/${b.dataset.postRetry}`, { action: "retry" })));

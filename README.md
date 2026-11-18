@@ -181,8 +181,10 @@ Menu **Off-page team** (và các lối tắt Prospects, Email outreach, Backlink
 - **Link Monitor** (mỗi tuần): mở trang nguồn của backlink đã có (từ "Có link" ở Prospects hoặc thêm tay), ghi còn/mất, dofollow/nofollow, anchor; báo khi mất link.
 - **Citations**: chỉ cho site dịch vụ có NAP thật; danh bạ theo thị trường (AU, US, CA, GB, DE, NZ + Bing Places, Apple Business Connect, Foursquare), anh tự gửi, app theo dõi trạng thái.
 
+**Mỗi site một tài khoản riêng** cho email và từng mạng xã hội. Email gửi bắt buộc thuộc tên miền của site. App chặn khi một tài khoản, trang/board/công ty hoặc link profile đã gắn với site khác. Nên tạo app developer bằng tài khoản của chính site đó và nhập ở Off-page › Mạng xã hội › App developer riêng; app chung ở Cài đặt › API key chỉ là dự phòng. Trước khi bấm Kết nối, đăng nhập đúng tài khoản của site (một profile Chrome riêng cho mỗi site).
+
 Cần làm một lần:
-1. Cài đặt › API key: ID/secret app developer của Pinterest, Meta, LinkedIn, X (redirect URI: `https://duyoi.duy.digital/api/social/oauth/callback`).
+1. Từng site: app developer của Pinterest, Meta, LinkedIn, X (redirect URI: `https://duyoi.duy.digital/api/social/oauth/callback`), nhập ở Off-page › Mạng xã hội.
 2. Từng site: Off-page › Team & cài đặt: tên người gửi, email gửi thuộc tên miền site, chủ đề.
 3. Cloudflare › Email Service › Sending: bật tên miền gửi (cần gói Workers Paid); Email Routing: bật; bấm **Dựng hộp thư** (token cần thêm Zone › Email Routing Rules Edit), rồi **Gửi thư thử**.
 4. Agent HQ › Quản lý prompt: duyệt 4 prompt mới (`outreach_draft`, `outreach_review`, `community_answer`, `social_caption`) và duyệt lại `lead_plan` (thêm việc off-page).

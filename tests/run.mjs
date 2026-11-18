@@ -1261,7 +1261,10 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
     // Social Entity: Bluesky (App Password) + X (OAuth PKCE)
     assert.equal((await cO("POST", `/api/social/${sid}/accounts`, { network: "bluesky", handle: "golfdemo.bsky.social", app_password: "sai" })).status, 400);
     assert.equal((await cO("POST", `/api/social/${sid}/accounts`, { network: "bluesky", handle: "golfdemo.bsky.social", app_password: "app-pass-1234" })).status, 200);
+    // App developer riêng của site được dùng thay app chung
+    assert.equal((await cO("PUT", `/api/social/${sid}/app`, { network: "x", client_id: "x-site-client", client_secret: "x-secret" })).status, 200);
     const start = await cO("GET", `/api/social/oauth/x/start?site=${sid}`);
+    assert.equal(new URL(start.headers.get("Location")).searchParams.get("client_id"), "x-site-client");
     assert.equal(start.status, 302);
     const loc = new URL(start.headers.get("Location"));
     assert.equal(loc.hostname, "x.com");
@@ -1286,6 +1289,16 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
     assert.equal(xp.status, "blocked", "bài X có số không có trong bài và nói đã test");
     assert.ok(xp.gate.problems.some((p) => p.rule === "numbers") && xp.gate.problems.some((p) => p.rule === "honesty"));
     assert.ok(v.entity["@graph"][0].sameAs.includes("https://x.com/golfdemo"), "sameAs từ profile");
+    // Mỗi site một tài khoản: tài khoản đã gắn site khác bị chặn
+    const s2 = (await cO("POST", "/api/sites", { name: "Golf 2", domain: "golfzwei.com", platform: "astro", siteType: "affiliate", market: "US", language: "en" })).data.site.id;
+    const dupB = await cO("POST", `/api/social/${s2}/accounts`, { network: "bluesky", handle: "golfdemo.bsky.social", app_password: "app-pass-1234" });
+    assert.equal(dupB.status, 409);
+    assert.match(dupB.data.message, /golfdemo\.com/);
+    assert.equal((await cO("POST", `/api/social/${s2}/accounts`, { network: "x", profile_url: "https://x.com/golfdemo" })).status, 409, "link profile trùng site khác");
+    const st2 = new URL((await cO("GET", `/api/social/oauth/x/start?site=${s2}`)).headers.get("Location")).searchParams.get("state");
+    const cb2 = await cO("GET", `/api/social/oauth/callback?state=${st2}&code=x-code`);
+    assert.match(decodeURIComponent(cb2.headers.get("Location")), /đang gắn với site golfdemo\.com/);
+    assert.ok(!(await cO("GET", `/api/offpage/${s2}`)).data.accounts.some((a) => a.network === "x"));
     // Link Monitor
     await cO("PUT", `/api/offpage/prospects/${v.prospects.find((p) => p.domain === "mentioner.example").id}`, { status: "won" });
     web["https://mentioner.example/best-tools/"] = `<html><body><p>We like the guides from <a href="https://golfdemo.com/garage-golf-simulator-guide/">Golfdemo</a>.</p></body></html>`;
