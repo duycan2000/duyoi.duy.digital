@@ -6,6 +6,7 @@ import { viewRecovery } from "./recovery.js";
 import { viewHq } from "./hq.js";
 import { viewStudio } from "./studio.js";
 import { viewStats } from "./stats.js";
+import { viewOffpage } from "./offpage.js";
 import { $, $$, esc, fmtTime, ago, showMsg, busy, formData, floatLabels } from "./ui.js";
 
 const app = $("#app");
@@ -211,7 +212,7 @@ const ICON = {
   close: "M6 6l12 12M18 6L6 18"
 };
 const GROUP_ICON = { rec: "trend", ops: "chart", site: "layers", content: "pen", tech: "shield", off: "link", ai: "spark", sys: "sliders" };
-const ITEM_ICON = { analytics: "chart", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
+const ITEM_ICON = { analytics: "chart", offpage: "users", prospects: "search", mail: "pen", backlinks: "link", citations: "list", entity: "globe", hq: "users", overview: "home", sites: "globe", members: "users", activity: "list", settings: "gear", account: "user" };
 const itemIcon = (id) => ICON[ITEM_ICON[id] || GROUP_ICON[ITEMS[id].group]];
 const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -394,7 +395,7 @@ function route() {
   const main = $("#main");
   main.className = `main g-${ITEMS[view].group}`;
   main.innerHTML = `<div class="page"><p class="note">Đang tải…</p></div>`;
-  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
+  const views = { recovery: (m, a) => viewRecovery(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), hq: (m, a) => viewHq(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs }), content: (m, a) => viewStudio(m, a, { state, icon, ICON }), analytics: (m, a) => viewStats(m, a, { state, icon, ICON }), ...Object.fromEntries(["offpage", "prospects", "mail", "backlinks", "citations", "entity"].map((id) => [id, (m, a) => viewOffpage(m, a, { state, icon, ICON, tabsNav, panelAttr, bindTabs, item: ITEMS[id] })])), overview: viewOverview, sites: viewSites, members: viewMembers, settings: viewSettings, account: viewAccount, activity: viewActivity };
   const fn = views[view] || viewSoon;
   Promise.resolve(fn(main, parts.slice(1), ITEMS[view])).catch((e) => {
     if (e.code === "must_change_password") { state.user.mustChangePassword = true; return renderForcePassword(); }

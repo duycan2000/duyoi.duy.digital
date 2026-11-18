@@ -23,7 +23,7 @@ Giao diện và cách hoạt động theo bản demo đã duyệt (`docs/prototy
 - Đăng bài: WordPress qua Application Password + plugin kết nối; Astro qua PR vào repo.
 - Quick wins, trang so sánh, free tool.
 
-## Giai đoạn 4 · Off-page
+## Giai đoạn 4 · Off-page (đã làm: xem README › Team off-page)
 - Prospects: tìm, chấm điểm, tìm email, đọc quy định nhận bài.
 - Hộp thư riêng từng site (Email Routing + Email Service), agent soạn, anh duyệt; báo về điện thoại.
 - Off-page team, Tìm link, Citations. Site Đức: không email lạnh.

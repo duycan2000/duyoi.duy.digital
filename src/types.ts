@@ -30,6 +30,21 @@ export interface Env {
   SETUP_TOKEN?: string;
   ENCRYPTION_KEY?: string;
   MEDIA?: R2Like;
+  EMAIL?: EmailSender;
+}
+
+// Cloudflare Email Service (binding send_email): gửi email outreach từ địa chỉ riêng của từng site
+export interface EmailSender {
+  send(message: { from: { email: string; name?: string }; to: { email: string }[]; subject: string; text?: string; html?: string; replyTo?: { email: string }; headers?: Record<string, string> }): Promise<{ messageId?: string } | unknown>;
+}
+
+// Thư đến qua Email Routing (handler email() của Worker)
+export interface InboundEmail {
+  from: string;
+  to: string;
+  headers: Headers;
+  raw: ReadableStream<Uint8Array>;
+  rawSize: number;
 }
 
 // Phần R2 app dùng (ảnh thật cho site Astro)

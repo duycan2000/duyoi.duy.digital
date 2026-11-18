@@ -13,9 +13,17 @@ export const SECRET_KEYS = {
   cloudflare_api_token: "Cloudflare API token",
   google_api_key: "Google Cloud API key",
   google_service_account: "Google service account (JSON)",
-  github_token: "GitHub token (đăng bài lên repo site Astro)"
+  github_token: "GitHub token (đăng bài lên repo site Astro)",
+  pinterest_app_id: "Pinterest App ID",
+  pinterest_app_secret: "Pinterest App secret",
+  meta_app_id: "Meta (Facebook) App ID",
+  meta_app_secret: "Meta (Facebook) App secret",
+  linkedin_client_id: "LinkedIn Client ID",
+  linkedin_client_secret: "LinkedIn Client secret",
+  x_client_id: "X (Twitter) Client ID",
+  x_client_secret: "X (Twitter) Client secret"
 } as const;
-type SecretKey = keyof typeof SECRET_KEYS;
+export type SecretKey = keyof typeof SECRET_KEYS;
 
 // Giá trị mặc định cho cài đặt thường. Kiểu của từng khoá dùng để kiểm tra dữ liệu gửi lên.
 export const DEFAULTS = {

@@ -22,7 +22,7 @@ export const MENU = [
     { id: "sites", label: "Site", live: true },
     { id: "context", label: "Project context", phase: 3, plan: ["Giọng văn, tác giả, đối tượng đọc của từng site", "Luật riêng: site Đức không email lạnh, bài review cần ảnh test thật"] },
     { id: "topical", label: "Topical map", phase: 3, plan: ["Import PDF nghiên cứu từ khoá (Semrush, Keyword Planner) và topical map có sẵn", "Sơ đồ hub, money, support; bài đã đăng và sẽ đăng"] },
-    { id: "entity", label: "Entity", phase: 5, plan: ["Entity home, schema Organization/Person có @id, sameAs", "Kiểm tra Knowledge Graph, about/mentions trong bài"] }
+    { id: "entity", label: "Entity & social", live: true }
   ]},
   { group: "Nội dung", key: "content", items: [
     { id: "keywords", label: "Keyword Hub", phase: 2, plan: ["Từ khoá theo cụm, intent, volume, KD", "Câu hỏi thật: PAA (mở 4 lớp), autocomplete, diễn đàn"] },
@@ -36,12 +36,11 @@ export const MENU = [
     { id: "penalty", label: "Penalty & cập nhật", phase: 5, plan: ["Đối chiếu tụt traffic với lịch Google update", "Soạn disavow khi có link spam"] }
   ]},
   { group: "Off-page", key: "off", items: [
-    { id: "backlinks", label: "Backlink monitoring", phase: 2, plan: ["Domain đang link, link mới/mất, anchor, lịch sử 90 ngày", "Cảnh báo anchor exact quá 15%, domain spam, mất nhiều hơn được"] },
-    { id: "prospects", label: "Prospects", phase: 4, plan: ["Tìm nơi guest post, link chết, nhắc tên chưa link, phóng viên", "Chấm điểm, tìm và kiểm tra email, đọc quy định nhận bài"] },
-    { id: "mail", label: "Hộp thư", phase: 4, plan: ["Hộp thư riêng từng site qua Cloudflare Email Routing + Email Service", "Agent gắn nhãn thư, soạn trả lời; anh duyệt trước khi gửi", "Báo về điện thoại qua Telegram hoặc ntfy"] },
-    { id: "offpage", label: "Off-page team", phase: 4, plan: ["Social entity, Prospector, Outreach, Community Scout (anh tự đăng Reddit/Quora)"] },
-    { id: "linkfind", label: "Tìm link", phase: 4, plan: ["Link intersect với đối thủ, trang tài nguyên, trang 404 của đối thủ"] },
-    { id: "citations", label: "Citations", phase: 4, plan: ["Danh bạ ngành và địa phương phù hợp (không làm GBP giả)"] }
+    { id: "offpage", label: "Off-page team", live: true },
+    { id: "prospects", label: "Prospects", live: true },
+    { id: "mail", label: "Email outreach", live: true },
+    { id: "backlinks", label: "Backlink", live: true },
+    { id: "citations", label: "Citations", live: true }
   ]},
   { group: "AI & tăng trưởng", key: "ai", items: [
     { id: "aivis", label: "AI visibility", phase: 5, plan: ["Theo dõi site có được ChatGPT, AI Overview, AI Mode, Perplexity nhắc tới không"] },

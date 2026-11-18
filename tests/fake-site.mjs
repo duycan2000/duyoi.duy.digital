@@ -1,7 +1,7 @@
 // Site WordPress giả (tiếng Đức) để kiểm thử chức năng Phục hồi thứ hạng mà không cần mạng.
 
 export function fakeSite(opts = {}) {
-  const host = "caddemo.de";
+  const host = opts.host || "caddemo.de";
   const filler = (topic, n) => Array.from({ length: n }, (_, i) => `<p>Im Bereich ${topic} ist die saubere Planung der erste Schritt für jedes Projekt und sie spart später viel Aufwand bei der Abstimmung mit allen Beteiligten im Team ${i}. Die Zeichnungen müssen klar und eindeutig sein, damit alle Gewerke die gleiche Grundlage haben und Fehler früh erkannt werden. Zum Schluss prüfen wir alle Details zu ${topic} noch einmal gründlich, bevor die Unterlagen an den Kunden gehen (Abschnitt ${i}).</p>`).join("");
   const render = (title, h1, body, extra = "") => `<!doctype html><html lang="de"><head><title>${title}</title><meta name="description" content="${h1} – Beschreibung."><link rel="canonical" href="https://${host}${extra}"></head><body class="elementor-default"><header><nav><a href="/">Start</a><a href="/cad-dienstleistung-tga/">TGA</a><a href="/kontakt/">Kontakt</a></nav></header><main><h1>${h1}</h1>${body}</main><footer><a href="/impressum/">Impressum</a></footer></body></html>`;
   const page = (title, h1, body, extra = "") => ({ title, h1, body, extra });
@@ -18,6 +18,8 @@ export function fakeSite(opts = {}) {
     "/referenzen-alt/": page("Referenzen", "Referenzen", `<h2>Projekte</h2>${filler("Referenzen", 2)}<p>Gemeinsam mit 3DScan Solutions umgesetzt [LINK 1].</p><img src="/wp-content/uploads/3dscan.png">`, "/referenzen-alt/")
   };
   const urls = Object.keys(pages).concat(["/geloeschte-seite/"]);
+  const extra = opts.extra || {};
+  const sitemapNow = () => `<?xml version="1.0"?><urlset>${urls.concat(Object.keys(extra)).map((u, i) => `<url><loc>https://${host}${u}</loc></url>`).join("")}</urlset>`;
   const sitemap = `<?xml version="1.0"?><urlset>${urls.map((u, i) => `<url><loc>https://${host}${u}</loc><lastmod>2025-0${(i % 3) + 6}-01</lastmod></url>`).join("")}</urlset>`;
   const index = `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://${host}/page-sitemap.xml</loc></sitemap></sitemapindex>`;
   // Trạng thái WordPress giả: mỗi trang là một bài; bài CAD-Symbole dựng bằng Elementor
@@ -101,6 +103,20 @@ export function fakeSite(opts = {}) {
       const kw = [["cad zeichner tga", 320, 22, "commercial"], ["tga planung cad", 140, 30, "informational"], ["cad outsourcing kosten", 90, 18, "commercial"], ["12 wichtige cad symbole fur architektur", 900, 20, "informational"], ["3dscan alternative", 50, 10, "commercial"], ["haustechnik zeichnung erstellen lassen", 70, 15, "transactional"], ["autocad download", 5000, 60, "navigational"], ["tga symbole liste", 40, 12, "informational"]];
       return jsonRes({ status_code: 20000, cost: 0.0115, tasks: [{ status_code: 20000, cost: 0.0115, result: [{ items: kw.map(([k, v, d, i]) => ({ keyword: k, keyword_info: { search_volume: v, cpc: 2.1 }, keyword_properties: { keyword_difficulty: d }, search_intent_info: { main_intent: i } })) }] }] });
     }
+    if (u.pathname.includes("bulk_traffic_estimation")) {
+      const etv = { "partnerblog.example": 5000, "resources.example": 2000, "mentioner.example": 800, "paidposts.example": 9000, "tinyblog.example": 10 };
+      return jsonRes({ status_code: 20000, cost: 0.011, tasks: [{ status_code: 20000, cost: 0.011, result: [{ items: task.targets.map((t) => ({ target: t, metrics: { organic: { etv: etv[t] ?? 300 } } })) }] }] });
+    }
+    if (u.pathname.includes("serp/google/organic") && /write for us|intitle:resources|site:reddit|site:quora|site:gutefrage|^"/.test(task.keyword)) {
+      const k = task.keyword;
+      const o = (url, title, description = "") => ({ type: "organic", url, domain: new URL(url).hostname, title, description });
+      const items = /write for us/.test(k) ? [o("https://partnerblog.example/write-for-us/", "Write for us – Golf Simulator Blog"), o("https://paidposts.example/write-for-us/", "Write for us: sponsored posts"), o("https://www.reddit.com/r/golf/x", "reddit"), o("https://tinyblog.example/write-for-us/", "Write for us")]
+        : /intitle:resources/.test(k) ? [o("https://resources.example/golf-resources/", "Golf Simulator Resources")]
+        : /site:reddit/.test(k) ? [o("https://www.reddit.com/r/Golfsimulator/comments/abc/is_9_ft_ceiling_enough/", "Is 9 ft ceiling enough for a garage golf simulator?", "My garage has a 9 ft ceiling…")]
+        : /site:quora/.test(k) ? [o("https://www.quora.com/What-is-the-cheapest-way-to-build-a-golf-simulator", "What is the cheapest way to build a golf simulator?")]
+        : /^"/.test(k) ? [o("https://mentioner.example/best-tools/", "Best golf tools 2026")] : [];
+      return jsonRes({ status_code: 20000, cost: 0.002, tasks: [{ status_code: 20000, cost: 0.002, result: [{ items }] }] });
+    }
     if (u.pathname.includes("serp/google/organic")) {
       return jsonRes({ status_code: 20000, cost: 0.002, tasks: [{ status_code: 20000, cost: 0.002, result: [{ items: [
         { type: "organic", title: `${task.keyword} – Ratgeber`, url: "https://example.de/a", description: "Ein Überblick." },
@@ -151,6 +167,15 @@ export function fakeSite(opts = {}) {
       const cite = user.web_facts?.length ? `<p>Laut <a href="${user.web_facts[0].source_url}">${user.web_facts[0].source_title}</a> gliedert die HOAI die Planung in die Leistungsphasen 1 bis 9, siehe auch <a href="https://evil.example/z">hier</a>.</p>` : "";
       const html = `${cite}<p>Wer eine TGA-Planung vergibt, möchte vor allem wissen, wie der Ablauf aussieht, welche Unterlagen nötig sind und wie Rückfragen vermieden werden.</p><h2>Worauf es ankommt</h2>${Array.from({ length: 8 }, (_, i) => para(i)).join("")}<h2>Ablauf</h2>${Array.from({ length: 8 }, (_, i) => para(i + 8)).join("")}<h2>Unterlagen und Abstimmung</h2>${Array.from({ length: 8 }, (_, i) => para(i + 16)).join("")}<p>Unterstützung bietet unsere <a href="${user.service_page}">CAD-Dienstleistung TGA</a>.</p>${bad ? "<p>Sie sparen damit 30% der Kosten.</p>" : ""}<script>alert(1)</script>`;
       content = { title: user.outline.title, html, meta_description: "Leitfaden zur TGA-Planung." };
+    } else if (/personal outreach email/.test(sys)) {
+      const paid = /Resources/.test(user.recipient_page.title || "");
+      content = { subject: `A note about ${String(user.recipient_page.title).slice(0, 30)}`, body: `Hi, I read your page "${user.recipient_page.title}" and found it clear. ${paid ? "I can pay a small fee for a link. " : ""}We wrote a guide that fits: ${user.target_page.url}. Would it help your readers?`, followup_body: "Just checking whether you saw my note. No worries if not.", pitch_title: "" };
+    } else if (/review ONE outreach email/.test(sys)) {
+      content = { score: 81, issues: ["Thư ngắn gọn, đúng trang người nhận."], fixed_subject: "", fixed_body: "", fixed_followup: "" };
+    } else if (/helpful answer that the owner will review/.test(sys)) {
+      content = { answer: `A 9 ft ceiling works for most golfers if you swing carefully. See also https://evil.example/spam for more.`, include_link: true, why: "Câu hỏi đúng bài." };
+    } else if (/social posts that share ONE article/.test(sys)) {
+      content = { posts: user.networks.map((n) => ({ network: n, text: n === "x" ? "We tested it: 40% faster setup for your garage sim." : `New guide: ${user.title}. What to check before you buy.`, title: user.title, alt_text: user.title })) };
     } else if (user.sections) {
       const bad = /Kosten/.test(user.page_title || "");
       content = { answers: user.sections.slice(0, 2).map((s) => ({ heading: s.heading, answer: bad ? "Mit uns arbeiten Sie 40% schneller und sparen Zeit bei jedem Projekt." : `Kurz gesagt: Bei ${s.heading} kommt es auf eine saubere und abgestimmte Planung an. Wir prüfen alle Unterlagen gründlich, bevor sie an Sie gehen.` })), faq_title: "Häufige Fragen", faq: [1, 2, 3].map((i) => ({ q: `Wie läuft die Zusammenarbeit ab (Frage ${String.fromCharCode(64 + i)})?`, a: "Sie senden uns Ihre Unterlagen, wir stimmen die Anforderungen ab und liefern geprüfte Zeichnungen." })) };
@@ -237,6 +262,19 @@ export function fakeSite(opts = {}) {
     }
     if (u.hostname === "api.github.com") return github(u, init);
     if (u.hostname === "api.cloudflare.com") return cloudflare(u, init);
+    if (opts.web && u.href in opts.web) { const w = opts.web[u.href]; const r = typeof w === "number" ? new Response("gone", { status: w }) : new Response(w, { status: 200, headers: { "content-type": "text/html" } }); Object.defineProperty(r, "url", { value: u.href }); return r; }
+    if (u.hostname === "bsky.social") {
+      const b = init?.body ? JSON.parse(init.body) : {};
+      const so = opts.social || (opts.social = { posts: [] });
+      if (u.pathname.endsWith("createSession")) return b.password === "app-pass-1234" ? jsonRes({ did: "did:plc:golf", accessJwt: "jwt1", handle: b.identifier }) : jsonRes({ error: "AuthenticationRequired", message: "Invalid identifier or password" }, 401);
+      if (u.pathname.endsWith("createRecord")) { if (new Headers(init.headers).get("Authorization") !== "Bearer jwt1") return jsonRes({ error: "auth" }, 401); so.posts.push({ net: "bluesky", ...b }); return jsonRes({ uri: `at://did:plc:golf/app.bsky.feed.post/r${so.posts.length}`, cid: "c" }); }
+    }
+    if (u.hostname === "api.x.com") {
+      const so = opts.social || (opts.social = { posts: [] });
+      if (u.pathname === "/2/oauth2/token") { const f = new URLSearchParams(init.body); return f.get("code") === "x-code" && f.get("code_verifier") && new Headers(init.headers).get("Authorization")?.startsWith("Basic ") ? jsonRes({ access_token: "x-tok", refresh_token: "x-ref", expires_in: 7200 }) : jsonRes({ error: "invalid_request" }, 400); }
+      if (u.pathname === "/2/users/me") return jsonRes({ data: { id: "1", username: "golfdemo" } });
+      if (u.pathname === "/2/tweets") { so.posts.push({ net: "x", ...JSON.parse(init.body) }); return jsonRes({ data: { id: `t${so.posts.length}` } }, 201); }
+    }
     const stRoute = u.hostname.replace(/^www\./, "") === host && cfs.routes.find((r) => /\/_[0-9a-f]{8}\/\*$/.test(r.pattern) && u.pathname.startsWith(r.pattern.slice(r.pattern.indexOf("/"), -1)));
     if (stRoute) {
       const w = cfs.workers[stRoute.script];
@@ -260,7 +298,7 @@ export function fakeSite(opts = {}) {
     if (u.pathname.startsWith("/wp-json/duyoi/v1")) return wpRoute(u, init);
     const pg = pages[u.pathname];
     const body = u.pathname === "/robots.txt" ? `User-agent: *\nDisallow: /wp-admin/\nSitemap: https://${host}/sitemap_index.xml`
-      : u.pathname === "/sitemap_index.xml" ? index : u.pathname === "/page-sitemap.xml" ? sitemap : pg ? render(pg.title, pg.h1, pg.body, pg.extra) : null;
+      : u.pathname === "/sitemap_index.xml" ? index : u.pathname === "/page-sitemap.xml" ? (Object.keys(extra).length ? sitemapNow() : sitemap) : pg ? render(pg.title, pg.h1, pg.body, pg.extra) : extra[u.pathname] || null;
     if (!body) return new Response("<html>404</html>", { status: 404, headers: { "content-type": "text/html" } });
     const type = u.pathname.endsWith(".xml") ? "application/xml" : u.pathname.endsWith(".txt") ? "text/plain" : "text/html; charset=utf-8";
     const res = new Response(body, { status: 200, headers: { "content-type": type } });

@@ -3,6 +3,8 @@
 // Việc nhẹ (nghiên cứu từ khoá, tạo chủ đề) chạy ngay; việc nặng (dàn ý, viết, chấm, quét lại) chạy bằng cron hoặc nút Chạy ngay.
 
 import { statsForLead } from "./stats";
+import { checkLinksCore, draftOutreachCore, findProspectsCore, findThreadsCore, germanSite, readOp, siteOf } from "./offpage";
+import { socialRun } from "./social";
 import { aiJson } from "./ai";
 import { logActivity } from "./activity";
 import { approveIdeaCore, briefCore, createIdeaCore, draftCore, researchCore, reviewCore, waitingInterview } from "./content";
@@ -21,7 +23,12 @@ export const ACTIONS = {
   write_brief: { agent: "planner", label: "Lập dàn ý", heavy: true },
   write_draft: { agent: "writer", label: "Viết bài nháp (kèm Biên tập viên chấm)", heavy: true },
   review_draft: { agent: "editor", label: "Biên tập viên sửa và chấm lại", heavy: true },
-  rescan_site: { agent: "doctor", label: "Quét lại site", heavy: true }
+  rescan_site: { agent: "doctor", label: "Quét lại site", heavy: true },
+  find_prospects: { agent: "prospector", label: "Tìm nơi xin link (guest post, mention, broken link, tài nguyên)", heavy: true },
+  draft_outreach: { agent: "outreach_writer", label: "Soạn email outreach (anh duyệt trước khi gửi)", heavy: true },
+  find_threads: { agent: "community", label: "Tìm thread Reddit/Quora, soạn câu trả lời cho anh tự đăng", heavy: true },
+  social_sync: { agent: "social", label: "Đăng bài mới lên mạng xã hội đã kết nối", heavy: true },
+  check_links: { agent: "link_monitor", label: "Kiểm tra backlink đã có", heavy: false }
 } as const;
 type Action = keyof typeof ACTIONS;
 
@@ -48,6 +55,9 @@ export async function leadState(env: Env) {
       service_pages: hubs.map((h) => ({ path: h.path, title: h.title })),
       documents: docs?.n || 0,
       analytics: await statsForLead(env, s.domain).catch(() => null),
+      offpage: await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM op_prospects WHERE site_id = ?1 AND status = 'new') AS new_prospects, (SELECT COUNT(*) FROM op_messages WHERE site_id = ?1 AND status IN ('ready', 'needs_fix')) AS emails_waiting_owner,
+        (SELECT COUNT(*) FROM op_messages WHERE site_id = ?1 AND status = 'sent' AND kind = 'initial') AS emails_sent, (SELECT COUNT(*) FROM op_messages WHERE site_id = ?1 AND status = 'replied') AS replies, (SELECT COUNT(*) FROM op_threads WHERE site_id = ?1 AND status = 'drafted') AS forum_answers_waiting_owner,
+        (SELECT COUNT(*) FROM op_links WHERE site_id = ?1 AND status IN ('live', 'nofollow')) AS backlinks_live, (SELECT COUNT(*) FROM social_accounts WHERE site_id = ?1 AND status = 'connected') AS social_connected`).bind(s.id).first().then((r) => ({ ...r, german_no_cold_email: germanSite(s) })).catch(() => null),
       profile: { summary: profile.summary, services: profile.services.slice(0, 10), products: profile.products.slice(0, 10).map((p) => p.name), facts: profile.facts.length, ideas_from_documents: profile.ideas.slice(0, 10) },
       ideas: ideas.map((i) => {
         const f = formatOf(String(i.format));
@@ -105,6 +115,10 @@ async function validate(env: Env, raw: unknown[]): Promise<PlanItem[]> {
       if (item.keyword.length < 3) bad("Thiếu từ khoá.");
       const dup = await env.DB.prepare("SELECT id FROM content_ideas WHERE site_id = ? AND keyword = ?").bind(item.site_id, item.keyword).first();
       if (dup && item.ok) bad("Chủ đề này đã có trong danh sách.");
+    }
+    if (["find_prospects", "draft_outreach"].includes(action) && site && item.ok) {
+      const so = await siteOf(env, item.site_id);
+      if (germanSite(so)) bad("Site Đức: không outreach email lạnh (§ 7 UWG).");
     }
     if (["research_keywords", "create_article", "rescan_site"].includes(action) && item.ok) {
       const c = await env.DB.prepare("SELECT id FROM recovery_cases WHERE site_id = ? AND status != 'archived' ORDER BY id DESC LIMIT 1").bind(item.site_id).first();
@@ -194,6 +208,11 @@ export async function runJob(env: Env, id: number): Promise<{ ok: boolean; resul
     if (claim.action === "write_brief") { await briefCore(env, p.idea_id!, actor); result = "Đã lập dàn ý"; }
     if (claim.action === "write_draft") { const g = await draftCore(env, p.idea_id!, actor); result = g.ok ? "Đã viết nháp, qua Gác cổng" : `Đã viết nháp, Gác cổng còn ${g.problems.filter((x) => x.level === "block").length} lỗi chặn`; }
     if (claim.action === "review_draft") { const g = await reviewCore(env, p.idea_id!, true, actor); result = g.ok ? "Đã sửa và chấm lại, qua Gác cổng" : "Đã sửa và chấm lại"; }
+    if (claim.action === "find_prospects") { const r = await findProspectsCore(env, claim.site_id, actor); result = r.note || `Tìm được ${r.found} nơi mới, bỏ ${r.skipped}`; }
+    if (claim.action === "draft_outreach") { const r = await draftOutreachCore(env, claim.site_id, null, actor); result = r.note || `Soạn ${r.drafted} email chờ anh duyệt`; }
+    if (claim.action === "find_threads") { const r = await findThreadsCore(env, claim.site_id, actor); result = `Soạn ${r.drafted} câu trả lời cho anh tự đăng`; }
+    if (claim.action === "social_sync") { const so = await siteOf(env, claim.site_id); const r = await socialRun(env, claim.site_id, (await readOp(env, so)).settings, actor, true); result = r.note || `Bài mới ${r.newUrls}, chờ đăng ${r.queued}, đã đăng ${r.posted}`; }
+    if (claim.action === "check_links") { const r = await checkLinksCore(env, claim.site_id, actor); result = `Kiểm tra ${r.checked} link: ${r.live} còn, ${r.lost} mới mất`; }
     if (claim.action === "rescan_site") { await resetForRescan(env, await caseOf(env, claim.site_id)); result = "Đã xếp lịch quét lại"; }
     await env.DB.prepare("UPDATE agent_jobs SET status = 'done', result = ?, finished_at = ? WHERE id = ?").bind(result, now(), id).run();
     return { ok: true, result };

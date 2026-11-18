@@ -168,6 +168,25 @@ Cần plugin Duy Ơi Connector **1.2.0** trở lên (thêm chế độ `wrap_lin
 
 Tab **Đội agent** trong Agent HQ có thêm **Văn phòng 3D**: mỗi agent một bàn trong 4 phòng; đang làm thì chuyển động, có việc chờ hiện dấu "!", bị chặn hiện đỏ, rảnh thì mờ. Bấm bàn để xem chi tiết; nút **Dạng thẻ** quay lại kiểu cũ (điện thoại mặc định dạng thẻ).
 
+### Team off-page (backlink, outreach, mạng xã hội, cộng đồng)
+
+Menu **Off-page team** (và các lối tắt Prospects, Email outreach, Backlink, Citations, Entity & social). Agent HQ có khu **Off-page** với 7 agent. Cron chạy tự động cho mọi site đang chạy; Trưởng nhóm giao được các việc `find_prospects`, `draft_outreach`, `find_threads`, `social_sync`, `check_links`.
+
+- **Prospector** (mỗi tuần): Google qua DataForSEO tìm trang "write for us", trang nhắc tên thương hiệu chưa link, trang tài nguyên (kiểm tra link chết → cơ hội broken link). Mở từng trang, tìm email (cả trang liên hệ), ước tính traffic; bỏ nơi bán link/nhận tiền đăng bài, traffic dưới mức đặt, mạng xã hội, diễn đàn.
+- **Outreach Writer + Reviewer**: soạn email ngắn riêng cho từng trang kèm một follow-up; Reviewer (model khác) chấm và sửa; code chặn nhắc tiền/đổi link, link ngoài site, nhận đã test khi Hồ sơ site không có, từ cấm, và **mọi email lạnh cho site Đức hoặc người nhận .de/.at/.ch** (§ 7 UWG). Hệ thống tự thêm tên người gửi, thương hiệu, địa chỉ và dòng từ chối nhận thư. Một tên miền chỉ được liên hệ một lần trong 30 ngày (tính cả các site khác).
+- **Anh duyệt từng thư** (tab Email). Thư đã duyệt gửi qua **Cloudflare Email Service** từ địa chỉ riêng của site, tối đa 2 thư/site mỗi lượt cron, cách nhau ít nhất 10 phút, theo trần mỗi ngày. Follow-up đã duyệt cùng thư đầu, gửi sau N ngày nếu chưa có trả lời.
+- **Thư đến**: Email Routing chuyển thư gửi tới địa chỉ outreach về Worker `duyoi` (handler `email()`); app ghép với thư đã gửi, dừng follow-up, có thể chuyển tiếp về hộp thư của anh.
+- **Community Scout** (mỗi tuần): tìm thread Reddit/Quora (site Đức: gutefrage), chấm rủi ro, soạn câu trả lời; link chỉ về trang phù hợp của site và kèm dòng công khai. **Agent không đăng**: anh chép, sửa, tự đăng rồi bấm "Đã đăng".
+- **Social Entity** (2 giờ một lần): đọc sitemap, bài mới thì viết bài chia sẻ cho từng mạng đã kết nối, qua Gác cổng (giới hạn ký tự, số phải có trong bài, không nhận đã test, tối đa 3 hashtag, không giật tít) rồi tự đăng, tối đa N bài/mạng/ngày, cách nhau 2 giờ. Bài cũ lúc kết nối không đăng lại. Pinterest dùng ảnh đại diện có sẵn của bài (og:image), không tạo ảnh AI. Mạng: Pinterest, Facebook Page, LinkedIn Page, X (OAuth), Bluesky (App Password); YouTube/Instagram/TikTok/Crunchbase chỉ ghi profile vào sameAs. Tab Mạng xã hội có JSON-LD Organization + sameAs để dán vào layout.
+- **Link Monitor** (mỗi tuần): mở trang nguồn của backlink đã có (từ "Có link" ở Prospects hoặc thêm tay), ghi còn/mất, dofollow/nofollow, anchor; báo khi mất link.
+- **Citations**: chỉ cho site dịch vụ có NAP thật; danh bạ theo thị trường (AU, US, CA, GB, DE, NZ + Bing Places, Apple Business Connect, Foursquare), anh tự gửi, app theo dõi trạng thái.
+
+Cần làm một lần:
+1. Cài đặt › API key: ID/secret app developer của Pinterest, Meta, LinkedIn, X (redirect URI: `https://duyoi.duy.digital/api/social/oauth/callback`).
+2. Từng site: Off-page › Team & cài đặt: tên người gửi, email gửi thuộc tên miền site, chủ đề.
+3. Cloudflare › Email Service › Sending: bật tên miền gửi (cần gói Workers Paid); Email Routing: bật; bấm **Dựng hộp thư** (token cần thêm Zone › Email Routing Rules Edit), rồi **Gửi thư thử**.
+4. Agent HQ › Quản lý prompt: duyệt 4 prompt mới (`outreach_draft`, `outreach_review`, `community_answer`, `social_caption`) và duyệt lại `lead_plan` (thêm việc off-page).
+
 ### Số liệu site (bộ đo riêng cho site Astro)
 
 Menu **Số liệu site**. Site tĩnh không tự biết khách làm gì, nên app dựng một bộ đo nhỏ trên chính tên miền của site:
@@ -222,6 +241,9 @@ src/
   dashboard.ts   tổng quan, tạm dừng, cron
   activity.ts    nhật ký
   http.ts        JSON, cookie, chặn CSRF, kiểm tra dữ liệu
+  offpage.ts     Prospector, Outreach (Email Service), thư đến, Community Scout, Link Monitor, Citations
+  social.ts      tài khoản mạng xã hội (OAuth), tự đăng bài mới, sameAs
+  web.ts         đọc trang, sitemap, email liên hệ
   stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request
 migrations/      schema D1

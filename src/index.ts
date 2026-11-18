@@ -16,10 +16,12 @@ import { apiDeleteDoc, apiDocs, apiSaveProfile, apiUploadDoc, apiVoice } from ".
 import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, apiRestorePlaybook, apiRunJob, apiSavePlaybook, processJobs } from "./lead";
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
+import { apiAddLink as opAddLink, apiCitation, apiDeleteLink as opDeleteLink, apiInboxRead, apiMessage, apiOffpageList, apiOffpageRun, apiOffpageView, apiProspect, apiSaveOpSettings, apiSetupMailbox, apiTestEmail, apiThread, handleInbound, runOffpage } from "./offpage";
+import { apiDeleteAccount, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
 import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
 import { apiApply as affApply, apiDecide as affDecide, apiDeleteLink as affDelete, apiLinks as affLinks, apiRollback as affRollback, apiSaveLink as affSave, apiScan as affScan } from "./affiliate";
 import { runAutopilot } from "./autopilot";
-import type { CronEvent, Env, ExecCtx } from "./types";
+import type { InboundEmail, CronEvent, Env, ExecCtx } from "./types";
 
 async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promise<Response> {
   const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -82,6 +84,40 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
 
   // Agent HQ và cấp Quản lý
   if (path === "/api/hq" && m === "GET") return hqView(env);
+  if (path === "/api/offpage" && m === "GET") return apiOffpageList(env);
+  const opSite = path.match(/^\/api\/offpage\/(\d+)(?:\/(settings|run|links|mailbox|test-email))?$/);
+  if (opSite) {
+    const sid = Number(opSite[1]);
+    if (!opSite[2] && m === "GET") return apiOffpageView(env, sid);
+    if (opSite[2] === "settings" && m === "PUT") return apiSaveOpSettings(env, req, user, sid);
+    if (opSite[2] === "run" && m === "POST") return apiOffpageRun(env, req, user, sid);
+    if (opSite[2] === "links" && m === "POST") return opAddLink(env, req, user, sid);
+    if (opSite[2] === "mailbox" && m === "POST") return apiSetupMailbox(env, user, sid);
+    if (opSite[2] === "test-email" && m === "POST") return apiTestEmail(env, req, user, sid);
+  }
+  const opItem = path.match(/^\/api\/offpage\/(prospects|messages|threads|links|citations|inbox)\/(\d+)$/);
+  if (opItem) {
+    const id = Number(opItem[2]);
+    if (opItem[1] === "prospects" && m === "PUT") return apiProspect(env, req, user, id);
+    if (opItem[1] === "messages" && m === "PUT") return apiMessage(env, req, user, id);
+    if (opItem[1] === "threads" && m === "PUT") return apiThread(env, req, user, id);
+    if (opItem[1] === "links" && m === "DELETE") return opDeleteLink(env, user, id);
+    if (opItem[1] === "citations" && m === "PUT") return apiCitation(env, req, user, id);
+    if (opItem[1] === "inbox" && m === "PUT") return apiInboxRead(env, user, id);
+  }
+  if (path === "/api/social/oauth/callback" && m === "GET") return apiOAuthCallback(env, req, user, url);
+  const soStart = path.match(/^\/api\/social\/oauth\/(\w+)\/start$/);
+  if (soStart && m === "GET") return apiOAuthStart(env, req, user, soStart[1]!, url);
+  const soAcc = path.match(/^\/api\/social\/(\d+)\/accounts$/);
+  if (soAcc && m === "POST") return apiSaveAccount(env, req, user, Number(soAcc[1]));
+  const soItem = path.match(/^\/api\/social\/(accounts|posts)\/(\d+)(\/targets)?$/);
+  if (soItem) {
+    const id = Number(soItem[2]);
+    if (soItem[1] === "accounts" && soItem[3] && m === "GET") return apiTargets(env, user, id);
+    if (soItem[1] === "accounts" && !soItem[3] && m === "PUT") return apiSetTarget(env, req, user, id);
+    if (soItem[1] === "accounts" && !soItem[3] && m === "DELETE") return apiDeleteAccount(env, user, id);
+    if (soItem[1] === "posts" && m === "PUT") return socialPost(env, req, user, id);
+  }
   if (path === "/api/stats" && m === "GET") return apiStats(env);
   if (path === "/api/stats/report" && m === "GET") return apiStatsReport(env, url);
   if (path === "/api/stats/domains" && m === "POST") return apiAddStatsDomain(env, req, user);
@@ -197,10 +233,15 @@ export default {
     return env.ASSETS.fetch(req);
   },
 
+  // Thư trả lời outreach: Email Routing chuyển thư gửi tới địa chỉ outreach của site về Worker này
+  async email(message: InboundEmail, env: Env, _ctx: ExecCtx): Promise<void> {
+    await handleInbound(message, env);
+  },
+
   async scheduled(_event: CronEvent, env: Env, ctx: ExecCtx): Promise<void> {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
     // Một lượt cron tối đa ~10 phút việc nặng: hàng việc của Trưởng nhóm trước, chế độ tự động dùng phần thời gian còn lại
     const started = Date.now();
-    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).then(() => processStats(env, started + 11 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
+    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).then(() => processStats(env, started + 11 * 60000)).then(() => runOffpage(env, started + 13 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
   }
 };

@@ -537,7 +537,7 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     // Agent HQ
     const hq = await c4("GET", "/api/hq");
     assert.equal(hq.status, 200);
-    assert.equal(hq.data.manager.promptsPending, 6, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm");
+    assert.equal(hq.data.manager.promptsPending, 10, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm + 4 prompt off-page");
     assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 6);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
@@ -1166,6 +1166,137 @@ await test("bộ đo riêng: thêm tên miền khi site chưa có, tự dựng W
     const list = (await cS("GET", "/api/stats")).data;
     assert.ok(list.cfReady);
     assert.equal(list.domains.find((x) => x.domain === "caddemo.de").status, "verified");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Service, dừng follow-up khi có trả lời), UWG, Community Scout, Social Entity (Bluesky, X OAuth), Link Monitor, HQ", async () => {
+  const sentMail = [];
+  const envO = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  envO.EMAIL = { send: async (m) => { sentMail.push(m); return { messageId: `<m${sentMail.length}@cf.example>` }; } };
+  const cO = client(envO);
+  await cO("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  await cO("PUT", "/api/settings", { secrets: { openrouter_api_key: "sk-or-test-123456", dataforseo_login: "a@b.de", dataforseo_password: "pw-123456", x_client_id: "x-client", x_client_secret: "x-secret" } });
+  for (const p of (await cO("GET", "/api/manager/prompts")).data.prompts) await cO("PUT", `/api/manager/prompts/${p.id}`, { status: "approved" });
+  const web = {
+    "https://partnerblog.example/write-for-us/": `<html><body><main><h1>Write for us</h1><p>We accept useful guides about golf simulators. Send your idea to <a href="mailto:editor@partnerblog.example">editor@partnerblog.example</a>.</p></main></body></html>`,
+    "https://paidposts.example/write-for-us/": `<html><body><p>Sponsored post price list: $150 per article.</p><a href="mailto:ads@paidposts.example">x</a></body></html>`,
+    "https://tinyblog.example/write-for-us/": `<html><body><p>Write for us.</p><a href="mailto:me@tinyblog.example">x</a></body></html>`,
+    "https://resources.example/golf-resources/": `<html><body><main><h1>Resources</h1><p>Our favourite golf simulator links.</p><a href="https://dead.example/old-guide">Old guide</a><a href="/contact/">Contact</a></main></body></html>`,
+    "https://resources.example/contact/": `<html><body><p>Mail us: hello@resources.example</p></body></html>`,
+    "https://dead.example/old-guide": 404,
+    "https://mentioner.example/best-tools/": `<html><body><article><p>We like the guides from Golfdemo for garage setups.</p><p>Contact: team@mentioner.example</p></article></body></html>`
+  };
+  const extra = {};
+  const fake = { host: "golfdemo.com", web, extra, social: { posts: [] } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite(fake);
+  try {
+    const site = await cO("POST", "/api/sites", { name: "Golfdemo", domain: "golfdemo.com", platform: "astro", siteType: "affiliate", market: "US", language: "en" });
+    const sid = site.data.site.id;
+    assert.equal((await cO("PUT", `/api/offpage/${sid}/settings`, { outreachEmail: "me@gmail.com" })).status, 400, "email gửi phải thuộc tên miền site");
+    assert.equal((await cO("PUT", `/api/offpage/${sid}/settings`, { senderName: "Lena Hart", outreachEmail: "hello@golfdemo.com", topics: "golf simulator", brandTerms: "Golfdemo", postalAddress: "1 Main St, Austin TX" })).status, 200);
+    // Prospector
+    let r = await cO("POST", `/api/offpage/${sid}/run`, { what: "prospects" });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    let v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    const by = (d) => v.prospects.find((p) => p.domain === d);
+    assert.equal(by("partnerblog.example").kind, "guest_post");
+    assert.equal(by("partnerblog.example").contact_email, "editor@partnerblog.example");
+    assert.equal(by("resources.example").kind, "broken_link", "trang tài nguyên có link chết");
+    assert.equal(by("resources.example").dead_url, "https://dead.example/old-guide");
+    assert.equal(by("resources.example").contact_email, "hello@resources.example", "lấy email từ trang liên hệ");
+    assert.equal(by("mentioner.example").kind, "mention");
+    assert.equal(by("paidposts.example").status, "skipped", "nơi bán link bị bỏ");
+    assert.equal(by("tinyblog.example").status, "skipped", "traffic thấp bị bỏ");
+    assert.ok(!v.prospects.some((p) => p.domain.includes("reddit")), "bỏ mạng xã hội/diễn đàn");
+    // Outreach Writer + Reviewer
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "drafts" });
+    assert.equal(r.data.drafted, 3, JSON.stringify(r.data));
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    const init = v.messages.filter((m) => m.kind === "initial");
+    const okMsg = init.find((m) => m.to_email === "editor@partnerblog.example");
+    const badMsg = init.find((m) => m.to_email === "hello@resources.example");
+    assert.equal(okMsg.status, "ready");
+    assert.equal(badMsg.status, "needs_fix");
+    assert.ok(badMsg.review.problems.some((p) => p.rule === "paid"), "nhắc trả tiền bị chặn");
+    assert.match(okMsg.body, /Lena Hart\nGolfdemo · https:\/\/golfdemo\.com\n1 Main St/);
+    assert.match(okMsg.body, /reply "no"/, "có dòng từ chối nhận thư");
+    assert.ok(v.messages.some((m) => m.kind === "followup" && m.parent_id === okMsg.id && m.status === "draft"));
+    assert.equal((await cO("PUT", `/api/offpage/messages/${badMsg.id}`, { action: "approve" })).status, 409, "thư còn lỗi chặn không duyệt được");
+    // Sửa thư lỗi thì hết chặn
+    const fixed = await cO("PUT", `/api/offpage/messages/${badMsg.id}`, { body: badMsg.body.replace("I can pay a small fee for a link. ", "") });
+    assert.equal(fixed.data.status, "ready");
+    // Chưa duyệt thì không gửi
+    await cO("POST", `/api/offpage/${sid}/run`, { what: "send" });
+    assert.equal(sentMail.length, 0);
+    assert.equal((await cO("PUT", `/api/offpage/messages/${okMsg.id}`, { action: "approve" })).status, 200);
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "send" });
+    assert.equal(r.data.sent, 1);
+    assert.equal(sentMail[0].from.email, "hello@golfdemo.com");
+    assert.deepEqual(sentMail[0].to, [{ email: "editor@partnerblog.example" }]);
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    const fu = v.messages.find((m) => m.kind === "followup" && m.parent_id === okMsg.id);
+    assert.equal(fu.status, "approved", "follow-up được duyệt cùng thư đầu");
+    assert.ok(fu.send_after > Date.now() + 4 * 86400000, "follow-up sau 5 ngày");
+    assert.equal(v.prospects.find((p) => p.domain === "partnerblog.example").status, "contacted");
+    // Thư trả lời qua Email Routing → dừng follow-up
+    const raw = new Blob(["Subject: Re: idea\r\nFrom: editor@partnerblog.example\r\n\r\nSounds good, send the draft.\r\n> quoted"]).stream();
+    await worker.email({ from: "editor@partnerblog.example", to: "hello@golfdemo.com", headers: new Headers({ subject: "Re: idea", "message-id": "<r1@pb>", "in-reply-to": "<m1@cf.example>" }), raw, rawSize: 80 }, envO, { waitUntil() {} });
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    assert.equal(v.inbox[0].snippet, "Sounds good, send the draft.");
+    assert.equal(v.messages.find((m) => m.id === okMsg.id).status, "replied");
+    assert.equal(v.messages.find((m) => m.id === fu.id).status, "cancelled");
+    assert.equal(v.prospects.find((p) => p.domain === "partnerblog.example").status, "replied");
+    // Site Đức: không outreach
+    const de = await cO("POST", "/api/sites", { name: "Saunademo", domain: "saunademo.de", platform: "astro", siteType: "affiliate", market: "DE", language: "de" });
+    assert.match((await cO("POST", `/api/offpage/${de.data.site.id}/run`, { what: "prospects" })).data.note, /UWG/);
+    // Community Scout: link lạ bị gỡ, link về site kèm dòng công khai, không tự đăng
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "threads" });
+    assert.equal(r.data.drafted, 2);
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    assert.ok(v.threads.every((t) => !t.draft.includes("evil.example")));
+    assert.ok(v.threads.every((t) => t.status === "drafted"));
+    // Social Entity: Bluesky (App Password) + X (OAuth PKCE)
+    assert.equal((await cO("POST", `/api/social/${sid}/accounts`, { network: "bluesky", handle: "golfdemo.bsky.social", app_password: "sai" })).status, 400);
+    assert.equal((await cO("POST", `/api/social/${sid}/accounts`, { network: "bluesky", handle: "golfdemo.bsky.social", app_password: "app-pass-1234" })).status, 200);
+    const start = await cO("GET", `/api/social/oauth/x/start?site=${sid}`);
+    assert.equal(start.status, 302);
+    const loc = new URL(start.headers.get("Location"));
+    assert.equal(loc.hostname, "x.com");
+    assert.equal(loc.searchParams.get("code_challenge_method"), "S256");
+    const cb = await cO("GET", `/api/social/oauth/callback?state=${loc.searchParams.get("state")}&code=x-code`);
+    assert.equal(cb.status, 302);
+    assert.match(decodeURIComponent(cb.headers.get("Location")), /Đã kết nối X/);
+    assert.equal((await cO("GET", `/api/social/oauth/callback?state=${loc.searchParams.get("state")}&code=x-code`)).status, 302, "state chỉ dùng một lần");
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    assert.equal(v.accounts.find((a) => a.network === "x").handle, "@golfdemo");
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "social" });
+    assert.match(r.data.note, /Lần đầu/, "bài cũ không đăng lại");
+    assert.equal(fake.social.posts.length, 0);
+    extra["/garage-golf-simulator-guide/"] = `<html lang="en"><head><title>Garage golf simulator guide</title><meta property="og:image" content="https://golfdemo.com/images/hero.jpg"></head><body><article><p>How to plan a garage golf simulator: ceiling height, mat and screen, step by step for beginners.</p></article></body></html>`;
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "social" });
+    assert.equal(r.data.newUrls, 1);
+    assert.equal(r.data.posted, 1, JSON.stringify(r.data));
+    assert.equal(fake.social.posts[0].net, "bluesky");
+    assert.equal(fake.social.posts[0].record.embed.external.uri, "https://golfdemo.com/garage-golf-simulator-guide/");
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    const xp = v.posts.find((p) => p.network === "x");
+    assert.equal(xp.status, "blocked", "bài X có số không có trong bài và nói đã test");
+    assert.ok(xp.gate.problems.some((p) => p.rule === "numbers") && xp.gate.problems.some((p) => p.rule === "honesty"));
+    assert.ok(v.entity["@graph"][0].sameAs.includes("https://x.com/golfdemo"), "sameAs từ profile");
+    // Link Monitor
+    await cO("PUT", `/api/offpage/prospects/${v.prospects.find((p) => p.domain === "mentioner.example").id}`, { status: "won" });
+    web["https://mentioner.example/best-tools/"] = `<html><body><p>We like the guides from <a href="https://golfdemo.com/garage-golf-simulator-guide/">Golfdemo</a>.</p></body></html>`;
+    r = await cO("POST", `/api/offpage/${sid}/run`, { what: "links" });
+    assert.equal(r.data.live, 1);
+    v = (await cO("GET", `/api/offpage/${sid}`)).data;
+    assert.equal(v.links[0].anchor, "Golfdemo");
+    // HQ có khu Off-page
+    const hq = (await cO("GET", "/api/hq")).data;
+    assert.equal(hq.zones.offpage.length, 7);
+    assert.ok(hq.offpageAsks.some((a) => a.kind === "community"));
   } finally {
     globalThis.fetch = realFetch;
   }

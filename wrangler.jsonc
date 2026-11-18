@@ -28,6 +28,10 @@
   // Wrangler 4.45+ tự tạo bucket khi deploy nếu chưa có. Mỗi site gắn tên miền ảnh riêng vào bucket (R2 › Settings › Custom Domains).
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "duyoi-media" }],
 
+  // Cloudflare Email Service: gửi email outreach (anh duyệt từng thư) từ địa chỉ riêng của từng site.
+  // Mỗi tên miền gửi phải được bật ở Email Service › Sending. Thư trả lời về qua Email Routing → Worker này (handler email()).
+  "send_email": [{ "name": "EMAIL" }],
+
   // Cron 15 phút: chỉ ghi nhịp và (từ giai đoạn 2) đẩy việc đến hạn vào hàng đợi.
   "triggers": { "crons": ["*/15 * * * *"] },
 

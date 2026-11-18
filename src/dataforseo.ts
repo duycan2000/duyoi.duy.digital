@@ -69,3 +69,20 @@ export async function serpInfo(env: Env, siteId: number, keyword: string, market
     paa: items.filter((i) => i.type === "people_also_ask").flatMap((i) => (i.items || []).map((q) => q.title || "")).filter(Boolean).slice(0, 10)
   };
 }
+
+export interface SerpHit { title: string; url: string; domain: string; description: string }
+
+// Một truy vấn Google bất kỳ (dùng cho Prospector, Community Scout): chỉ kết quả organic
+export async function serpOrganic(env: Env, siteId: number, query: string, market: string, language: string, agent: string, task: string, depth = 20): Promise<SerpHit[]> {
+  type Item = { type?: string; title?: string; url?: string; domain?: string; description?: string };
+  const r = await call<{ items?: Item[] }>(env, "serp/google/organic/live/advanced", { keyword: query, location_code: LOCATION[market] || 2840, language_code: language, depth }, { agent, task, siteId });
+  return (r.items || []).filter((i) => i.type === "organic" && i.url).map((i) => ({ title: i.title || "", url: i.url!, domain: (i.domain || new URL(i.url!).hostname).replace(/^www\./, ""), description: (i.description || "").slice(0, 300) }));
+}
+
+// Lượng truy cập tự nhiên ước tính (ETV/tháng) của nhiều tên miền một lần
+export async function trafficEstimate(env: Env, siteId: number, domains: string[], market: string, language: string, agent: string): Promise<Record<string, number>> {
+  if (!domains.length) return {};
+  type Item = { target?: string; metrics?: { organic?: { etv?: number } } };
+  const r = await call<{ items?: Item[] }>(env, "dataforseo_labs/google/bulk_traffic_estimation/live", { targets: domains.slice(0, 50), location_code: LOCATION[market] || 2840, language_code: language, item_types: ["organic"] }, { agent, task: "offpage.traffic", siteId });
+  return Object.fromEntries((r.items || []).filter((i) => i.target).map((i) => [i.target!.replace(/^www\./, ""), Math.round(i.metrics?.organic?.etv || 0)]));
+}
