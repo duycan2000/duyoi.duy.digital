@@ -5,7 +5,7 @@ import { $, $$, esc, fmtTime, ago, showMsg, busy } from "./ui.js";
 
 let K;
 const STATE = { working: ["Đang làm", "info"], waiting: ["Có việc chờ", "warn"], idle: ["Rảnh", ""], blocked: ["Chờ Quản lý duyệt prompt", "err"] };
-const ZONES = [["manager", "Điều hành", "Quản lý kiểm prompt và chi tiêu trước khi agent được làm"], ["recovery", "Phục hồi thứ hạng", "Quét, chẩn đoán, sửa site bị tụt hạng"], ["content", "Nội dung mới", "Cấu trúc, từ khoá, dàn ý, bài nháp"], ["auto", "Tự động", "Lịch chạy 15 phút một lần"], ["offpage", "Off-page", "Backlink, outreach, mạng xã hội, cộng đồng"]];
+const ZONES = [["manager", "Điều hành", "Quản lý kiểm prompt và chi tiêu trước khi agent được làm"], ["recovery", "Phục hồi thứ hạng", "Quét, chẩn đoán, sửa site bị tụt hạng"], ["content", "Nội dung mới", "Cấu trúc, từ khoá, dàn ý, bài nháp"], ["auto", "Tự động", "Lịch chạy 15 phút một lần"], ["offpage", "Off-page", "Backlink, outreach, mạng xã hội, cộng đồng"], ["monitor", "Theo dõi & cảnh báo", "Thứ hạng, traffic, backlink; phản ứng khi tụt đột ngột"]];
 const money = (n) => `$${(Number(n) || 0).toFixed(Number(n) >= 1 ? 2 : 4)}`;
 const tag = ([l, c]) => `<span class="tag ${c}">${esc(l)}</span>`;
 const ACTOR = { doctor: "Bác sĩ SEO", linker: "Nối link nội bộ", funnel: "Phễu CTA", geo: "GEO", research: "Nghiên cứu từ khoá", planner: "Biên tập viên", writer: "Người viết", autopilot: "Tự động", manager: "Quản lý" };
@@ -20,6 +20,7 @@ export async function viewHq(main, args, kit) {
     <div class="page-head"><div><h2>Agent HQ</h2><p>Đội agent làm việc cho các site của anh. Mọi prompt phải được Quản lý duyệt, mọi lần gọi AI và DataForSEO đều được kiểm trần chi phí và ghi lại.</p></div>
       <div class="toolbar"><button type="button" id="hq-refresh">${K.icon(K.ICON.clock)}Làm mới</button></div></div>
     ${hq.asks?.length ? `<div class="msg warn"><b>Agent đang hỏi anh (${hq.asks.length}):</b> ${hq.asks.slice(0, 4).map((a) => `<a href="#/recovery/${a.caseId}/content">${esc(a.domain)} · "${esc(a.keyword)}"</a>: ${esc(a.text)}`).join(" · ")}</div>` : ""}
+    ${hq.monitorAsks?.length ? `<div class="msg warn"><b>Cảnh báo thứ hạng:</b> ${hq.monitorAsks.slice(0, 5).map((a) => `<a href="#/rankings/${a.siteId}">${esc(a.domain)}</a>: ${esc(a.text)}`).join(" · ")}</div>` : ""}
     ${hq.offpageAsks?.length ? `<div class="msg warn"><b>Off-page chờ anh:</b> ${hq.offpageAsks.slice(0, 5).map((a) => `<a href="#/offpage/${a.siteId}">${esc(a.domain)}</a>: ${esc(a.text)}`).join(" · ")}</div>` : ""}
     ${hq.manager.promptsPending ? `<div class="msg warn">${hq.manager.promptsPending} prompt chưa được duyệt: agent dùng prompt đó sẽ bị chặn. ${admin ? `<a href="#/hq/prompts" data-tab-go="prompts">Duyệt ngay</a>` : "Nhờ admin duyệt."}</div>` : ""}
     <div class="card tabbed">
@@ -77,12 +78,12 @@ function agentCard(a, href) {
 }
 
 const leadOf = (hq) => ({ id: "lead", name: "Trưởng nhóm", icon: "spark", role: "Anh chat trực tiếp: Trưởng nhóm đọc tình trạng thật của các site, trả lời và đề xuất phương án giao cho agent sẵn có. Anh chọn việc rồi bấm Giao việc.", state: hq.lead.blockedPrompt ? "blocked" : hq.lead.running ? "working" : hq.lead.queued ? "waiting" : "idle", detail: `${hq.lead.queued} việc chờ · ${hq.lead.running} đang chạy · ${hq.lead.done} xong${hq.lead.failed ? ` · ${hq.lead.failed} lỗi` : ""}`, spend: hq.lead.spend, last: hq.lead.last });
-const HREF = (a, key) => (a.id === "lead" ? "#/hq/lead" : key === "recovery" ? "#/recovery" : key === "content" ? "#/content" : key === "offpage" ? "#/offpage" : key === "manager" ? "#/hq/prompts" : null);
+const HREF = (a, key) => (a.id === "lead" ? "#/hq/lead" : key === "recovery" ? "#/recovery" : key === "content" ? "#/content" : key === "offpage" ? "#/offpage" : key === "monitor" ? "#/rankings" : key === "manager" ? "#/hq/prompts" : null);
 
 // Văn phòng 3D: sàn isometric 4 phòng, mỗi agent một bàn; trạng thái thật hiện bằng chuyển động (đang làm),
 // dấu "!" (có việc chờ), đèn đỏ (bị chặn), mờ (rảnh). Bấm bàn để xem chi tiết.
 function officeHtml(hq, x) {
-  const rooms = [["manager", [x.lead, x.manager]], ["auto", [x.auto]], ["recovery", hq.zones.recovery], ["content", hq.zones.content], ["offpage", hq.zones.offpage || []]];
+  const rooms = [["manager", [x.lead, x.manager]], ["auto", [x.auto]], ["recovery", hq.zones.recovery], ["content", hq.zones.content], ["offpage", hq.zones.offpage || []], ["monitor", hq.zones.monitor || []]];
   const all = rooms.flatMap(([key, ags]) => ags.map((a) => [key, a]));
   const desk = (key, a) => {
     const st = STATE[a.state] || STATE.idle;
@@ -126,7 +127,7 @@ function teamHtml(hq, spend) {
     </div>
     <div class="hq-team v-${mode}">
       ${officeHtml(hq, { manager, auto, lead: leadOf(hq) })}
-      <div class="hq-floor">${zone("manager")}${zone("auto")}${zone("recovery")}${zone("content")}${zone("offpage")}</div>
+      <div class="hq-floor">${zone("manager")}${zone("auto")}${zone("recovery")}${zone("content")}${zone("offpage")}${zone("monitor")}</div>
     </div>
     <h3 class="sub">${K.icon(K.ICON.list)}Agent vừa làm</h3>
     ${hq.recent.length ? `<div class="activity">${hq.recent.map((r) => `<a href="#/activity"><span><b>${esc(ACTOR[r.actor.replace("agent:", "")] || r.actor)}</b> · ${esc(r.detail || r.action)}</span><time>${esc(fmtTime(r.at))}</time></a>`).join("")}</div>` : `<p class="note">Chưa có hoạt động của agent.</p>`}`;

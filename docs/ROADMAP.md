@@ -10,9 +10,9 @@ Giao diện và cách hoạt động theo bản demo đã duyệt (`docs/prototy
 
 ## Giai đoạn 2 · Dữ liệu SEO
 - Client DataForSEO có Budget Guard: ghi `usage_events`, dừng khi chạm trần tháng.
-- Rankings: desktop và mobile hằng ngày, SERP feature, AI Overview, đối thủ, cannibalization.
+- Rankings: xong bản đầu (Search Console hằng ngày, vị trí từ khoá qua DataForSEO SERP, AI Overview, 3 site đứng đầu, cannibalization, cảnh báo tụt và phương án). Còn: tách desktop/mobile, xuất CSV.
 - Site audit (DataForSEO On-Page), Kiểm tra kỹ thuật (CrUX, index, sitemap).
-- Backlink monitoring hằng ngày.
+- Backlink monitoring: xong bản đầu (hằng tuần: domain trỏ về, link mới/mất). Còn: Bing Webmaster (miễn phí) làm nguồn thứ hai.
 - Keyword Hub, câu hỏi thật (PAA mở 4 lớp, autocomplete, diễn đàn).
 - Lịch chạy: Queues theo loại việc, mỗi site lệch phút cố định, hạn mức từng nhà cung cấp (Durable Object).
 

@@ -1378,6 +1378,141 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
   }
 });
 
+await test("theo dõi thứ hạng: Search Console, vị trí từ khoá, backlink mới/mất; tụt đột ngột → chẩn đoán (lỗi kỹ thuật, bản cập nhật Google) và phương án tự động", async () => {
+  const envM = makeEnv({ SETUP_TOKEN: "setup-token-123456" });
+  const cM = client(envM);
+  await cM("POST", "/api/setup", { setupToken: "setup-token-123456", name: "Duy", email: "duy@example.com", password: "mat-khau-dai-123" });
+  const kp = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const der = Buffer.from(await crypto.subtle.exportKey("pkcs8", kp.privateKey)).toString("base64");
+  const sa = JSON.stringify({ type: "service_account", client_email: "duyoi@proj.iam.gserviceaccount.com", private_key: `-----BEGIN PRIVATE KEY-----\n${der.match(/.{1,64}/g).join("\n")}\n-----END PRIVATE KEY-----\n`, token_uri: "https://oauth2.googleapis.com/token" });
+  await cM("PUT", "/api/settings", { secrets: { google_service_account: sa, dataforseo_login: "a@b.de", dataforseo_password: "pw-123456" } });
+  const site = (await cM("POST", "/api/sites", { name: "CAD Demo", domain: "caddemo.de", platform: "wordpress", siteType: "service", market: "de", language: "de" })).data.site;
+  const A = "https://caddemo.de/12-wichtige-cad-symbole-fur-architektur/", B = "https://caddemo.de/cad-software-vergleich-beste-programme/", G = "https://caddemo.de/inventor-vs-solidworks/";
+  let drop = true;
+  const span = (b) => (Date.parse(b.endDate) - Date.parse(b.startDate)) / 86400000;
+  const mon = {
+    gsc(b) {
+      const dims = b.dimensions.join(",");
+      const cur = span(b) <= 7;
+      if (dims === "date") {
+        const rows = [];
+        for (let t = Date.parse(b.startDate); t <= Date.parse(b.endDate); t += 86400000) { const d = new Date(t).toISOString().slice(0, 10); const recent = Date.parse(b.endDate) - t < 7 * 86400000; rows.push({ keys: [d], clicks: drop && recent ? 30 : 100, impressions: 3000, position: 9.1 }); }
+        return rows;
+      }
+      if (dims === "page") return cur ? [{ keys: [A], clicks: drop ? 5 : 100, impressions: drop ? 200 : 4000, position: drop ? 14 : 4 }, { keys: [B], clicks: 50, impressions: 900, position: 6 }]
+        : [{ keys: [A], clicks: 400, impressions: 16000, position: 4 }, { keys: [B], clicks: 200, impressions: 3600, position: 6 }, { keys: [G], clicks: 40, impressions: 3200, position: 8 }];
+      if (dims === "query,page") return cur ? [{ keys: ["cad symbole", A], clicks: drop ? 2 : 40, impressions: 300, position: drop ? 15 : 4 }, { keys: ["cad software vergleich", B], clicks: 20, impressions: 200, position: 6 }]
+        : [{ keys: ["cad symbole", A], clicks: 160, impressions: 1200, position: 4 }, { keys: ["cad software vergleich", B], clicks: 80, impressions: 800, position: 6 }];
+      return null;
+    },
+    ranks: { "cad symbole": 4, "cad software vergleich": 6, "tga symbole liste": 9 },
+    urls: { "cad symbole": A, "cad software vergleich": B },
+    summary: { backlinks: 500, referring_domains: 40, rank: 120, broken_backlinks: 2 },
+    new: [{ url_from: "https://blog.example/cad-tipps/", domain_from: "blog.example", url_to: "https://caddemo.de/", anchor: "CAD Demo", dofollow: true, first_seen: "2026-11-15 08:00:00 +00:00" }],
+    lost: [{ url_from: "https://old.example/links/", domain_from: "old.example", url_to: "https://caddemo.de/geloeschte-seite/", anchor: "CAD", dofollow: true, lost_date: "2026-11-14 00:00:00 +00:00" }],
+    incidents: []
+  };
+  const web = { [A]: `<html><head><meta name="robots" content="noindex, follow"><title>x</title></head><body>x</body></html>` };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = fakeSite({ mon, web });
+  try {
+    // Chưa có số liệu
+    let v = (await cM("GET", `/api/monitor/${site.id}`)).data;
+    assert.equal(v.settings.gscProperty, "sc-domain:caddemo.de");
+    assert.equal(v.alerts.length, 0);
+    // Search Console: 70 ngày, trang, truy vấn; tự chọn từ khoá theo click
+    let r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "gsc" });
+    assert.equal(r.status, 200);
+    assert.ok(r.data.days >= 60);
+    v = (await cM("GET", `/api/monitor/${site.id}`)).data;
+    assert.deepEqual(v.keywords.map((k) => k.keyword).sort(), ["cad software vergleich", "cad symbole"]);
+    // Thêm từ khoá tay, kiểm vị trí
+    r = await cM("POST", `/api/monitor/${site.id}/keywords`, { keywords: "TGA symbole liste\nx" });
+    assert.equal(r.data.added, 1);
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "rank" });
+    assert.equal(r.data.checked, 3);
+    // Lần kiểm sau: "cad symbole" rơi khỏi top 10, có AI Overview
+    mon.ranks["cad symbole"] = 14; mon.aio = true;
+    await envM.DB.prepare("UPDATE mon_keywords SET checked_at = ?").bind(Date.now() - 4 * 86400000).run();
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "rank" });
+    assert.equal(r.data.checked, 3);
+    v = (await cM("GET", `/api/monitor/${site.id}`)).data;
+    const sym = v.keywords.find((k) => k.keyword === "cad symbole");
+    assert.equal(sym.pos, 14); assert.equal(sym.prev_pos, 4); assert.equal(sym.best_pos, 4);
+    assert.ok(sym.features.features.includes("ai_overview"));
+    assert.deepEqual(sym.features.top, ["rival1.example", "rival2.example", "rival3.example"]);
+    // Backlink: link mới vào Link Monitor, link mất trỏ trang 404 → việc chuyển hướng 301
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "backlinks" });
+    assert.deepEqual(r.data, { added: 1, lost: 1 });
+    assert.ok(await envM.DB.prepare("SELECT 1 FROM op_links WHERE site_id = ? AND source_url = 'https://blog.example/cad-tipps/'").bind(site.id).first());
+    const rc = await envM.DB.prepare("SELECT url, detail FROM op_manual WHERE site_id = ? AND method = 'reclaim'").bind(site.id).first();
+    assert.equal(rc.url, "https://caddemo.de/geloeschte-seite/");
+    // Kiểm tra tụt: traffic -70%, trang A noindex → lỗi kỹ thuật, khẩn, chưa mở ca phục hồi
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "check" });
+    assert.equal(r.data.opened, 1);
+    v = (await cM("GET", `/api/monitor/${site.id}`)).data;
+    let al = v.alerts[0];
+    assert.equal(al.kind, "drop"); assert.equal(al.severity, "critical"); assert.equal(al.status, "open");
+    assert.equal(al.detail.cause, "technical");
+    assert.equal(al.detail.traffic.change, -70);
+    assert.ok(al.detail.tech.some((t) => t.url === A && /noindex/.test(t.problem)));
+    assert.ok(al.detail.keywords.some((k) => k.keyword === "cad symbole" && k.prev === 4 && k.pos === 14));
+    assert.ok(al.detail.gone.some((p) => p.page === G));
+    assert.ok(al.plan.some((p) => /lỗi kỹ thuật/.test(p.text) && !p.auto));
+    assert.ok(al.plan.some((p) => /AI Overview/.test(p.text)));
+    assert.equal((await envM.DB.prepare("SELECT COUNT(*) AS n FROM recovery_cases WHERE site_id = ?").bind(site.id).first()).n, 0);
+    // Hết lỗi kỹ thuật nhưng Google đang rollout một bản cập nhật: chỉ theo dõi
+    delete web[A];
+    const today = new Date().toISOString().slice(0, 10);
+    mon.incidents = [{ external_desc: "Test 2026 spam update", begin: `${today}T08:00:00+00:00`, end: null, service_name: "Ranking" }];
+    await envM.DB.prepare("DELETE FROM google_updates").run();
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "check" });
+    assert.equal(r.data.opened, 0);
+    al = (await cM("GET", `/api/monitor/${site.id}`)).data.alerts[0];
+    assert.equal(al.status, "watching"); assert.equal(al.detail.cause, "update_rolling");
+    assert.ok(al.detail.updates.some((u) => u.name === "Test 2026 spam update" && u.end == null));
+    assert.equal((await envM.DB.prepare("SELECT COUNT(*) AS n FROM recovery_cases WHERE site_id = ?").bind(site.id).first()).n, 0);
+    // Rollout xong: mở ca Phục hồi (qua Gác cổng, anh duyệt)
+    mon.incidents = [{ external_desc: "November 2026 core update", begin: "2026-11-10T09:00:00+00:00", end: "2026-11-10T20:00:00+00:00", service_name: "Ranking" }];
+    await envM.DB.prepare("DELETE FROM google_updates").run();
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "check" });
+    al = (await cM("GET", `/api/monitor/${site.id}`)).data.alerts[0];
+    assert.equal(al.status, "open");
+    const step = al.plan.find((p) => /ca Phục hồi/.test(p.text));
+    assert.equal(step.status, "done"); assert.match(step.text, /ca #\d+/);
+    const cs = await envM.DB.prepare("SELECT rules, created_by FROM recovery_cases WHERE site_id = ?").bind(site.id).first();
+    assert.equal(cs.created_by, null);
+    assert.equal(JSON.parse(cs.rules).gscProperty, "sc-domain:caddemo.de");
+    // HQ có phòng Theo dõi và cảnh báo chờ anh
+    const hq = (await cM("GET", "/api/hq")).data;
+    assert.deepEqual(hq.zones.monitor.map((a) => a.id), ["rank_tracker", "backlink_watch", "drop_doctor"]);
+    assert.ok(hq.monitorAsks.some((a) => a.siteId === site.id));
+    const list = (await cM("GET", "/api/monitor")).data;
+    assert.equal(list.sites.find((s) => s.id === site.id).alerts, 1);
+    // Traffic và vị trí hồi lại: cảnh báo tự đóng
+    drop = false; mon.ranks["cad symbole"] = 4;
+    await envM.DB.prepare("UPDATE mon_keywords SET checked_at = ?").bind(Date.now() - 4 * 86400000).run();
+    await cM("POST", `/api/monitor/${site.id}/run`, { what: "gsc" });
+    await cM("POST", `/api/monitor/${site.id}/run`, { what: "rank" });
+    r = await cM("POST", `/api/monitor/${site.id}/run`, { what: "check" });
+    assert.equal(r.data.alerts, 0);
+    assert.equal((await cM("GET", `/api/monitor/${site.id}`)).data.alerts[0].status, "resolved");
+    // Đánh dấu tay, sai trạng thái, cài đặt
+    assert.equal((await cM("PUT", `/api/monitor/alerts/${al.id}`, { status: "xyz" })).status, 400);
+    assert.equal((await cM("PUT", `/api/monitor/${site.id}/settings`, { gscProperty: "abc" })).status, 400);
+    r = await cM("PUT", `/api/monitor/${site.id}/settings`, { gscProperty: "https://caddemo.de/", maxKeywords: 2, rankEvery: 7, backlinks: false });
+    assert.equal(r.data.settings.maxKeywords, 5);
+    assert.equal(r.data.settings.gscProperty, "https://caddemo.de/");
+    r = await cM("POST", `/api/monitor/${site.id}/keywords`, { keywords: "kw eins\nkw zwei\nkw drei" });
+    assert.deepEqual(r.data, { added: 2, skipped: 1 });
+    assert.equal((await cM("POST", `/api/monitor/${site.id}/keywords`, { keywords: "noch ein keyword" })).status, 400);
+    // Cron chạy được với mọi thứ đã cấu hình
+    const waits = [];
+    await worker.scheduled({ cron: "*/15 * * * *", scheduledTime: Date.now() }, envM, { waitUntil: (pr) => waits.push(pr) });
+    await Promise.all(waits);
+  } finally { globalThis.fetch = realFetch; }
+});
+
 await test("đường dẫn không phải /api trả giao diện (SPA)", async () => {
   const res = await worker.fetch(new Request(BASE + "/sites/12"), env);
   assert.equal(res.status, 200);

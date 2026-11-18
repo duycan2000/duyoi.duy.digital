@@ -86,6 +86,7 @@ export function fakeSite(opts = {}) {
   async function google(u, init) {
     if (u.hostname === "oauth2.googleapis.com") return jsonRes({ access_token: "tok", expires_in: 3600 });
     const body = init?.body ? JSON.parse(init.body) : {};
+    if (u.hostname === "www.googleapis.com" && opts.mon?.gsc) { const rows = opts.mon.gsc(body); if (rows) return jsonRes({ rows }); }
     if (u.hostname === "www.googleapis.com") {
       const rows = { "/12-wichtige-cad-symbole-fur-architektur/": 110, "/cad-software-vergleich-beste-programme/": 101, "/cad-dienstleistung-tga/": 4, "/": 20 };
       const before = body.startDate < "2025-10-01";
@@ -106,6 +107,18 @@ export function fakeSite(opts = {}) {
     if (u.pathname.includes("bulk_traffic_estimation")) {
       const etv = { "partnerblog.example": 5000, "resources.example": 2000, "mentioner.example": 800, "paidposts.example": 9000, "tinyblog.example": 10 };
       return jsonRes({ status_code: 20000, cost: 0.011, tasks: [{ status_code: 20000, cost: 0.011, result: [{ items: task.targets.map((t) => ({ target: t, metrics: { organic: { etv: etv[t] ?? 300 } } })) }] }] });
+    }
+    if (u.pathname.includes("backlinks/summary") && opts.mon) return jsonRes({ status_code: 20000, cost: 0.02, tasks: [{ status_code: 20000, cost: 0.02, result: [opts.mon.summary] }] });
+    if (u.pathname.includes("backlinks/backlinks") && opts.mon) return jsonRes({ status_code: 20000, cost: 0.02, tasks: [{ status_code: 20000, cost: 0.02, result: [{ items: opts.mon[task.backlinks_status_type] || [] }] }] });
+    if (u.pathname.includes("serp/google/organic") && task.depth === 30 && opts.mon?.ranks) {
+      (opts.mon.rankCalls ||= []).push(task.keyword);
+      const pos = opts.mon.ranks[task.keyword];
+      const o = (i, d) => ({ type: "organic", rank_group: i, url: `https://${d}/${task.keyword.replace(/\s+/g, "-")}/`, domain: d });
+      const mine = opts.mon.urls?.[task.keyword] || `https://${host}/`;
+      const items = [o(1, "rival1.example"), o(2, "rival2.example"), o(3, "rival3.example")];
+      if (pos != null) items.splice(pos - 1, 0, { type: "organic", rank_group: pos, url: mine, domain: host });
+      if (opts.mon.aio) items.unshift({ type: "ai_overview" });
+      return jsonRes({ status_code: 20000, cost: 0.002, tasks: [{ status_code: 20000, cost: 0.002, result: [{ item_types: opts.mon.aio ? ["ai_overview", "organic"] : ["organic"], items }] }] });
     }
     if (u.pathname.includes("serp/google/organic") && /testimonials|podcast|expert roundup|member directory|where to buy/.test(task.keyword)) {
       const o = (url, title, description = "") => ({ type: "organic", url, domain: new URL(url).hostname, title, description });
@@ -278,6 +291,7 @@ export function fakeSite(opts = {}) {
     if (u.hostname === "api.github.com") return github(u, init);
     if (u.hostname === "api.cloudflare.com") return cloudflare(u, init);
     if (opts.web && u.href in opts.web) { const w = opts.web[u.href]; const r = typeof w === "number" ? new Response("gone", { status: w }) : new Response(w, { status: 200, headers: { "content-type": "text/html" } }); Object.defineProperty(r, "url", { value: u.href }); return r; }
+    if (u.hostname === "status.search.google.com" && opts.mon) return jsonRes(opts.mon.incidents || []);
     if (u.hostname === "api.indexnow.org") { const so = opts.social || (opts.social = { posts: [] }); (so.indexnow ||= []).push(JSON.parse(init.body)); return new Response(null, { status: 200 }); }
     if (u.hostname === "api.postiz.com") {
       const so = opts.social || (opts.social = { posts: [] });

@@ -20,6 +20,7 @@ import { apiIndexnowCheck } from "./indexnow";
 import { apiManualItem, apiManualPrepare, apiManualView, apiPrAnswer, apiReclaim } from "./manual";
 import { apiAddLink as opAddLink, apiCitation, apiDeleteLink as opDeleteLink, apiInboxRead, apiMessage, apiOffpageList, apiOffpageRun, apiOffpageView, apiProspect, apiSaveOpSettings, apiSetupMailbox, apiTestEmail, apiThread, handleInbound, runOffpage } from "./offpage";
 import { apiDeleteAccount, apiPostizIntegrations, apiPostizLink, apiSavePostiz, apiSaveApp, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
+import { apiMonitorAlert, apiMonitorKeyword, apiMonitorKeywords, apiMonitorList, apiMonitorRun, apiMonitorSettings, apiMonitorView, runMonitor } from "./monitor";
 import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
 import { apiApply as affApply, apiDecide as affDecide, apiDeleteLink as affDelete, apiLinks as affLinks, apiRollback as affRollback, apiSaveLink as affSave, apiScan as affScan } from "./affiliate";
 import { runAutopilot } from "./autopilot";
@@ -132,6 +133,17 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (soItem[1] === "accounts" && !soItem[3] && m === "DELETE") return apiDeleteAccount(env, user, id);
     if (soItem[1] === "posts" && m === "PUT") return socialPost(env, req, user, id);
   }
+  if (path === "/api/monitor" && m === "GET") return apiMonitorList(env);
+  const monSite = path.match(/^\/api\/monitor\/(\d+)(?:\/(settings|keywords|run))?$/);
+  if (monSite) {
+    const sid = Number(monSite[1]);
+    if (!monSite[2] && m === "GET") return apiMonitorView(env, sid);
+    if (monSite[2] === "settings" && m === "PUT") return apiMonitorSettings(env, req, user, sid);
+    if (monSite[2] === "keywords" && m === "POST") return apiMonitorKeywords(env, req, user, sid);
+    if (monSite[2] === "run" && m === "POST") return apiMonitorRun(env, req, user, sid);
+  }
+  const monItem = path.match(/^\/api\/monitor\/(keywords|alerts)\/(\d+)$/);
+  if (monItem && m === "PUT") return monItem[1] === "keywords" ? apiMonitorKeyword(env, req, user, Number(monItem[2])) : apiMonitorAlert(env, req, user, Number(monItem[2]));
   if (path === "/api/stats" && m === "GET") return apiStats(env);
   if (path === "/api/stats/report" && m === "GET") return apiStatsReport(env, url);
   if (path === "/api/stats/domains" && m === "POST") return apiAddStatsDomain(env, req, user);
@@ -256,6 +268,6 @@ export default {
     ctx.waitUntil(runCron(env).catch((e) => console.error("cron failed", e)));
     // Một lượt cron tối đa ~10 phút việc nặng: hàng việc của Trưởng nhóm trước, chế độ tự động dùng phần thời gian còn lại
     const started = Date.now();
-    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).then(() => processStats(env, started + 11 * 60000)).then(() => runOffpage(env, started + 13 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
+    ctx.waitUntil(processRecoveryQueue(env).then(() => processJobs(env, 2, started + 5 * 60000)).then(() => runAutopilot(env, 3, started + 9 * 60000)).then(() => syncOpenPrs(env)).then(() => processStats(env, started + 11 * 60000)).then(() => runOffpage(env, started + 13 * 60000)).then(() => runMonitor(env, started + 14 * 60000)).catch((e) => console.error("recovery/jobs/autopilot cron failed", e)));
   }
 };

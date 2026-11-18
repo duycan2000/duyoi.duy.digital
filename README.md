@@ -212,6 +212,15 @@ Menu **Số liệu site**. Site tĩnh không tự biết khách làm gì, nên a
 - Trưởng nhóm đọc số liệu 28 ngày của từng site (trang nhiều người đọc, tỉ lệ click affiliate) khi lập kế hoạch.
 - Token Cloudflare cần thêm **Account › Account Analytics Read** (đọc số liệu) bên cạnh Workers Scripts Edit, Zone Read, Workers Routes Edit. Mỗi lượt xem tốn khoảng 2–3 request Worker; gói Workers Free có 100.000 request/ngày cho cả tài khoản.
 
+### Thứ hạng & cảnh báo (theo dõi và phản ứng khi tụt)
+
+Menu **Thứ hạng & cảnh báo**, mỗi site một trang. Ba agent trong phòng "Theo dõi & cảnh báo" của Agent HQ:
+
+- **Rank Tracker**: mỗi ngày đọc Search Console (click, hiển thị, vị trí 70 ngày; trang và truy vấn 7 ngày so với 4 tuần trước). Property mặc định `sc-domain:<tên miền>`, hoặc lấy từ ca Phục hồi; email service account cần quyền xem property. Từ khoá theo dõi tự chọn từ các truy vấn mang click nhiều nhất (hoặc bài đã đăng nếu chưa có Search Console), anh thêm tay được; vài ngày một lần kiểm vị trí qua DataForSEO SERP (top 30, kèm AI Overview, featured snippet và 3 site đứng đầu). Trần mặc định 20 từ khoá, 3 ngày một lần.
+- **Backlink Watch**: mỗi tuần đo số domain trỏ về, backlink mới và mất (DataForSEO Backlinks, trả theo lượt dùng). Link dofollow mới tự vào Link Monitor; link mất mà trang đích trên site đã 404 thành việc chuyển hướng 301 ở Off-page › Làm tay.
+- **Drop Doctor**: báo tụt khi click 7 ngày giảm từ 30% so với tuần trung bình 4 tuần trước (tối thiểu 35 click/tuần), từ khoá rơi khỏi top 10 hoặc tụt từ 5 bậc, hay từ 3 trang mất hết hiển thị. Không có Search Console thì dùng lượt xem từ bộ đo riêng. Khi tụt, tự kiểm robots.txt, noindex, canonical, chuyển hướng, lỗi HTTP của trang chủ và các trang tụt; đối chiếu bản cập nhật Google (đọc mỗi ngày từ Google Search Status Dashboard); xem backlink mất, truy vấn nhiều trang cùng tranh, AI Overview.
+- Phương án theo nguyên nhân: lỗi kỹ thuật → báo khẩn, anh sửa (canonical/redirect cần anh duyệt), kiểm lại mỗi ngày, hết lỗi thì tự gửi IndexNow; Google đang rollout → chỉ theo dõi, đánh giá lại 7 ngày sau khi xong; còn lại → tự mở ca Phục hồi (quét, đề xuất, Gác cổng, anh duyệt từng sửa). Không tự sửa site, không tự disavow. Tín hiệu hết thì cảnh báo tự đóng.
+
 ### Chế độ tự động
 
 Bật ở **Luật an toàn › Chế độ tự động** cho từng site. Cron 15 phút làm tối đa một bước nặng mỗi site: quét lại định kỳ, (tuỳ chọn) áp dụng việc người đã duyệt tối đa 3 trang/ngày, AI viết câu chèn, nghiên cứu từ khoá 30 ngày một lần, (tuỳ chọn) tự duyệt chủ đề tốt nhất, dàn ý → nháp → bản nháp WordPress. Tạm dừng toàn bộ cũng dừng chế độ này.
@@ -261,6 +270,7 @@ src/
   manual.ts      link building làm tay: chuẩn bị nơi, đoạn văn, tìm ảnh, 404 còn backlink
   indexnow.ts    báo IndexNow khi có bài mới hoặc trang vừa sửa
   stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
+  monitor.ts     Search Console, vị trí từ khoá, backlink; phát hiện tụt, chẩn đoán, phương án
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request
 migrations/      schema D1
 public/          giao diện (static assets, không tính request Worker)

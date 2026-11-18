@@ -12,7 +12,7 @@ export const MENU = [
   { group: "Điều hành", key: "ops", items: [
     { id: "overview", label: "Tổng quan", live: true },
     { id: "hq", label: "Agent HQ", live: true },
-    { id: "rankings", label: "Rankings", phase: 2, plan: ["Vị trí desktop và mobile hằng ngày qua DataForSEO SERP (chế độ Standard, rẻ)", "SERP feature: PAA, AI Overview, featured snippet, local pack", "Biểu đồ hiển thị toàn site, tab Đối thủ và Cannibalization, xuất CSV"] },
+    { id: "rankings", label: "Thứ hạng & cảnh báo", live: true },
     { id: "analytics", label: "Số liệu site", live: true }
   ]},
   { group: "Phục hồi", key: "rec", items: [

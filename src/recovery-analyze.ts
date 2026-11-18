@@ -245,7 +245,7 @@ export function analyze(pages: ScannedPage[], checks: SiteChecks, rules: SiteRul
 
   // ---- Đối chiếu thời điểm ----
   const near: GoogleUpdate[] = dropMonth ? updatesNear(dropMonth) : [];
-  if (dropMonth) add({ code: "timeline", category: "timeline", severity: "info", title: near.length ? `Tháng tụt ${dropMonth} trùng với: ${near.map((u) => u.name).join(", ")}` : `Không có bản cập nhật Google nào được xác nhận gần tháng ${dropMonth}`, detail: near.map((u) => `${u.name} (${u.start} → ${u.end}): ${u.note}`).join("\n") || "Nguyên nhân có thể là thay đổi trên site (theme, plugin, xoá trang, đổi URL) hoặc đối thủ. So với lịch sử sửa site.", urls: [] });
+  if (dropMonth) add({ code: "timeline", category: "timeline", severity: "info", title: near.length ? `Tháng tụt ${dropMonth} trùng với: ${near.map((u) => u.name).join(", ")}` : `Không có bản cập nhật Google nào được xác nhận gần tháng ${dropMonth}`, detail: near.map((u) => `${u.name} (${u.start} → ${u.end || "đang chạy"}): ${u.note}`).join("\n") || "Nguyên nhân có thể là thay đổi trên site (theme, plugin, xoá trang, đổi URL) hoặc đối thủ. So với lịch sử sửa site.", urls: [] });
 
   // ---- Điểm & chẩn đoán ----
   const perCat = new Map<string, number>();

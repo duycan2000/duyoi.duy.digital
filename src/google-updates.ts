@@ -5,7 +5,7 @@ export interface GoogleUpdate {
   name: string;
   kind: "core" | "spam" | "discover" | "measurement";
   start: string; // YYYY-MM-DD
-  end: string;   // YYYY-MM-DD
+  end: string | null; // YYYY-MM-DD; null = đang rollout
   note: string;
 }
 
@@ -24,8 +24,21 @@ export const GOOGLE_UPDATES: GoogleUpdate[] = [
   { name: "May 2026 core update", kind: "core", start: "2026-05-21", end: "2026-06-02", note: "Cập nhật lõi, biến động mạnh hơn bản tháng 3." },
   { name: "June 2026 spam update", kind: "spam", start: "2026-06-24", end: "2026-06-26", note: "Chống spam." },
   { name: "August 2026 spam update", kind: "spam", start: "2026-08-18", end: "2026-08-20", note: "Chống spam." },
-  { name: "September 2026 spam update", kind: "spam", start: "2026-09-24", end: "2026-10-08", note: "Chống spam kéo dài 2 tuần, tác động mạnh; các đợt ảnh hưởng 25–27/9, 30/9 và 4–6/10." }
+  { name: "September 2026 spam update", kind: "spam", start: "2026-09-24", end: "2026-10-08", note: "Chống spam kéo dài 2 tuần, tác động mạnh; các đợt ảnh hưởng 25–27/9, 30/9 và 4–6/10." },
+  { name: "November 2026 core update", kind: "core", start: "2026-11-10", end: null, note: "Cập nhật lõi, Google báo rollout tới 2 tuần." }
 ];
+
+// Gộp danh sách tĩnh với các bản Monitor tự đọc từ Google Search Status Dashboard (bảng google_updates)
+export function mergeUpdates(extra: GoogleUpdate[]): GoogleUpdate[] {
+  const m = new Map(GOOGLE_UPDATES.map((u) => [u.name.toLowerCase(), u]));
+  for (const u of extra) { const old = m.get(u.name.toLowerCase()); m.set(u.name.toLowerCase(), old ? { ...old, end: u.end ?? old.end } : u); }
+  return [...m.values()].sort((a, b) => a.start.localeCompare(b.start));
+}
+
+export function kindOf(name: string): GoogleUpdate["kind"] {
+  const n = name.toLowerCase();
+  return n.includes("spam") ? "spam" : n.includes("discover") ? "discover" : "core";
+}
 
 // Bản cập nhật có khả năng liên quan tới tháng tụt: chạy trong tháng đó hoặc kết thúc trong vòng 6 tuần trước đó
 // (hiệu ứng thường thấy rõ sau khi rollout xong).
@@ -37,7 +50,7 @@ export function updatesNear(dropMonth: string): GoogleUpdate[] {
   const windowStart = monthStart - 42 * 86400000;
   return GOOGLE_UPDATES.filter((u) => {
     const s = Date.parse(u.start + "T00:00:00Z");
-    const e = Date.parse(u.end + "T23:59:59Z");
+    const e = u.end ? Date.parse(u.end + "T23:59:59Z") : Date.now();
     return e >= windowStart && s <= monthEnd;
   });
 }

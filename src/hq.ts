@@ -3,6 +3,7 @@
 import { json } from "./http";
 import { PROMPTS, promptApproved } from "./manager";
 import { RECOVERY_AGENTS } from "./recovery-analyze";
+import { monitorAsks } from "./monitor";
 import { readRules } from "./recovery-rules";
 import { getAuto } from "./content";
 import { formatOf, readProducts } from "./formats";
@@ -27,6 +28,12 @@ const OFFPAGE_AGENTS = [
   { id: "link_monitor", name: "Link Monitor", icon: "link", role: "Mỗi tuần mở trang nguồn của backlink đã có: còn link không, dofollow hay nofollow, anchor gì; báo khi mất link." },
   { id: "linkbuilder", name: "Link Builder (làm tay)", icon: "link", role: "Chuẩn bị sẵn cho anh làm tay: trả lời phóng viên, ảnh bị dùng không ghi nguồn, testimonial, hãng/nhà cung cấp, podcast, bài tổng hợp chuyên gia, hiệp hội, trang 404 còn backlink. Anh làm và đánh dấu." },
   { id: "citations", name: "Citations", icon: "list", role: "Danh bạ doanh nghiệp theo thị trường cho site dịch vụ có NAP thật; anh tự gửi (có xác minh), agent theo dõi trạng thái. Không tạo doanh nghiệp giả." }
+];
+
+const MONITOR_AGENTS = [
+  { id: "rank_tracker", name: "Rank Tracker", icon: "chart", role: "Mỗi ngày đọc Search Console (click, hiển thị, vị trí theo trang và truy vấn); vài ngày một lần kiểm vị trí từ khoá theo dõi qua DataForSEO SERP, kèm AI Overview và 3 site đứng đầu." },
+  { id: "backlink_watch", name: "Backlink Watch", icon: "link", role: "Mỗi tuần đo số domain trỏ về, tìm backlink mới và mất. Link dofollow mới vào Link Monitor; link mất mà trang đích 404 thành việc chuyển hướng 301 cho anh." },
+  { id: "drop_doctor", name: "Drop Doctor", icon: "shield", role: "Phát hiện tụt đột ngột (traffic −30% so với 4 tuần trước, từ khoá rơi khỏi top 10, trang mất hiển thị), kiểm lỗi kỹ thuật, đối chiếu bản cập nhật Google, mất backlink, rồi mở phương án: sửa lỗi, chờ rollout xong, hoặc mở ca Phục hồi." }
 ];
 
 export async function hqView(env: Env): Promise<Response> {
@@ -110,14 +117,23 @@ export async function hqView(env: Env): Promise<Response> {
     const blockedPrompt = prompts.some((p) => p.agent === a.id && !p.ok);
     return { ...a, zone: "offpage", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt, state: agentState(a.id, { waiting: opWait[a.id] || 0, blockedPrompt }), waiting: opWait[a.id] || 0, detail: opDetail[a.id] || "" };
   });
+  const mon = await env.DB.prepare(`SELECT (SELECT COUNT(*) FROM mon_keywords WHERE active = 1) AS kws, (SELECT COUNT(*) FROM mon_keywords WHERE active = 1 AND pos <= 10) AS top10, (SELECT COUNT(*) FROM mon_alerts WHERE status = 'open') AS open,
+    (SELECT COUNT(*) FROM mon_alerts WHERE status = 'watching') AS watching, (SELECT COUNT(*) FROM mon_bl_changes WHERE kind = 'lost' AND seen_at > ?1) AS lost7, (SELECT COUNT(*) FROM mon_bl_changes WHERE kind = 'new' AND seen_at > ?1) AS new7`).bind(Date.now() - 7 * 86400000).first<Record<string, number>>() || {} as Record<string, number>;
+  const monDetail: Record<string, string> = {
+    rank_tracker: `${mon.kws || 0} từ khoá theo dõi · ${mon.top10 || 0} trong top 10`,
+    backlink_watch: `${mon.new7 || 0} link mới · ${mon.lost7 || 0} mất (7 ngày)`,
+    drop_doctor: `${mon.open || 0} cảnh báo mở${mon.watching ? ` · ${mon.watching} đang theo dõi` : ""}`
+  };
+  const monitor = MONITOR_AGENTS.map((a) => ({ ...a, zone: "monitor", last: lastOf(a.id), spend: costOf(a.id), blockedPrompt: false, state: agentState(a.id, { waiting: a.id === "drop_doctor" ? mon.open || 0 : 0 }), waiting: a.id === "drop_doctor" ? mon.open || 0 : 0, detail: monDetail[a.id] || "" }));
+  const monitorAsksList = await monitorAsks(env);
   const autoSites = await Promise.all(cases.results.filter((c) => readRules(c.rules).autopilot).map(async (c) => ({ siteId: c.site_id, caseId: c.id, domain: c.domain, ...(await getAuto(env, c.site_id)) })));
   const jq = await env.DB.prepare("SELECT status, COUNT(*) AS n FROM agent_jobs GROUP BY status").all<{ status: string; n: number }>();
   const jobs = Object.fromEntries(jq.results.map((r) => [r.status, r.n])) as Record<string, number>;
   return json({
     lead: { queued: jobs.queued || 0, running: jobs.running || 0, done: jobs.done || 0, failed: jobs.failed || 0, blockedPrompt: prompts.some((p) => p.agent === "lead" && !p.ok), last: lastOf("lead"), spend: costOf("lead") },
     manager: { promptsTotal: prompts.length, promptsPending: promptPending.length, spend: spend.results, last: recent.results.find((r) => r.actor === "agent:manager") || null },
-    zones: { recovery, content, offpage },
-    offpageAsks,
+    zones: { recovery, content, offpage, monitor },
+    offpageAsks, monitorAsks: monitorAsksList,
     autopilot: { sites: autoSites, last: lastOf("autopilot") },
     ideas, asks,
     recent: recent.results.slice(0, 25)

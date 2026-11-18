@@ -86,3 +86,42 @@ export async function trafficEstimate(env: Env, siteId: number, domains: string[
   const r = await call<{ items?: Item[] }>(env, "dataforseo_labs/google/bulk_traffic_estimation/live", { targets: domains.slice(0, 50), location_code: LOCATION[market] || 2840, language_code: language, item_types: ["organic"] }, { agent, task: "offpage.traffic", siteId });
   return Object.fromEntries((r.items || []).filter((i) => i.target).map((i) => [i.target!.replace(/^www\./, ""), Math.round(i.metrics?.organic?.etv || 0)]));
 }
+
+export interface RankCheck { pos: number | null; url: string | null; top: string[]; features: string[] }
+
+// Vị trí của một domain cho một từ khoá (top 30), kèm 3 domain đứng đầu và SERP feature (AI Overview, featured snippet…)
+export async function rankCheck(env: Env, siteId: number, keyword: string, domain: string, market: string, language: string): Promise<RankCheck> {
+  type Item = { type?: string; rank_group?: number; url?: string; domain?: string };
+  const r = await call<{ items?: Item[]; item_types?: string[] }>(env, "serp/google/organic/live/advanced", { keyword, location_code: LOCATION[market] || 2840, language_code: language, depth: 30 }, { agent: "rank_tracker", task: "monitor.rank", siteId });
+  const host = (d: string) => d.replace(/^www\./, "").toLowerCase();
+  const organic = (r.items || []).filter((i) => i.type === "organic" && i.url);
+  const mine = organic.find((i) => host(i.domain || new URL(i.url!).hostname) === host(domain));
+  const types = new Set([...(r.item_types || []), ...(r.items || []).map((i) => i.type || "")]);
+  return {
+    pos: mine?.rank_group ?? null, url: mine?.url ?? null,
+    top: organic.slice(0, 3).map((i) => host(i.domain || new URL(i.url!).hostname)),
+    features: ["ai_overview", "featured_snippet", "people_also_ask", "local_pack", "video", "images", "shopping"].filter((t) => types.has(t))
+  };
+}
+
+export interface BacklinkSummary { backlinks: number; domains: number; rank: number; broken: number }
+
+export async function backlinkSummary(env: Env, siteId: number, domain: string): Promise<BacklinkSummary> {
+  const r = await call<{ backlinks?: number; referring_domains?: number; rank?: number; broken_backlinks?: number }>(env, "backlinks/summary/live", { target: domain, include_subdomains: true, backlinks_status_type: "live" }, { agent: "backlink_watch", task: "monitor.backlinks", siteId });
+  return { backlinks: r.backlinks ?? 0, domains: r.referring_domains ?? 0, rank: r.rank ?? 0, broken: r.broken_backlinks ?? 0 };
+}
+
+export interface BacklinkChange { sourceUrl: string; domain: string; targetUrl: string; anchor: string; dofollow: boolean; date: string | null }
+
+// Backlink mới hoặc mất gần đây (mặc định 50 cái mới nhất)
+export async function backlinkChanges(env: Env, siteId: number, domain: string, kind: "new" | "lost", limit = 50): Promise<BacklinkChange[]> {
+  type Item = { url_from?: string; domain_from?: string; url_to?: string; anchor?: string; dofollow?: boolean; first_seen?: string; lost_date?: string };
+  const r = await call<{ items?: Item[] }>(env, "backlinks/backlinks/live", {
+    target: domain, mode: "as_is", include_subdomains: true, backlinks_status_type: kind, limit,
+    order_by: [kind === "lost" ? "lost_date,desc" : "first_seen,desc"]
+  }, { agent: "backlink_watch", task: `monitor.backlinks_${kind}`, siteId });
+  return (r.items || []).filter((i) => i.url_from).map((i) => ({
+    sourceUrl: i.url_from!, domain: (i.domain_from || "").replace(/^www\./, ""), targetUrl: i.url_to || "", anchor: (i.anchor || "").slice(0, 200),
+    dofollow: !!i.dofollow, date: ((kind === "lost" ? i.lost_date : i.first_seen) || "").slice(0, 10) || null
+  }));
+}

@@ -48,7 +48,7 @@ export async function googleToken(env: Env): Promise<string> {
   return data.access_token;
 }
 
-async function gpost<T>(env: Env, url: string, body: unknown): Promise<T> {
+export async function gpost<T>(env: Env, url: string, body: unknown): Promise<T> {
   const token = await googleToken(env);
   const res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(25000) });
   const data = (await res.json().catch(() => ({}))) as T & { error?: { message?: string; status?: string } };
