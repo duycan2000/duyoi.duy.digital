@@ -537,7 +537,7 @@ await test("Quản lý + đội Nội dung + tự động: duyệt prompt, trầ
     // Agent HQ
     const hq = await c4("GET", "/api/hq");
     assert.equal(hq.status, 200);
-    assert.equal(hq.data.manager.promptsPending, 10, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm + 4 prompt off-page");
+    assert.equal(hq.data.manager.promptsPending, 12, "chưa duyệt: đọc tài liệu, tra Google, giọng văn, chấm bài, sửa bài, Trưởng nhóm + 6 prompt off-page");
     assert.ok(hq.data.zones.recovery.length === 9 && hq.data.zones.content.length === 6);
     assert.ok(hq.data.autopilot.sites.some((x) => x.domain === "caddemo.de"));
   } finally {
@@ -1331,6 +1331,37 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
     assert.equal(v1.status, "posted", JSON.stringify(v1));
     assert.equal(v1.image_url, "https://golfdemo.com/images/mat-closeup.jpg", "Pin mới dùng ảnh thật khác trong bài, bỏ logo");
     assert.notEqual(v1.title, v.posts.find((p) => p.network === "pinterest" && p.variant === 0).title);
+    // Link building làm tay: chuẩn bị trước, anh làm tay
+    let mk = await cO("POST", `/api/offpage/${sid}/manual`, { method: "journalist", ownerName: "Duy Can", ownerRole: "Founder" });
+    assert.equal(mk.status, 200, JSON.stringify(mk.data));
+    let mv = (await cO("GET", `/api/offpage/${sid}/manual`)).data;
+    assert.equal(mv.kits.journalist.items[0].label, "Bio ngắn");
+    assert.ok(mv.platforms.some((p) => p.name === "Source of Sources"));
+    const pr = await cO("POST", `/api/offpage/${sid}/pr-answer`, { query: "Looking for experts: how high should a garage ceiling be for a golf simulator? Deadline Friday." });
+    assert.match(pr.data.answer, /Lena Hart|Duy/);
+    assert.deepEqual(pr.data.missing, ["Số đo trần nhà thật của anh"]);
+    mk = await cO("POST", `/api/offpage/${sid}/manual`, { method: "testimonial", vendors: "TrackMan", experience: "Dùng TrackMan 2 năm trong garage." });
+    assert.equal(mk.data.targets, 1);
+    for (const m of ["podcast", "roundup"]) assert.ok((await cO("POST", `/api/offpage/${sid}/manual`, { method: m })).data.targets >= 1, m);
+    // Ảnh: lấy ảnh thật trong bài đã đăng, anh dán trang dùng ảnh → vào Prospects loại ghi nguồn ảnh
+    mk = await cO("POST", `/api/offpage/${sid}/manual`, { method: "image" });
+    assert.ok(mk.data.targets >= 2, JSON.stringify(mk.data));
+    mv = (await cO("GET", `/api/offpage/${sid}/manual`)).data;
+    const imgRow = mv.targets.find((t) => t.method === "image" && t.url.endsWith("mat-closeup.jpg"));
+    assert.match(imgRow.detail.google, /^https:\/\/lens\.google\.com\/uploadbyurl\?url=/);
+    web["https://copycat.example/mats/"] = `<html><head><title>Mats we like</title></head><body><img src="https://golfdemo.com/images/mat-closeup.jpg"><p>Write to editor@copycat.example</p></body></html>`;
+    const found = await cO("PUT", `/api/offpage/manual/${imgRow.id}`, { found_url: "https://copycat.example/mats/" });
+    assert.equal(found.data.ok, true, JSON.stringify(found.data));
+    const ip = (await cO("GET", `/api/offpage/${sid}`)).data.prospects.find((p) => p.kind === "image_credit");
+    assert.equal(ip.contact_email, "editor@copycat.example");
+    assert.equal(ip.dead_url, "https://golfdemo.com/golf-mat-guide/", "trang đích là bài chứa ảnh");
+    // 404 còn backlink
+    const rc = await cO("POST", `/api/offpage/${sid}/reclaim`, { text: "URL,Links\nhttps://golfdemo.com/old-mat-review/,12\nhttps://golfdemo.com/golf-mat-guide/,3\nhttps://other.example/x,1" });
+    assert.deepEqual(rc.data, { checked: 2, broken: 1 });
+    // Đánh dấu có link → vào Link Monitor
+    const pod = (await cO("GET", `/api/offpage/${sid}/manual`)).data.targets.find((t) => t.method === "podcast");
+    await cO("PUT", `/api/offpage/manual/${pod.id}`, { status: "won", link_url: "https://golfpod.example/ep-12/" });
+    assert.ok((await cO("GET", `/api/offpage/${sid}`)).data.links.some((l) => l.source_url === "https://golfpod.example/ep-12/"));
     // Link Monitor
     await cO("PUT", `/api/offpage/prospects/${v.prospects.find((p) => p.domain === "mentioner.example").id}`, { status: "won" });
     web["https://mentioner.example/best-tools/"] = `<html><body><p>We like the guides from <a href="https://golfdemo.com/garage-golf-simulator-guide/">Golfdemo</a>.</p></body></html>`;
@@ -1340,7 +1371,7 @@ await test("team off-page: Prospector, Outreach (anh duyệt, gửi qua Email Se
     assert.equal(v.links[0].anchor, "Golfdemo");
     // HQ có khu Off-page
     const hq = (await cO("GET", "/api/hq")).data;
-    assert.equal(hq.zones.offpage.length, 7);
+    assert.equal(hq.zones.offpage.length, 8);
     assert.ok(hq.offpageAsks.some((a) => a.kind === "community"));
   } finally {
     globalThis.fetch = realFetch;

@@ -1,0 +1,4 @@
+-- Link building làm tay: agent chuẩn bị (danh sách nơi, đoạn văn sẵn để dán, link tra cứu), anh tự làm và đánh dấu kết quả
+CREATE TABLE IF NOT EXISTS op_kits (site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE, method TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}', inputs TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL, PRIMARY KEY (site_id, method));
+CREATE TABLE IF NOT EXISTS op_manual (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE, method TEXT NOT NULL, title TEXT, url TEXT NOT NULL, detail TEXT, status TEXT NOT NULL DEFAULT 'todo', note TEXT, link_url TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE (site_id, method, url));
+CREATE INDEX IF NOT EXISTS idx_op_manual ON op_manual(site_id, method, status);

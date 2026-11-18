@@ -25,6 +25,7 @@ const OFFPAGE_AGENTS = [
   { id: "social", name: "Social Entity", icon: "globe", role: "Thấy bài mới trên sitemap thì viết bài chia sẻ cho Pinterest, Facebook, LinkedIn, X, Bluesky, qua Gác cổng rồi tự đăng (giãn lịch); giữ profile sameAs và schema Organization." },
   { id: "community", name: "Community Scout", icon: "users", role: "Tìm thread Reddit/Quora/gutefrage đúng chủ đề, chấm rủi ro, soạn câu trả lời. Anh tự đăng bằng tài khoản thật; agent không bao giờ đăng." },
   { id: "link_monitor", name: "Link Monitor", icon: "link", role: "Mỗi tuần mở trang nguồn của backlink đã có: còn link không, dofollow hay nofollow, anchor gì; báo khi mất link." },
+  { id: "linkbuilder", name: "Link Builder (làm tay)", icon: "link", role: "Chuẩn bị sẵn cho anh làm tay: trả lời phóng viên, ảnh bị dùng không ghi nguồn, testimonial, hãng/nhà cung cấp, podcast, bài tổng hợp chuyên gia, hiệp hội, trang 404 còn backlink. Anh làm và đánh dấu." },
   { id: "citations", name: "Citations", icon: "list", role: "Danh bạ doanh nghiệp theo thị trường cho site dịch vụ có NAP thật; anh tự gửi (có xác minh), agent theo dõi trạng thái. Không tạo doanh nghiệp giả." }
 ];
 
@@ -86,7 +87,7 @@ export async function hqView(env: Env): Promise<Response> {
     (SELECT COUNT(*) FROM op_messages WHERE status = 'approved') AS approved, (SELECT COUNT(*) FROM op_messages WHERE status = 'sent' AND sent_at > ?1) AS sent7, (SELECT COUNT(*) FROM op_messages WHERE status = 'replied') AS replied,
     (SELECT COUNT(*) FROM op_threads WHERE status = 'drafted') AS threads, (SELECT COUNT(*) FROM social_posts WHERE status = 'queued') AS queued, (SELECT COUNT(*) FROM social_posts WHERE status = 'posted' AND posted_at > ?1) AS posted7,
     (SELECT COUNT(*) FROM social_posts WHERE status IN ('failed', 'blocked')) AS postFail, (SELECT COUNT(*) FROM social_accounts WHERE status IN ('expired', 'choose_target')) AS accFix,
-    (SELECT COUNT(*) FROM op_links WHERE status IN ('live', 'nofollow')) AS linksLive, (SELECT COUNT(*) FROM op_links WHERE status = 'missing') AS linksLost, (SELECT COUNT(*) FROM op_citations WHERE status = 'todo') AS citTodo`).bind(Date.now() - 7 * 86400000).first<Record<string, number>>() || {} as Record<string, number>;
+    (SELECT COUNT(*) FROM op_links WHERE status IN ('live', 'nofollow')) AS linksLive, (SELECT COUNT(*) FROM op_links WHERE status = 'missing') AS linksLost, (SELECT COUNT(*) FROM op_citations WHERE status = 'todo') AS citTodo, (SELECT COUNT(*) FROM op_manual WHERE status IN ('todo', 'doing')) AS manualTodo`).bind(Date.now() - 7 * 86400000).first<Record<string, number>>() || {} as Record<string, number>;
   const opAsks = await env.DB.prepare(`SELECT s.id AS siteId, s.domain, (SELECT COUNT(*) FROM op_messages WHERE site_id = s.id AND status = 'ready') AS emails, (SELECT COUNT(*) FROM op_threads WHERE site_id = s.id AND status = 'drafted') AS threads,
     (SELECT COUNT(*) FROM social_accounts WHERE site_id = s.id AND status IN ('expired', 'choose_target')) AS acc FROM sites s WHERE s.status = 'active'`).all<{ siteId: number; domain: string; emails: number; threads: number; acc: number }>();
   const offpageAsks = opAsks.results.flatMap((r) => [
@@ -94,7 +95,7 @@ export async function hqView(env: Env): Promise<Response> {
     ...(r.threads ? [{ kind: "community", siteId: r.siteId, domain: r.domain, text: `${r.threads} câu trả lời Reddit/Quora chờ anh đọc và tự đăng` }] : []),
     ...(r.acc ? [{ kind: "social", siteId: r.siteId, domain: r.domain, text: "Tài khoản mạng xã hội cần kết nối lại hoặc chọn trang để đăng" }] : [])
   ]);
-  const opWait: Record<string, number> = { prospector: op.prospects || 0, outreach_writer: op.needsFix || 0, outreach_reviewer: (op.ready || 0) + (op.approved || 0), social: (op.queued || 0) + (op.accFix || 0), community: op.threads || 0, link_monitor: op.linksLost || 0, citations: op.citTodo || 0 };
+  const opWait: Record<string, number> = { prospector: op.prospects || 0, outreach_writer: op.needsFix || 0, outreach_reviewer: (op.ready || 0) + (op.approved || 0), social: (op.queued || 0) + (op.accFix || 0), community: op.threads || 0, link_monitor: op.linksLost || 0, citations: op.citTodo || 0, linkbuilder: op.manualTodo || 0 };
   const opDetail: Record<string, string> = {
     prospector: `${op.prospects || 0} nơi mới chưa soạn thư`,
     outreach_writer: op.needsFix ? `${op.needsFix} thư còn lỗi chặn cần sửa` : "",
@@ -102,7 +103,8 @@ export async function hqView(env: Env): Promise<Response> {
     social: `${op.posted7 || 0} bài đăng 7 ngày · ${op.queued || 0} chờ đăng${op.postFail ? ` · ${op.postFail} lỗi/bị chặn` : ""}${op.accFix ? ` · ${op.accFix} tài khoản cần xử lý` : ""}`,
     community: `${op.threads || 0} câu trả lời chờ anh tự đăng`,
     link_monitor: `${op.linksLive || 0} link còn${op.linksLost ? ` · ${op.linksLost} mất` : ""}`,
-    citations: `${op.citTodo || 0} danh bạ chưa gửi`
+    citations: `${op.citTodo || 0} danh bạ chưa gửi`,
+    linkbuilder: `${op.manualTodo || 0} việc làm tay đã chuẩn bị`
   };
   const offpage = OFFPAGE_AGENTS.map((a) => {
     const blockedPrompt = prompts.some((p) => p.agent === a.id && !p.ok);

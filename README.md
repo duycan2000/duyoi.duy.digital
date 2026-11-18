@@ -186,13 +186,19 @@ Menu **Off-page team** (và các lối tắt Prospects, Email outreach, Backlink
 - **Postiz (tuỳ chọn)**: dán API key Postiz (Cloud hoặc tự cài) theo site, gắn kênh để đăng thêm Threads, Instagram, Mastodon, Google Business Profile (chỉ site dịch vụ) hoặc đăng Pinterest/LinkedIn/X qua app đã được duyệt của Postiz. Agent vẫn soạn, Gác cổng vẫn kiểm; Reddit, diễn đàn, kênh chat không gắn được.
 - **Prospector** xoay bộ dấu hiệu tìm kiếm mỗi lượt: "write for us", "become a contributor", "submit a guest post", trang tài nguyên ("useful links", inurl:resources) và bài tổng hợp "best … blogs" (loại roundup).
 
+- **Làm tay** (tab Làm tay, agent Link Builder): agent chuẩn bị sẵn, anh tự làm rồi đánh dấu; "Có link" tự vào Link Monitor.
+  - Trả lời phóng viên: danh sách nền tảng thay HARO theo thị trường (Source of Sources, HARO/Featured, Qwoted, Help a B2B Writer, SourceBottle, #journorequest), bio ngắn/dài, và ô dán câu hỏi để agent soạn nháp trả lời (prompt `pr_answer`, chỉ dùng sự thật trong Hồ sơ site, nêu chỗ anh phải bổ sung).
+  - Ảnh bị dùng không ghi nguồn: danh sách ảnh thật của anh kèm link tìm ngược Google Lens, Bing, TinEye, Yandex; dán trang đang dùng ảnh → app kiểm tra, tìm email, đưa vào Prospects (loại ghi nguồn ảnh) để soạn thư.
+  - Testimonial cho công cụ anh dùng thật, hãng/nhà cung cấp (nơi bán, đối tác, chương trình review), podcast, bài tổng hợp chuyên gia, hiệp hội và phòng thương mại: agent tìm nơi (DataForSEO) và soạn sẵn đoạn văn (prompt `manual_kit`), luôn dưới tên thật của anh, không bịa khách hàng, số liệu, giải thưởng.
+  - Trang 404 còn backlink: dán danh sách xuất từ Search Console, app tìm trang lỗi và gợi ý trang chuyển hướng 301; anh tự đặt redirect.
+
 **Mỗi site một tài khoản riêng** cho email và từng mạng xã hội. Email gửi bắt buộc thuộc tên miền của site. App chặn khi một tài khoản, trang/board/công ty hoặc link profile đã gắn với site khác. Nên tạo app developer bằng tài khoản của chính site đó và nhập ở Off-page › Mạng xã hội › App developer riêng; app chung ở Cài đặt › API key chỉ là dự phòng. Trước khi bấm Kết nối, đăng nhập đúng tài khoản của site (một profile Chrome riêng cho mỗi site).
 
 Cần làm một lần:
 1. Từng site: app developer của Pinterest, Meta, LinkedIn, X (redirect URI: `https://duyoi.duy.digital/api/social/oauth/callback`), nhập ở Off-page › Mạng xã hội.
 2. Từng site: Off-page › Team & cài đặt: tên người gửi, email gửi thuộc tên miền site, chủ đề.
 3. Cloudflare › Email Service › Sending: bật tên miền gửi (cần gói Workers Paid); Email Routing: bật; bấm **Dựng hộp thư** (token cần thêm Zone › Email Routing Rules Edit), rồi **Gửi thư thử**.
-4. Agent HQ › Quản lý prompt: duyệt 4 prompt mới (`outreach_draft`, `outreach_review`, `community_answer`, `social_caption`) và duyệt lại `lead_plan` (thêm việc off-page).
+4. Agent HQ › Quản lý prompt: duyệt 4 prompt mới (`outreach_draft`, `outreach_review`, `community_answer`, `social_caption`) và duyệt lại `lead_plan` (thêm việc off-page); thêm `manual_kit`, `pr_answer` cho phần Làm tay.
 5. WordPress: cập nhật plugin Duy Ơi Connector lên 1.3.0 (file khoá IndexNow).
 
 ### Số liệu site (bộ đo riêng cho site Astro)
@@ -252,6 +258,7 @@ src/
   offpage.ts     Prospector, Outreach (Email Service), thư đến, Community Scout, Link Monitor, Citations
   social.ts      tài khoản mạng xã hội (OAuth), tự đăng bài mới, sameAs
   web.ts         đọc trang, sitemap, email liên hệ, ảnh thật trong bài
+  manual.ts      link building làm tay: chuẩn bị nơi, đoạn văn, tìm ảnh, 404 còn backlink
   indexnow.ts    báo IndexNow khi có bài mới hoặc trang vừa sửa
   stats.ts       bộ đo riêng cho site (Worker trên tên miền, Analytics Engine, gộp vào D1)
   affiliate.ts   thư viện link affiliate, rà bài đã đăng, chèn qua plugin hoặc pull request

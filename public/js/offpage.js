@@ -2,8 +2,9 @@
 
 import { api } from "./api.js";
 import { $, $$, esc, showMsg, busy, formData, ago } from "./ui.js";
+import { mountManual } from "./manual.js";
 
-const KIND = { guest_post: "Guest post", mention: "Nhắc tên chưa link", resource: "Trang tài nguyên", broken_link: "Link chết" };
+const KIND = { guest_post: "Guest post", mention: "Nhắc tên chưa link", resource: "Trang tài nguyên", broken_link: "Link chết", roundup: "Bài tổng hợp", image_credit: "Ghi nguồn ảnh" };
 const PST = { new: ["Mới", "info"], drafted: ["Đã soạn thư", "fmt"], contacted: ["Đã gửi", "ok"], replied: ["Đã trả lời", "ok"], won: ["Có link", "ok"], lost: ["Không được", ""], skipped: ["Bỏ", ""] };
 const MST = { needs_fix: ["Cần sửa", "err"], ready: ["Chờ anh duyệt", "warn"], approved: ["Đã duyệt, chờ gửi", "info"], sent: ["Đã gửi", "ok"], replied: ["Có trả lời", "ok"], cancelled: ["Đã bỏ", ""], failed: ["Lỗi gửi", "err"], blocked: ["Bị chặn", "err"], draft: ["Nháp", ""] };
 const SST = { connected: ["Đang đăng", "ok"], choose_target: ["Chọn trang để đăng", "warn"], expired: ["Hết hạn", "err"], profile: ["Chỉ sameAs", ""] };
@@ -227,12 +228,13 @@ export async function viewOffpage(main, args, K) {
       <div class="toolbar"><select id="op-site" aria-label="Site">${list.sites.map((s) => `<option value="${s.id}"${s.id === siteId ? " selected" : ""}>${esc(s.domain)}${s.approvals ? ` (${s.approvals} thư chờ)` : ""}</option>`).join("")}</select></div></div>
     <div class="msg" id="op-msg" hidden></div>
     <div class="card tabbed">
-      ${K.tabsNav("op", [["team", "Team & cài đặt", "users"], ["prospects", `Prospects (${d.prospects.filter((p) => p.status === "new").length})`, "search"], ["mail", `Email${pending ? ` (${pending})` : ""}`, "pen"], ["social", "Mạng xã hội", "globe"], ["community", `Cộng đồng (${d.threads.filter((t) => t.status === "drafted").length})`, "users"], ["links", "Backlink", "link"], ["citations", "Citations", "list"]], "team")}
+      ${K.tabsNav("op", [["team", "Team & cài đặt", "users"], ["prospects", `Prospects (${d.prospects.filter((p) => p.status === "new").length})`, "search"], ["mail", `Email${pending ? ` (${pending})` : ""}`, "pen"], ["social", "Mạng xã hội", "globe"], ["community", `Cộng đồng (${d.threads.filter((t) => t.status === "drafted").length})`, "users"], ["manual", "Làm tay", "bolt"], ["links", "Backlink", "link"], ["citations", "Citations", "list"]], "team")}
       <div class="tab-body" ${K.panelAttr("op", "team", "team")}>${settingsHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "prospects", "team")}>${prospectsHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "mail", "team")}>${mailHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "social", "team")}>${socialHtml(d, canEdit, location.origin, K.state.user.role === "admin")}</div>
       <div class="tab-body" ${K.panelAttr("op", "community", "team")}>${communityHtml(d, canEdit)}</div>
+      <div class="tab-body" id="op-manual" ${K.panelAttr("op", "manual", "team")}><p class="note">Đang tải…</p></div>
       <div class="tab-body" ${K.panelAttr("op", "links", "team")}>${linksHtml(d, canEdit)}</div>
       <div class="tab-body" ${K.panelAttr("op", "citations", "team")}>${citationsHtml(d, canEdit)}</div>
     </div>
@@ -241,6 +243,7 @@ export async function viewOffpage(main, args, K) {
   const msgEl = $("#op-msg", main);
   const msg = (e, ok) => showMsg(msgEl, ok || e.message, ok ? "ok" : "err");
   if (query.get("msg")) msg(null, query.get("msg"));
+  mountManual($("#op-manual", main), siteId, canEdit, (e, ok) => { msg(e, ok); msgEl.scrollIntoView({ block: "nearest" }); });
   const reload = () => viewOffpage(main, [String(siteId)], K);
   const put = async (url, body, okText) => { try { await api(url, { method: "PUT", body }); await reload(); if (okText) msg(null, okText); } catch (e) { msg(e); } };
   $("#op-site", main).addEventListener("change", (e) => { location.hash = `#/offpage/${e.target.value}`; });

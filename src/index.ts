@@ -17,6 +17,7 @@ import { apiAppendPlaybook, apiLeadRun, apiLeadSend, apiLeadView, apiPlaybook, a
 import { apiBrief, apiCreateIdea, apiDeleteImage, apiDraft, apiExportMarkdown, syncOpenPrs, apiGithubPr, apiGithubPreview, apiGithubSync, apiHandoff, apiImport, apiInterview, apiReview, apiWebFacts, apiIdeaStatus, apiProducts, apiResearch, apiUploadImage, apiWpDraft, contentView } from "./content";
 import { hqView } from "./hq";
 import { apiIndexnowCheck } from "./indexnow";
+import { apiManualItem, apiManualPrepare, apiManualView, apiPrAnswer, apiReclaim } from "./manual";
 import { apiAddLink as opAddLink, apiCitation, apiDeleteLink as opDeleteLink, apiInboxRead, apiMessage, apiOffpageList, apiOffpageRun, apiOffpageView, apiProspect, apiSaveOpSettings, apiSetupMailbox, apiTestEmail, apiThread, handleInbound, runOffpage } from "./offpage";
 import { apiDeleteAccount, apiPostizIntegrations, apiPostizLink, apiSavePostiz, apiSaveApp, apiOAuthCallback, apiOAuthStart, apiPost as socialPost, apiSaveAccount, apiSetTarget, apiTargets } from "./social";
 import { apiAddStatsDomain, apiDeleteStats, apiInstallStats, apiRefreshStats, apiStats, apiStatsReport, processStats } from "./stats";
@@ -86,7 +87,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
   // Agent HQ và cấp Quản lý
   if (path === "/api/hq" && m === "GET") return hqView(env);
   if (path === "/api/offpage" && m === "GET") return apiOffpageList(env);
-  const opSite = path.match(/^\/api\/offpage\/(\d+)(?:\/(settings|run|links|mailbox|test-email|indexnow))?$/);
+  const opSite = path.match(/^\/api\/offpage\/(\d+)(?:\/(settings|run|links|mailbox|test-email|indexnow|manual|reclaim|pr-answer))?$/);
   if (opSite) {
     const sid = Number(opSite[1]);
     if (!opSite[2] && m === "GET") return apiOffpageView(env, sid);
@@ -96,8 +97,12 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (opSite[2] === "mailbox" && m === "POST") return apiSetupMailbox(env, user, sid);
     if (opSite[2] === "test-email" && m === "POST") return apiTestEmail(env, req, user, sid);
     if (opSite[2] === "indexnow" && m === "POST") return apiIndexnowCheck(env, user, sid);
+    if (opSite[2] === "manual" && m === "GET") return apiManualView(env, sid);
+    if (opSite[2] === "manual" && m === "POST") return apiManualPrepare(env, req, user, sid);
+    if (opSite[2] === "reclaim" && m === "POST") return apiReclaim(env, req, user, sid);
+    if (opSite[2] === "pr-answer" && m === "POST") return apiPrAnswer(env, req, user, sid);
   }
-  const opItem = path.match(/^\/api\/offpage\/(prospects|messages|threads|links|citations|inbox)\/(\d+)$/);
+  const opItem = path.match(/^\/api\/offpage\/(prospects|messages|threads|links|citations|inbox|manual)\/(\d+)$/);
   if (opItem) {
     const id = Number(opItem[2]);
     if (opItem[1] === "prospects" && m === "PUT") return apiProspect(env, req, user, id);
@@ -106,6 +111,7 @@ async function handleApi(req: Request, env: Env, url: URL, ctx?: ExecCtx): Promi
     if (opItem[1] === "links" && m === "DELETE") return opDeleteLink(env, user, id);
     if (opItem[1] === "citations" && m === "PUT") return apiCitation(env, req, user, id);
     if (opItem[1] === "inbox" && m === "PUT") return apiInboxRead(env, user, id);
+    if (opItem[1] === "manual" && m === "PUT") return apiManualItem(env, req, user, id);
   }
   if (path === "/api/social/oauth/callback" && m === "GET") return apiOAuthCallback(env, req, user, url);
   const soStart = path.match(/^\/api\/social\/oauth\/(\w+)\/start$/);

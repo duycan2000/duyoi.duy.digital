@@ -107,6 +107,16 @@ export function fakeSite(opts = {}) {
       const etv = { "partnerblog.example": 5000, "resources.example": 2000, "mentioner.example": 800, "paidposts.example": 9000, "tinyblog.example": 10 };
       return jsonRes({ status_code: 20000, cost: 0.011, tasks: [{ status_code: 20000, cost: 0.011, result: [{ items: task.targets.map((t) => ({ target: t, metrics: { organic: { etv: etv[t] ?? 300 } } })) }] }] });
     }
+    if (u.pathname.includes("serp/google/organic") && /testimonials|podcast|expert roundup|member directory|where to buy/.test(task.keyword)) {
+      const o = (url, title, description = "") => ({ type: "organic", url, domain: new URL(url).hostname, title, description });
+      const k = task.keyword;
+      const items = /testimonials/.test(k) ? [o("https://www.trackman.example/customer-stories/", "Customer stories – TrackMan")]
+        : /site:podcasts/.test(k) ? [o("https://podcasts.apple.com/us/podcast/golf-sim-talk/id1", "Golf Sim Talk")]
+        : /podcast/.test(k) ? [o("https://golfpod.example/be-a-guest/", "Be a guest on GolfPod")]
+        : /expert roundup/.test(k) ? [o("https://golfmag.example/experts-share-garage-tips/", "12 experts share garage sim tips")]
+        : /where to buy/.test(k) ? [o("https://brand.example/where-to-buy/", "Where to buy")] : [o("https://golfassoc.example/members/", "Member directory")];
+      return jsonRes({ status_code: 20000, cost: 0.002, tasks: [{ status_code: 20000, cost: 0.002, result: [{ items }] }] });
+    }
     if (u.pathname.includes("serp/google/organic") && /write for us|intitle:resources|site:reddit|site:quora|site:gutefrage|^"/.test(task.keyword)) {
       const k = task.keyword;
       const o = (url, title, description = "") => ({ type: "organic", url, domain: new URL(url).hostname, title, description });
@@ -170,6 +180,10 @@ export function fakeSite(opts = {}) {
     } else if (/personal outreach email/.test(sys)) {
       const paid = /Resources/.test(user.recipient_page.title || "");
       content = { subject: `A note about ${String(user.recipient_page.title).slice(0, 30)}`, body: `Hi, I read your page "${user.recipient_page.title}" and found it clear. ${paid ? "I can pay a small fee for a link. " : ""}We wrote a guide that fits: ${user.target_page.url}. Would it help your readers?`, followup_body: "Just checking whether you saw my note. No worries if not.", pitch_title: "" };
+    } else if (/ready-to-paste texts the site owner will use HIMSELF/.test(sys)) {
+      content = { items: [{ label: "Bio ngắn", text: `${user.owner_name} runs ${user.brand}, a site about garage golf simulators.` }, { label: "Bio dài", text: `${user.owner_name} builds and tests home golf setups.` }], owner_todo: ["Kiểm tra lại vai trò"] };
+    } else if (/reply to a journalist source request/.test(sys)) {
+      content = { fit: "Hợp: câu hỏi đúng chủ đề site.", subject: "Re: garage simulators", answer: `Most garages need 9 ft of ceiling. — ${user.owner_name}, ${user.site}`, missing: ["Số đo trần nhà thật của anh"] };
     } else if (/review ONE outreach email/.test(sys)) {
       content = { score: 81, issues: ["Thư ngắn gọn, đúng trang người nhận."], fixed_subject: "", fixed_body: "", fixed_followup: "" };
     } else if (/helpful answer that the owner will review/.test(sys)) {
